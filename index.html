@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PORTAL//FLUX — momentum is a promise</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{ --cyan:#2eeaff; --orange:#ff9a3d; --bg:#05070f; }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ width:100%; height:100%; overflow:hidden; background:var(--bg);
+    font-family:"Segoe UI", Consolas, monospace; color:#cfe6ff; user-select:none; }
+  #gl{ position:fixed; inset:0; display:block; }
+
+  /* ---------- HUD ---------- */
+  #hud{ position:fixed; inset:0; pointer-events:none; z-index:5; }
+  #crosshair{ position:absolute; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px;
+    border-radius:50%; background:#eaffff; box-shadow:0 0 8px #2eeaff, 0 0 2px #fff; opacity:.9; }
+  #aimring{ position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px;
+    border-radius:8px; border:2px solid transparent; transition:border-color .1s, transform .1s; }
+  #aimring.valid{ border-color:rgba(46,234,255,.75); box-shadow:0 0 12px rgba(46,234,255,.35) inset; }
+  #aimring.invalid{ border-color:rgba(255,70,70,.55); }
+  #speedbox{ position:absolute; left:24px; bottom:26px; width:230px; }
+  #speedlabel{ font-size:11px; letter-spacing:.28em; color:#7fa8c9; margin-bottom:4px; }
+  #speedval{ font-size:30px; font-weight:700; color:#eafcff; text-shadow:0 0 14px rgba(46,234,255,.8); }
+  #speedval span{ font-size:13px; color:#7fa8c9; font-weight:400; margin-left:4px; }
+  #bar{ height:6px; margin-top:6px; background:rgba(255,255,255,.08); border-radius:3px; overflow:hidden; }
+  #barfill{ height:100%; width:0%; border-radius:3px;
+    background:linear-gradient(90deg,#18c8ff,#7df6ff); box-shadow:0 0 12px #2eeaff; transition:width .05s linear; }
+  #barfill.hot{ background:linear-gradient(90deg,#ffb34d,#fff0c8); box-shadow:0 0 14px #ffb34d; }
+  #hint{ position:absolute; left:50%; bottom:34px; transform:translateX(-50%); max-width:760px;
+    text-align:center; font-size:14px; color:#a8d4ee; text-shadow:0 0 12px rgba(0,0,0,.9);
+    background:rgba(4,10,20,.45); padding:6px 14px; border-radius:6px; border:1px solid rgba(46,234,255,.18); }
+  #infoline{ position:absolute; right:22px; bottom:26px; text-align:right; font-size:11px; color:#6f93b2; line-height:1.7; }
+  #infoline b{ color:#cfe6ff; }
+  #exitnav{ position:absolute; right:24px; top:24px; text-align:right; font-size:12px; color:#8fc7e8; }
+  #exitnav .dist{ font-size:20px; font-weight:700; color:#eafcff; text-shadow:0 0 10px rgba(46,234,255,.7); }
+  #compass{ display:inline-block; margin-right:8px; font-size:18px; color:#2eeaff; text-shadow:0 0 10px #2eeaff; }
+  #timerline{ position:absolute; left:24px; top:22px; font-size:13px; color:#9fc6e4; letter-spacing:.08em; }
+  #timerline .t{ font-size:20px; font-weight:700; color:#eafcff; text-shadow:0 0 10px rgba(46,234,255,.6); }
+  #flash{ position:absolute; inset:0; background:radial-gradient(circle,#bfeaff 0%,transparent 60%); opacity:0; }
+  .fadeflash{ animation:fl .45s ease-out forwards; }
+  @keyframes fl{ from{opacity:.5} to{opacity:0} }
+
+  /* ---------- overlays ---------- */
+  .overlay{ position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(ellipse at 50% 38%, rgba(10,24,44,.82), rgba(2,4,9,.95)); }
+  .panel{ width:min(680px, 92vw); padding:38px 44px; border-radius:14px; text-align:center;
+    background:linear-gradient(165deg, rgba(9,18,34,.92), rgba(4,8,18,.95));
+    border:1px solid rgba(46,234,255,.35); box-shadow:0 0 60px rgba(20,120,220,.25), 0 0 24px rgba(46,234,255,.12) inset; }
+  .panel h1{ font-size:40px; letter-spacing:.14em; color:#eafcff; text-shadow:0 0 24px rgba(46,234,255,.9); margin-bottom:2px; }
+  .panel h1 em{ font-style:normal; color:var(--orange); text-shadow:0 0 24px rgba(255,154,61,.8); }
+  .panel .sub{ color:#7fa8c9; font-size:13px; letter-spacing:.3em; margin-bottom:26px; }
+  .keys{ display:grid; grid-template-columns:auto auto; gap:5px 26px; justify-content:center; text-align:left;
+    font-size:13.5px; color:#a8cde8; margin-bottom:24px; }
+  .keys b{ color:#eafcff; font-weight:600; }
+  .btnrow{ display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-top:8px; }
+  button{ pointer-events:auto; cursor:pointer; font-family:inherit; font-size:14px; letter-spacing:.12em;
+    color:#dffbff; background:rgba(46,234,255,.08); border:1px solid rgba(46,234,255,.5);
+    padding:11px 22px; border-radius:8px; transition:.15s; }
+  button:hover{ background:rgba(46,234,255,.22); box-shadow:0 0 18px rgba(46,234,255,.45); }
+  button.warm{ border-color:rgba(255,154,61,.6); color:#ffe9d4; background:rgba(255,154,61,.08); }
+  button.warm:hover{ background:rgba(255,154,61,.22); box-shadow:0 0 18px rgba(255,154,61,.4); }
+  .row{ display:flex; gap:12px; justify-content:center; align-items:center; margin-top:18px; font-size:13px; color:#8fb6d6; flex-wrap:wrap; }
+  input[type=text]{ background:rgba(0,0,0,.4); border:1px solid rgba(46,234,255,.35); color:#eafcff;
+    font-family:inherit; padding:7px 10px; width:130px; border-radius:6px; text-align:center; }
+  input[type=range]{ accent-color:#2eeaff; pointer-events:auto; }
+  #winpanel h1{ color:#ffe9c8; text-shadow:0 0 26px rgba(255,180,80,.9); }
+  #winstats{ font-size:15px; color:#cfe6ff; line-height:2; margin-bottom:10px; }
+  #winstats b{ color:#ffd9a8; }
+  .hidden{ display:none !important; }
+  #err{ position:fixed; inset:auto 0 0 0; padding:14px; text-align:center; color:#ffb0b0; font-size:13px; z-index:20; background:rgba(60,0,0,.7); }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="aimring"></div>
+  <div id="timerline">TIME <span class="t" id="timer">00:00.0</span></div>
+  <div id="exitnav"><span id="compass">▲</span><span class="dist" id="exitdist">0</span> m to exit</div>
+  <div id="speedbox">
+    <div id="speedlabel">SPEED</div>
+    <div id="speedval">0<span>u/s</span></div>
+    <div id="bar"><div id="barfill"></div></div>
+  </div>
+  <div id="hint">CLICK TO CAPTURE MOUSE — LMB blue portal · RMB orange portal</div>
+  <div id="infoline">seed <b id="seedinfo">–</b> · fov <b id="fovinf">115</b> · autohop <b id="hopinf">on</b> · sound <b id="muteinf">on</b><br>
+    [ ] fov · V autohop · F fullscreen · R respawn · N new universe · M mute</div>
+  <div id="flash"></div>
+</div>
+
+<div class="overlay" id="startpanel">
+  <div class="panel">
+    <h1>PORTAL<em>//</em>FLUX</h1>
+    <div class="sub">MOMENTUM IS A PROMISE — COLLECT IT ON THE OTHER SIDE</div>
+    <div class="keys">
+      <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold + land = bunnyhop</span>
+      <span><b>MOUSE</b> — look · circle-jump to gain speed</span><span><b>SHIFT</b> — walk (precise)</span>
+      <span><b>LMB / RMB</b> — fire blue / orange portal</span><span><b>V</b> — toggle autohop · <b>F</b> — fullscreen</span>
+      <span><b>[ ]</b> — FOV (default 115) · <b>R</b> respawn · <b>N</b> new map</span><span><b>ESC</b> — menu</span>
+    </div>
+    <div class="btnrow"><button id="btnstart">▶ ENTER THE CHAMBER</button></div>
+    <div class="row"><label>seed <input type="text" id="seedinput" placeholder="random"></label>
+      <label>FOV <input type="range" id="fovslider" min="90" max="135" value="115"> <span id="fovval">115</span></label></div>
+    <div class="row" style="color:#6f93b2;font-size:12px">Portals stick to any flat face — floors, ceilings, walls and ramps.
+      Falling into one keeps your speed and takes the direction of the other.</div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="menupanel">
+  <div class="panel">
+    <h1>PAUSED</h1>
+    <div class="sub">THE CHAMBER WAITS</div>
+    <div class="btnrow">
+      <button id="btnresume">RESUME</button><button id="btnnewmap" class="warm">NEW UNIVERSE (N)</button>
+      <button id="btnfs">FULLSCREEN (F)</button>
+    </div>
+    <div class="row">
+      <label>FOV <input type="range" id="fovslider2" min="90" max="135" value="115"> <span id="fovval2">115</span></label>
+      <button id="btnhop">AUTOHOP: OFF</button><button id="btnmute">SOUND: ON</button>
+    </div>
+    <div class="row"><label>seed <input type="text" id="seedinput2" placeholder="random"></label></div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="winpanel">
+  <div class="panel">
+    <h1>EXIT REACHED</h1>
+    <div class="sub">THE ENTAILMENT TRAVELS SAFELY THROUGH SPACETIME</div>
+    <div id="winstats"></div>
+    <div class="btnrow"><button id="btnagain" class="warm">NEW UNIVERSE (N)</button><button id="btnsame">REPLAY THIS SEED</button></div>
+  </div>
+</div>
+
+<script type="module" src="./game.js"></script>
+</body>
+</html>
