@@ -15,6 +15,14 @@
   #hud{ position:fixed; inset:0; pointer-events:none; z-index:5; }
   #crosshair{ position:absolute; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px;
     border-radius:50%; background:#eaffff; box-shadow:0 0 8px #2eeaff, 0 0 2px #fff; opacity:.9; }
+  #crosshair.grab {
+    width: 28px; height: 28px; margin: -14px 0 0 -14px;
+    border: 2px solid white; border-radius: 6px; 
+    background: rgba(0,0,0,0.4); box-shadow: none;
+    display: flex; justify-content: center; align-items: center;
+    font-weight: bold; font-family: monospace; font-size: 16px; color: white;
+  }
+  #crosshair.grab::after { content: 'E'; }
   #aimring{ position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px;
     border-radius:8px; border:2px solid transparent; transition:border-color .1s, transform .1s; }
   #aimring.valid{ border-color:rgba(46,234,255,.75); box-shadow:0 0 12px rgba(46,234,255,.35) inset; }
@@ -95,12 +103,16 @@
     <h1>PORTAL<em>//</em>FLUX</h1>
     <div class="sub">MOMENTUM IS A PROMISE — COLLECT IT ON THE OTHER SIDE</div>
     <div class="keys">
-      <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold + land = bunnyhop</span>
-      <span><b>MOUSE</b> — look · circle-jump to gain speed</span><span><b>SHIFT</b> — walk (precise)</span>
-      <span><b>LMB / RMB</b> — fire blue / orange portal</span><span><b>V</b> — toggle autohop · <b>F</b> — fullscreen</span>
-      <span><b>[ ]</b> — FOV (default 115) · <b>R</b> respawn · <b>N</b> new map</span><span><b>ESC</b> — menu</span>
+      <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold = bunnyhop</span>
+      <span><b>MOUSE</b> — look · circle-jump to gain speed</span><span><b>LMB / RMB</b> — fire / action</span>
+      <span><b>1 / 2</b> or <b>SCROLL</b> — change weapons</span><span><b>E</b> — grab / drop cubes</span>
+      <span><b>[ ]</b> — FOV · <b>V</b> — autohop · <b>F</b> — fullscreen</span><span><b>R</b> — respawn · <b>N</b> — new map · <b>ESC</b> — menu</span>
     </div>
     <div class="btnrow"><button id="btnstart">▶ ENTER THE CHAMBER</button></div>
+    <div class="row">
+      <label>Server IP <input type="text" id="ipinput" placeholder="localhost:3000"></label>
+      <label>Password <input type="text" id="passinput" placeholder="secret"></label>
+    </div>
     <div class="row"><label>seed <input type="text" id="seedinput" placeholder="random"></label>
       <label>FOV <input type="range" id="fovslider" min="90" max="135" value="115"> <span id="fovval">115</span></label></div>
     <div class="row" style="color:#6f93b2;font-size:12px">Portals stick to any flat face — floors, ceilings, walls and ramps.
@@ -118,7 +130,7 @@
     </div>
     <div class="row">
       <label>FOV <input type="range" id="fovslider2" min="90" max="135" value="115"> <span id="fovval2">115</span></label>
-      <button id="btnhop">AUTOHOP: OFF</button><button id="btnmute">SOUND: ON</button>
+      <button id="btnhop">AUTOHOP: ON</button><button id="btnmute">SOUND: ON</button>
     </div>
     <div class="row"><label>seed <input type="text" id="seedinput2" placeholder="random"></label></div>
   </div>
@@ -133,6 +145,6 @@
   </div>
 </div>
 
-<script type="module" src="./game.js"></script>
+<script type="module" src="./main.js"></script>
 </body>
 </html>
