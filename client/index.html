@@ -40,9 +40,9 @@
     background:rgba(4,10,20,.45); padding:6px 14px; border-radius:6px; border:1px solid rgba(46,234,255,.18); }
   #infoline{ position:absolute; right:22px; bottom:26px; text-align:right; font-size:11px; color:#6f93b2; line-height:1.7; }
   #infoline b{ color:#cfe6ff; }
-  #exitnav{ position:absolute; right:24px; top:24px; text-align:right; font-size:12px; color:#8fc7e8; }
-  #exitnav .dist{ font-size:20px; font-weight:700; color:#eafcff; text-shadow:0 0 10px rgba(46,234,255,.7); }
-  #compass{ display:inline-block; margin-right:8px; font-size:18px; color:#2eeaff; text-shadow:0 0 10px #2eeaff; }
+  #eventlog{ position:absolute; right:24px; top:24px; text-align:right; font-size:13px; color:#a8d4ee; text-shadow:0 0 10px rgba(0,0,0,0.8); pointer-events:none; }
+  #eventlog .event{ margin-bottom: 6px; animation: slideIn 0.3s ease-out; }
+  @keyframes slideIn{ from{opacity:0; transform:translateX(20px);} to{opacity:1; transform:translateX(0);} }
   #timerline{ position:absolute; left:24px; top:22px; font-size:13px; color:#9fc6e4; letter-spacing:.08em; }
   #timerline .t{ font-size:20px; font-weight:700; color:#eafcff; text-shadow:0 0 10px rgba(46,234,255,.6); }
   #flash{ position:absolute; inset:0; background:radial-gradient(circle,#bfeaff 0%,transparent 60%); opacity:0; }
@@ -89,7 +89,7 @@
   <div id="crosshair"></div>
   <div id="aimring"></div>
   <div id="timerline">TIME <span class="t" id="timer">00:00.0</span></div>
-  <div id="exitnav"><span id="compass">▲</span><span class="dist" id="exitdist">0</span> m to exit</div>
+  <div id="eventlog"></div>  
   <div id="speedbox">
     <div id="speedlabel">SPEED</div>
     <div id="speedval">0<span>u/s</span></div>
@@ -106,12 +106,15 @@
     <h1>PORTAL<em>//</em>FLUX</h1>
     <div class="sub">MOMENTUM IS A PROMISE — COLLECT IT ON THE OTHER SIDE</div>
     <div class="keys">
-      <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold = bunnyhop</span>
+      <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold to bunnyhop</span>
       <span><b>MOUSE</b> — look · circle-jump to gain speed</span><span><b>LMB / RMB</b> — fire / action</span>
       <span><b>1 / 2</b> or <b>SCROLL</b> — change weapons</span><span><b>E</b> — grab / drop cubes</span>
       <span><b>[ ]</b> — FOV · <b>V</b> — autohop · <b>F</b> — fullscreen</span><span><b>R</b> — respawn · <b>N</b> — new map · <b>ESC</b> — menu</span>
     </div>
     <div class="btnrow"><button id="btnstart">▶ ENTER THE CHAMBER</button></div>
+    <div class="row">
+      <label class="grow">Player Name <input type="text" id="nameinput" placeholder="Guest" value="Guest"></label>
+    </div>
     <div class="row">
       <label class="grow">Server IP <input type="text" id="ipinput" placeholder="localhost:3001"></label>
       <label>Password <input type="text" id="passinput" placeholder="secret"></label>
@@ -133,7 +136,7 @@
     </div>
     <div class="row">
       <label>FOV <input type="range" id="fovslider2" min="90" max="135" value="115"> <span id="fovval2">115</span></label>
-      <button id="btnhop">AUTOHOP: ON</button><button id="btnmute">SOUND: ON</button>
+      <button id="btnmute">SOUND: ON</button>
     </div>
     <div class="row"><label>seed <input type="text" id="seedinput2" placeholder="random"></label></div>
   </div>
@@ -151,5 +154,8 @@
 <script type="module" src="./main.js"></script>
 </body>
 </html>
+
+
+
 
 

@@ -152,7 +152,11 @@ function start(ns) {
 
   const pl = { pos: new V3(), vel: new V3(), yaw: 0, pitch: 0, viewOffset: null, grounded: false, groundNormal: new V3(0, 1, 0), groundT: -1, jumpBuf: -1, cp: new V3(), maxSpeed: 0 };
 
-  let activeWeapon = 1; // 1 = Portal Gun, 2 = Rocket Launcher
+  let activeWeapon = 1; // 1 = Portal Gun, 2 = Rocket Launcher, 3 = Instagib
+  let isZooming = false;
+  let isConnected = false;
+  let lastIp = null, lastPass = null, lastName = null;
+  let zoomAmt = 0;
   let autohop = true, started = false, won = false;
   let nowT = 0, runTime = 0, timerOn = false, portalsFired = 0;
   const keys = {};
@@ -165,6 +169,21 @@ function start(ns) {
   const dom = id => document.getElementById(id);
   const startPanel = dom('startpanel'), menuPanel = dom('menupanel'), winPanel = dom('winpanel');
 
+  function addEventLog(msg) {
+    const logDiv = document.getElementById('eventlog');
+    if (!logDiv) return;
+    const el = document.createElement('div');
+    el.className = 'event';
+    el.innerText = msg;
+    logDiv.appendChild(el);
+    while (logDiv.children.length > 5) {
+      logDiv.removeChild(logDiv.firstChild);
+    }
+    setTimeout(() => {
+      if (el.parentNode === logDiv) logDiv.removeChild(el);
+    }, 15000);
+  }
+
   function requestLock() { canvas.requestPointerLock && canvas.requestPointerLock(); }
   document.addEventListener('pointerlockchange', () => {
     pointerLocked = document.pointerLockElement === canvas;
@@ -174,9 +193,11 @@ function start(ns) {
   canvas.addEventListener('click', () => { AudioSys.ensure(); if (started && !pointerLocked && !won) requestLock(); });
 
   document.addEventListener('mousemove', e => {
-    if (!pointerLocked) return;
-    pl.yaw -= e.movementX * 0.0023;
-    pl.pitch = Math.max(-1.55, Math.min(1.55, pl.pitch - e.movementY * 0.0023));
+    if (!pointerLocked || document.pointerLockElement !== canvas) return;
+    if (Math.abs(e.movementX) > 100 || Math.abs(e.movementY) > 100) return;
+    const sens = 0.0023 * (camera.fov / baseFov);
+    pl.yaw -= e.movementX * sens;
+    pl.pitch = Math.max(-1.55, Math.min(1.55, pl.pitch - e.movementY * sens));
   });
 
   document.addEventListener('mousedown', e => {
@@ -201,9 +222,13 @@ function start(ns) {
          else if (activeWeapon === 3) fireInstagib();
       }
     }
-    else if (e.button === 2 && activeWeapon === 1 && !grabbedCube) {
-      firePortal(localPlayerIndex * 2 + 1);
+    else if (e.button === 2) {
+      if (activeWeapon === 1 && !grabbedCube) firePortal(localPlayerIndex * 2 + 1);
+      else if (activeWeapon === 3) isZooming = true;
     }
+  });
+  document.addEventListener('mouseup', e => {
+    if (e.button === 2) isZooming = false;
   });
   document.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -216,7 +241,7 @@ function start(ns) {
 
   document.addEventListener('keydown', e => {
     if (e.code === 'Enter') {
-      if (!started && !dom('start').classList.contains('hidden')) {
+      if (!started && !dom('startpanel').classList.contains('hidden')) {
         dom('btnstart').click();
         return;
       }
@@ -230,7 +255,7 @@ function start(ns) {
     if (c === 'Digit2') { activeWeapon = 2; gun.visible = false; rocketGun.visible = true; instagibGun.visible = false; }
     if (c === 'Digit3') { activeWeapon = 3; gun.visible = false; rocketGun.visible = false; instagibGun.visible = true; }
     if (c === 'Space') pl.jumpBuf = nowT;
-    if (c === 'KeyV') { autohop = !autohop; dom('hopinf').textContent = autohop ? 'on' : 'off'; syncHopBtn(); }
+    
     if (c === 'KeyF') toggleFullscreen();
     if (c === String.fromCharCode(69,115,99,97,112,101)) { if (started && !won) menuPanel.classList.toggle(String.fromCharCode(104,105,100,100,101,110)); }
     if (c === 'KeyR') respawn(false);
@@ -274,9 +299,9 @@ function start(ns) {
   }
   dom('fovslider').addEventListener('input', e => setFov(+e.target.value));
   dom('fovslider2').addEventListener('input', e => setFov(+e.target.value));
-  function syncHopBtn() { const b = dom('btnhop'); if (b) b.textContent = 'AUTOHOP: ' + (autohop ? 'ON' : 'OFF'); }
+  
   function syncMuteBtn() { const b = dom('btnmute'); if (b) b.textContent = 'SOUND: ' + (AudioSys.muted ? 'OFF' : 'ON'); const i = dom('muteinf'); if (i) i.textContent = AudioSys.muted ? 'off' : 'on'; }
-  dom('btnhop').addEventListener('click', () => { autohop = !autohop; syncHopBtn(); dom('hopinf').textContent = autohop ? 'on' : 'off'; });
+  
   dom('btnmute').addEventListener('click', () => { AudioSys.toggleMute(); syncMuteBtn(); });
   dom('btnfs').addEventListener('click', toggleFullscreen);
 
@@ -285,30 +310,44 @@ function start(ns) {
     onMessage: (data) => {
       if (data.type === 'init') {
         localPlayerId = data.playerId;
-        localPlayerIndex = data.playerIndex;
+        localPlayerIndex = data.playerIndex % 2;
         
         const localColor = localPlayerIndex === 0 ? 0x33ff33 : 0xff3333;
         const bMesh = playerModel.children.find(c => c.name === 'bodyMesh');
         if (bMesh) bMesh.material.color.setHex(localColor);
+        const headGroup = playerModel.children.find(c => c.name === 'headGroup');
+        if (headGroup) { const hMesh = headGroup.children.find(c => c.name === 'headMesh'); if (hMesh) hMesh.material.color.setHex(localColor); }
         
         gun.userData.core.material.emissive.setHex(portals[localPlayerIndex * 2].color);
         gun.userData.ring.material.emissive.setHex(portals[localPlayerIndex * 2].color);
         
         started = true; startPanel.classList.add('hidden');
-        loadMap(data.seed);
-        requestLock();
+        if (currentSeed !== data.seed) loadMap(data.seed);
+        isConnected = true;
+        if (!pointerLocked) requestLock();
+      } else if (data.type === 'player_connected') {
+        addEventLog(data.name + ' has just connected');
+      } else if (data.type === 'player_disconnected') {
+        addEventLog(data.name + ' dropped from the game');
       } else if (data.type === 'map_change') {
         loadMap(data.seed);
       } else if (data.type === 'state') {
         for (const pid in data.players) {
            if (pid === localPlayerId) {
-             if (!pointerLocked) {
-               pl.pos.fromArray(data.players[pid].pos);
-               pl.vel.fromArray(data.players[pid].vel);
-             }
              continue;
            }
+           const oldRp = remotePlayers[pid];
            remotePlayers[pid] = data.players[pid];
+           if (oldRp && oldRp.predictedDeadUntil) remotePlayers[pid].predictedDeadUntil = oldRp.predictedDeadUntil;
+        }
+        for (const pid in remotePlayers) {
+           if (!data.players[pid]) {
+               delete remotePlayers[pid];
+               if (remotePlayerMeshes[pid]) {
+                   scene.remove(remotePlayerMeshes[pid]);
+                   delete remotePlayerMeshes[pid];
+               }
+           }
         }
         
 
@@ -347,8 +386,8 @@ function start(ns) {
         rMesh.rotateX(Math.PI / 2);
         rMesh.position.fromArray(data.pos);
         scene.add(rMesh);
-        rockets.push({ pos: new V3(...data.pos), vel: new V3(...data.vel), mesh: rMesh, life: 5 });
-        AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1);
+        rockets.push({ pos: new V3(...data.pos), vel: new V3(...data.vel), mesh: rMesh, life: 5, isLocal: false });
+        AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1, 0, new V3(...data.pos));
       } else if (data.type === 'fire_instagib') {
         if (data.playerId !== localPlayerId && remotePlayerMeshes[data.playerId]) remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
         const pts = data.pts.map(a => new V3(...a));
@@ -361,7 +400,8 @@ function start(ns) {
            }
         }
         for (let i = 0; i < pts.length; i += 2) spawnInstagibBeam(pts[i], pts[i+1]);
-        AudioSys.tone(1800, 300, 0.4, 'sawtooth', 0.1);
+        AudioSys.tone(150, 40, 0.8, 'square', 0.4);
+        AudioSys.tone(800, 150, 0.5, 'sawtooth', 0.2);
         
         if (data.hitPlayerId === localPlayerId) {
            die();
@@ -371,11 +411,12 @@ function start(ns) {
         spawnDeathAnimation(pos);
       }
     },
-    onError: () => {
-      showFatal('WebSocket error. Server might be down.');
-    },
+    onError: () => {},
     onClose: () => {
-      showFatal('Disconnected from server.');
+      isConnected = false;
+      if (started) {
+         setTimeout(() => { if (lastIp) Network.connect(lastIp, lastPass, lastName); }, 1000);
+      }
     }
   });
     
@@ -389,9 +430,12 @@ function start(ns) {
     const passInput = document.getElementById('passinput');
     const ip = (ipInput && ipInput.value.trim()) ? ipInput.value.trim() : 'localhost:3001';
     const pass = (passInput && passInput.value.trim()) ? passInput.value.trim() : 'secret';
+    const nameInput = document.getElementById('nameinput');
     const actualIp = ip || 'localhost:3001';
     
-    Network.connect(actualIp, pass);
+    lastIp = actualIp; lastPass = pass;
+    lastName = (nameInput && nameInput.value.trim()) ? nameInput.value.trim() : 'Guest';
+    Network.connect(actualIp, pass, lastName);
 
   });
   dom('btnresume').addEventListener('click', requestLock);
@@ -668,6 +712,7 @@ function start(ns) {
 
   function respawn() {
     pl.pos.copy(spawnPt); pl.vel.set(0, 0, 0);
+    pl.yaw = -Math.PI / 2; pl.pitch = 0; pl.viewOffset = null;
     AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
   }
   /* =======================================================================
@@ -716,7 +761,7 @@ function start(ns) {
     rMesh.position.copy(pos);
     scene.add(rMesh);
     
-    rockets.push({ pos: pos.clone(), vel: dir.multiplyScalar(70), mesh: rMesh, life: 5 });
+    rockets.push({ pos: pos.clone(), vel: dir.multiplyScalar(70), mesh: rMesh, life: 5, isLocal: true });
     Network.send({ type: 'fire_rocket', pos: pos.toArray(), vel: dir.toArray() });
   }
 
@@ -761,7 +806,8 @@ function start(ns) {
     if (runTime - lastInstagibTime < 1.0) return;
     muzzleT = 1;
     lastInstagibTime = runTime;
-    AudioSys.tone(1800, 300, 0.4, 'sawtooth', 0.1);
+    AudioSys.tone(150, 40, 0.8, 'square', 0.4);
+        AudioSys.tone(800, 150, 0.5, 'sawtooth', 0.2);
     camera.updateMatrixWorld(true);
     instagibGun.updateMatrixWorld(true);
     
@@ -811,15 +857,46 @@ function start(ns) {
             }
         }
         
+        if (iter > 0 && !won && !isDead) {
+            const box = new TH.Box3();
+            box.min.copy(pl.pos).add(new TH.Vector3(-0.4, 0, -0.4));
+            box.max.copy(pl.pos).add(new TH.Vector3(0.4, CFG.H, 0.4));
+            const ray = new TH.Ray(curPos, curDir);
+            const playerHit = ray.intersectBox(box, new TH.Vector3());
+            if (playerHit) {
+               const dist = curPos.distanceTo(playerHit);
+               if (dist < hitPlayerT) {
+                   hitPlayerT = dist;
+                   hitPlayerId = localPlayerId;
+               }
+            }
+        }
+
+        if (iter > 0 && !won && !isDead) {
+            const box = new TH.Box3();
+            box.min.copy(pl.pos).add(new TH.Vector3(-0.4, 0, -0.4));
+            box.max.copy(pl.pos).add(new TH.Vector3(0.4, CFG.H, 0.4));
+            const ray = new TH.Ray(curPos, curDir);
+            const playerHit = ray.intersectBox(box, new TH.Vector3());
+            if (playerHit) {
+               const dist = curPos.distanceTo(playerHit);
+               if (dist < hitPlayerT) {
+                   hitPlayerT = dist;
+                   hitPlayerId = localPlayerId;
+               }
+            }
+        }
+        
         if (hitPlayerId !== null) {
             bestT = hitPlayerT;
             const trueHitPt = curPos.clone().addScaledVector(curDir, bestT);
             pts.push(curStart, trueHitPt);
             Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()), hitPlayerId });
-            if (remotePlayers[hitPlayerId]) {
+            if (hitPlayerId === localPlayerId) { die(); } else if (remotePlayers[hitPlayerId]) {
                remotePlayers[hitPlayerId].isDead = true;
                remotePlayers[hitPlayerId].predictedDeadUntil = runTime + 3.0;
             }
+            AudioSys.tone(600, 600, 0.5, 'sine', 0.3);
             if (remotePlayerMeshes[hitPlayerId]) remotePlayerMeshes[hitPlayerId].visible = false;
             for (let i = 0; i < pts.length; i += 2) spawnInstagibBeam(pts[i], pts[i+1]);
             return;
@@ -866,6 +943,8 @@ function start(ns) {
   }
 
   let isDead = false;
+  let deathCamPos = new TH.Vector3();
+  let deathCamTarget = new TH.Vector3();
   function die() {
      if (!started || won || isDead) return;
      isDead = true;
@@ -873,9 +952,14 @@ function start(ns) {
      spawnDeathAnimation(pl.pos);
      
      gun.visible = false; rocketGun.visible = false; instagibGun.visible = false;
+     playerModel.visible = false;
+     const offset = new TH.Vector3(0, 2, 4).applyAxisAngle(new TH.Vector3(0, 1, 0), pl.yaw);
+     deathCamPos.copy(pl.pos).add(offset);
+     deathCamTarget.copy(pl.pos);
      
      setTimeout(() => {
         isDead = false;
+        playerModel.visible = true;
         if (activeWeapon === 1) gun.visible = true;
         if (activeWeapon === 2) rocketGun.visible = true;
         if (activeWeapon === 3) instagibGun.visible = true;
@@ -883,8 +967,8 @@ function start(ns) {
      }, 3000);
   }
 
-  function explosion(pos) {
-    AudioSys.tone(100, 40, 0.4, 'square', 0.2);
+  function explosion(pos, isLocal) {
+    AudioSys.tone(100, 40, 0.4, 'square', 0.2, 0, pos);
     const expl = new TH.Mesh(new TH.SphereGeometry(3.5, 16, 16), new TH.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 1 }));
     expl.position.copy(pos);
     scene.add(expl);
@@ -902,7 +986,9 @@ function start(ns) {
     }
     
     // Blast cubes
-    for (const c of grabCubes) {
+    const blasted = [];
+    for (let i = 0; i < grabCubes.length; i++) {
+      const c = grabCubes[i];
       if (c === grabbedCube) continue;
       const v = c.pos.clone().sub(pos);
       const cd = v.length();
@@ -911,7 +997,13 @@ function start(ns) {
         c.vel.add(v.normalize().multiplyScalar(force));
         c.vel.y += force * 0.4;
         c.rotVel.set(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).multiplyScalar(force);
+        if (isLocal) {
+           blasted.push({ idx: i, vel: c.vel.toArray(), rotVel: c.rotVel.toArray() });
+        }
       }
+    }
+    if (isLocal && blasted.length > 0) {
+        Network.send({ type: 'blast_cubes', cubes: blasted });
     }
   }
 
@@ -1217,6 +1309,7 @@ function start(ns) {
   function frame(now) {
     requestAnimationFrame(frame);
     let dt = Math.min(0.05, (now - last) / 1000); last = now;
+    AudioSys.listenerPos = pl.pos;
     nowT += dt;
 
     if (!started) { // idle preview orbit while at menu
@@ -1241,13 +1334,13 @@ function start(ns) {
           pitch: pl.pitch,
           autohop: autohop,
           jumpBuf: pl.jumpBuf,
-          pos: pointerLocked ? pl.pos.toArray() : undefined,
-          vel: pointerLocked ? pl.vel.toArray() : undefined,
+          pos: pl.pos.toArray(),
+          vel: pl.vel.toArray(),
           activeWeapon: activeWeapon,
           isDead: isDead, grabbedCubeIdx: grabbedCube ? grabCubes.indexOf(grabbedCube) : undefined, grabbedCubePos: grabbedCube ? grabbedCube.pos.toArray() : undefined, grabbedCubeVel: grabbedCube ? grabbedCube.vel.toArray() : undefined });
       }
 
-      let rem = dt;
+      let rem = isConnected ? dt : 0;
       while (rem > 1e-4) { const s = Math.min(rem, 1 / 120); physStep(s, activeKeys); rem -= s; }
       
       // Render remote players
@@ -1381,7 +1474,7 @@ function start(ns) {
       if (!teleported) {
         const hit = raycast(r.pos, r.vel.clone().normalize(), step.length(), 0.0);
         if (hit || r.life <= 0) {
-          explosion(hit ? hit.point : r.pos);
+          explosion(hit ? hit.point : r.pos, r.isLocal);
           if (hit) destroyWall(hit.obb, hit.point, hit.normal);
           scene.remove(r.mesh);
           r.mesh.traverse(o => { if(o.material) o.material.dispose(); if(o.geometry) o.geometry.dispose(); });
@@ -1401,6 +1494,11 @@ function start(ns) {
 
     if (started) {
       const sp = Math.hypot(pl.vel.x, pl.vel.z);
+      if (isDead) {
+        camera.position.lerp(deathCamPos, Math.min(1, dt * 5));
+        const m = new TH.Matrix4().lookAt(camera.position, deathCamTarget, new TH.Vector3(0, 1, 0));
+        camera.quaternion.slerp(new TH.Quaternion().setFromRotationMatrix(m), Math.min(1, dt * 5));
+      } else {
       camera.position.copy(pl.pos);
       camera.position.y += CFG.H - 0.12; // pl.pos is the feet point — eyes near top of capsule
       let bob = 0;
@@ -1409,6 +1507,7 @@ function start(ns) {
       camera.position.y += bob - landingThump * 0.18;
       camera.rotation.order = 'YXZ';
       camera.quaternion.setFromEuler(new TH.Euler(pl.pitch, pl.yaw, 0, 'YXZ'));
+      }
       
       playerModel.position.copy(pl.pos);
       playerModel.rotation.set(0, pl.yaw, 0, 'YXZ');
@@ -1442,7 +1541,14 @@ function start(ns) {
         if (pl.viewOffset.angleTo(id) < 0.001) pl.viewOffset = null;
         else camera.quaternion.multiply(pl.viewOffset);
       }
-      const wantFov = Math.min(baseFov + 16, baseFov + Math.max(0, (sp - CFG.GMAX) * 0.5));
+      if (activeWeapon === 3 && isZooming) {
+         zoomAmt = Math.min(1.0, zoomAmt + dt / 0.1);
+      } else {
+         zoomAmt = Math.max(0.0, zoomAmt - dt / 0.1);
+      }
+      const spFov = Math.min(baseFov + 16, baseFov + Math.max(0, (sp - CFG.GMAX) * 0.5));
+      const zoomedFov = baseFov * 0.4;
+      const wantFov = spFov * (1 - zoomAmt) + zoomedFov * zoomAmt;
       if (Math.abs(camera.fov - wantFov) > 0.05) { camera.fov = wantFov; camera.updateProjectionMatrix(); }
 
       let canGrab = false;
@@ -1478,7 +1584,7 @@ function start(ns) {
           if (!teleported) {
              c.pos.add(step);
              collideCube(c, c.rad);
-             if (c.vel.lengthSq() < 0.25) {
+             if (c.vel.lengthSq() < 0.001) {
                 c.vel.set(0, 0, 0); // sleep when very slow
                 c.rotVel.multiplyScalar(0.8);
                 const eu = new TH.Euler().setFromQuaternion(c.quat);
@@ -1594,8 +1700,8 @@ function start(ns) {
            a.core.material.opacity = a.life;
            a.glow.material.opacity = a.life * 0.6;
            a.points.material.opacity = a.life;
-           a.core.scale.set(a.life, 1, a.life);
-           a.glow.scale.set(a.life, 1, a.life);
+           // a.core.scale.set(a.life, 1, a.life);
+           // a.glow.scale.set(a.life, 1, a.life);
            const posAttr = a.points.geometry.attributes.position;
            for (let j = 0; j < a.vel.length; j++) {
              posAttr.array[j*3] += a.vel[j].x * dt;
@@ -1676,7 +1782,7 @@ function start(ns) {
     const aimDir = new TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
     const hit = raycast(camera.getWorldPosition(new TH.Vector3()), aimDir, 140);
 
-    updateHUD({ pl, CFG, currentSeed, portalsFired, exitPos, hit, won, mm, ss, ms, msg });
+    updateHUD({ pl, CFG, currentSeed, portalsFired, exitPos, hit, won, mm, ss, ms, msg: !isConnected ? "RECONNECTING..." : msg });
     renderer.setRenderTarget(null);
     renderer.render(scene, camera);
   }
@@ -1691,17 +1797,75 @@ function start(ns) {
   loadMap(String(Math.floor(Math.random() * 1e9)));
   
   // Pre-warm the renderer to prevent stutter on first portal pair placement
-  portals.forEach(p => { p.placed = true; p.n.set(0, 1, 0); });
+  camera.updateMatrixWorld();
+  const camPos = new TH.Vector3();
+  const camDir = new TH.Vector3();
+  camera.getWorldPosition(camPos);
+  camera.getWorldDirection(camDir);
+  if (camDir.lengthSq() < 0.1) camDir.set(0, 0, -1);
+  
+  portals.forEach(p => { 
+    p.placed = true; 
+    p.c.copy(camPos).add(camDir.clone().multiplyScalar(2));
+    p.n.copy(camDir).multiplyScalar(-1);
+    const f = frameFor(p.n);
+    p.r.copy(f.r);
+    p.u.copy(f.u);
+  });
 
   updatePair();
+  placePortalVisuals();
   quads.forEach(q => q.visible = true);
   renderPortalViews();
+  renderer.render(scene, camera);
   portals.forEach(p => p.placed = false);
+  placePortalVisuals();
   quads.forEach(q => q.visible = false);
   renderer.clear();
   
   requestAnimationFrame(frame);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

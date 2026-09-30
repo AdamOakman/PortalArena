@@ -85,6 +85,7 @@ export function initModels(TH, camera, scene) {
 
     const headGeo = new TH.BoxGeometry(0.4, 0.4, 0.4);
     const headMesh = new TH.Mesh(headGeo, bodyMat);
+    headMesh.name = 'headMesh';
     headGroup.add(headMesh);
 
     const eyeGeo = new TH.PlaneGeometry(0.3, 0.15);

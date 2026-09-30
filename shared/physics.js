@@ -310,7 +310,8 @@ export function initPhysics(TH, CFG, PORT) {
   function resolveCubeCollisions(grabCubes, grabbedCube) {
     const cDia = 1.5;
     const len = grabCubes.length;
-    for (let iter = 0; iter < 3; iter++) {
+    const MAX_ITER = 10;
+    for (let iter = 0; iter < MAX_ITER; iter++) {
       for (let i = 0; i < len; i++) {
         const cA = grabCubes[i];
         for (let j = i + 1; j < len; j++) {
@@ -334,21 +335,30 @@ export function initPhysics(TH, CFG, PORT) {
           const aGrab = (cA === grabbedCube), bGrab = (cB === grabbedCube);
           if (aGrab && bGrab) continue;
           
-          const pushA = aGrab ? 0 : (bGrab ? push : push * 0.5);
-          const pushB = bGrab ? 0 : (aGrab ? push : push * 0.5);
+          let pushA = aGrab ? 0 : (bGrab ? push : push * 0.5);
+          let pushB = bGrab ? 0 : (aGrab ? push : push * 0.5);
+          if (!aGrab && !bGrab) {
+             if (ny > 0) { pushA = 0; pushB = push; }
+             else if (ny < 0) { pushA = push; pushB = 0; }
+          }
           
           cA.pos.x -= nx * pushA; cA.pos.y -= ny * pushA; cA.pos.z -= nz * pushA;
           cB.pos.x += nx * pushB; cB.pos.y += ny * pushB; cB.pos.z += nz * pushB;
           
-          if (iter === 2) {
+          if (iter === MAX_ITER - 1) {
              const rvx = cB.vel.x - cA.vel.x;
              const rvy = cB.vel.y - cA.vel.y;
              const rvz = cB.vel.z - cA.vel.z;
              const velAlong = rvx*nx + rvy*ny + rvz*nz;
              if (velAlong < 0) {
-               const jImp = -(1.2) * velAlong / ((aGrab ? 0 : 1) + (bGrab ? 0 : 1));
-               if (!aGrab) { cA.vel.x -= nx * jImp; cA.vel.y -= ny * jImp; cA.vel.z -= nz * jImp; }
-               if (!bGrab) { cB.vel.x += nx * jImp; cB.vel.y += ny * jImp; cB.vel.z += nz * jImp; }
+               let jA = -(1.2) * velAlong / ((aGrab ? 0 : 1) + (bGrab ? 0 : 1));
+               let jB = jA;
+               if (!aGrab && !bGrab) {
+                  if (ny > 0) { jA = 0; jB = -(1.2) * velAlong; }
+                  else if (ny < 0) { jA = -(1.2) * velAlong; jB = 0; }
+               }
+               if (!aGrab) { cA.vel.x -= nx * jA; cA.vel.y -= ny * jA; cA.vel.z -= nz * jA; }
+               if (!bGrab) { cB.vel.x += nx * jB; cB.vel.y += ny * jB; cB.vel.z += nz * jB; }
              }
              if (Math.abs(ny) > 0.5) {
                 cA.vel.x = cA.vel.x * 0.9 + cB.vel.x * 0.1;
@@ -436,5 +446,8 @@ export function initPhysics(TH, CFG, PORT) {
     teleportCube
   };
 }
+
+
+
 
 

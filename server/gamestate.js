@@ -1,7 +1,7 @@
 import * as TH from 'three';
 import { generateMap } from '../shared/mapgen.js';
 
-export let seedStr = "multiplayer_seed_123";
+export let seedStr = String(Math.floor(Math.random() * 1e9));
 export let mapData = generateMap(seedStr);
 
 export const gameState = {
@@ -63,3 +63,4 @@ export function updateMap(newSeed) {
     gameState.players[pid].vel.set(0, 0, 0);
   }
 }
+
