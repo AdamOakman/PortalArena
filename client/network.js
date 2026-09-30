@@ -1,10 +1,10 @@
 export function initNetwork(handlers) {
   let ws = null;
   
-  function connect(ip, pass) {
+  function connect(ip, pass, name) {
     ws = new WebSocket('ws://' + ip);
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'auth', password: pass }));
+      ws.send(JSON.stringify({ type: 'auth', password: pass, name: name }));
     };
     ws.onmessage = (msg) => {
       const data = JSON.parse(msg.data);

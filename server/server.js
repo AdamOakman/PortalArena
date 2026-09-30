@@ -21,9 +21,14 @@ wss.on('connection', (ws) => {
         ws.close(1008, "Invalid password");
         return;
       }
+      if (Object.keys(gameState.players).length >= 2) {
+        ws.close(1008, "Server full");
+        return;
+      }
       playerId = Object.keys(gameState.players).length.toString();
       const playerIndex = Object.keys(gameState.players).length;
-        gameState.players[playerId] = { playerIndex,
+      const pName = data.name || 'Guest';
+        gameState.players[playerId] = { playerIndex, name: pName,
         pos: new TH.Vector3(mapData.spawn.x, mapData.spawn.y, mapData.spawn.z),
         vel: new TH.Vector3(),
         yaw: 0, pitch: 0,
@@ -38,6 +43,11 @@ wss.on('connection', (ws) => {
         playerIndex,
         seed: seedStr
       }));
+
+      const evtMsg = JSON.stringify({ type: 'player_connected', name: pName });
+      wss.clients.forEach(client => {
+         if (client.readyState === 1) client.send(evtMsg);
+      });
     } else if (data.type === 'input') {
       if (!playerId) return;
       const p = gameState.players[playerId];
@@ -62,6 +72,14 @@ wss.on('connection', (ws) => {
       P.r.fromArray(data.r);
       P.u.fromArray(data.u);
       updatePair();
+    } else if (data.type === 'blast_cubes') {
+      data.cubes.forEach(c => {
+         const cube = gameState.grabCubes[c.idx];
+         if (cube) {
+            cube.vel.fromArray(c.vel);
+            if (c.rotVel) cube.rotVel.fromArray(c.rotVel);
+         }
+      });
     } else if (data.type === String.fromCharCode(116,104,114,111,119,95,99,117,98,101)) {
       const c = gameState.grabCubes[data.idx];
       if (c) {
@@ -86,7 +104,14 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    if (playerId) delete gameState.players[playerId];
+    if (playerId && gameState.players[playerId]) {
+       const pName = gameState.players[playerId].name;
+       delete gameState.players[playerId];
+       const evtMsg = JSON.stringify({ type: 'player_disconnected', name: pName });
+       wss.clients.forEach(client => {
+          if (client.readyState === 1) client.send(evtMsg);
+       });
+    }
   });
 });
 
@@ -174,6 +199,7 @@ setInterval(() => {
       }
   }
   physics.resolveCubeCollisions(gameState.grabCubes, null);
+  gameState.grabCubes.forEach(c => { if (c.vel.lengthSq() < 0.001) c.vel.set(0,0,0); });
   // Broadcast state
   const stateUpdate = {
     type: 'state',
@@ -205,4 +231,13 @@ setInterval(() => {
 }, 1000 / TICK_RATE);
 
 console.log("PORTAL//FLUX Server running on ws://localhost:3001");
+
+
+
+
+
+
+
+
+
 

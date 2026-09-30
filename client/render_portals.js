@@ -81,9 +81,11 @@ export function initPortalRendering(ctx) {
     const oldFrameVis = frames[exitIdx].visible;
     const oldSparkVis = sparkles[exitIdx].mesh.visible;
     const oldQuadVis = quads[exitIdx].visible;
+    const oldSourceVis = quads[i].visible;
     frames[exitIdx].visible = false;
     sparkles[exitIdx].mesh.visible = false;
     quads[exitIdx].visible = false;
+    quads[i].visible = false;
     
     for (let j = 0; j < 4; j++) {
       if (quadMats[j]) quadMats[j].uniforms.uTex.value = texs[j];
@@ -99,6 +101,7 @@ export function initPortalRendering(ctx) {
     frames[exitIdx].visible = oldFrameVis;
     sparkles[exitIdx].mesh.visible = oldSparkVis;
     quads[exitIdx].visible = oldQuadVis;
+    quads[i].visible = oldSourceVis;
     
     return rt.texture;
   }
@@ -139,4 +142,8 @@ export function initPortalRendering(ctx) {
 
   return { renderPortalViews, placePortalVisuals, parkClip, makeRTs };
 }
+
+
+
+
 

@@ -29,8 +29,8 @@ export function initHUD(document) {
       const ang = Math.atan2(dx, dz);
       rel = pl.yaw - ang;
     }
-    hud.dist.textContent = Math.round(d);
-    hud.compass.style.transform = 'rotate(' + (-rel) + 'rad)';
+    if (hud.dist) hud.dist.textContent = Math.round(d);
+    if (hud.compass) hud.compass.style.transform = 'rotate(' + (-rel) + 'rad)';
     
     // Timer
     if (mm !== undefined) {
@@ -54,4 +54,5 @@ export function initHUD(document) {
 
   return { updateHUD };
 }
+
 
