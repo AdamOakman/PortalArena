@@ -215,6 +215,12 @@ function start(ns) {
   });
 
   document.addEventListener('keydown', e => {
+    if (e.code === 'Enter') {
+      if (!started && !dom('start').classList.contains('hidden')) {
+        dom('btnstart').click();
+        return;
+      }
+    }
     if (e.target.tagName === 'INPUT') return;
     const c = e.code;
     if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) e.preventDefault();
@@ -415,9 +421,9 @@ function start(ns) {
     q.renderOrder = 5; quads.push(q); portalGroup.add(q);
     
     const frameGrp = new TH.Group();
-    const core = new TH.Mesh(new TH.TorusGeometry(1, 0.02, 8, 64), new TH.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false }));
-    const glow1 = new TH.Mesh(new TH.TorusGeometry(1, 0.08, 8, 64), new TH.MeshBasicMaterial({ color: portals[i].color, transparent: true, opacity: 0.8, blending: TH.AdditiveBlending, depthWrite: false }));
-    const glow2 = new TH.Mesh(new TH.TorusGeometry(1, 0.25, 8, 64), new TH.MeshBasicMaterial({ color: portals[i].color, transparent: true, opacity: 0.35, blending: TH.AdditiveBlending, depthWrite: false }));
+    const core = new TH.Mesh(new TH.TorusGeometry(1, 0.02, 8, 64), new TH.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+    const glow1 = new TH.Mesh(new TH.TorusGeometry(1, 0.08, 8, 64), new TH.MeshBasicMaterial({ color: portals[i].color, transparent: true, opacity: 0.8, blending: TH.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+    const glow2 = new TH.Mesh(new TH.TorusGeometry(1, 0.25, 8, 64), new TH.MeshBasicMaterial({ color: portals[i].color, transparent: true, opacity: 0.35, blending: TH.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
     frameGrp.add(core, glow1, glow2);
     frameGrp.scale.set(PORT.hw + 0.05, PORT.hh + 0.05, 1);
     frames.push(frameGrp); portalGroup.add(frameGrp);
@@ -448,7 +454,7 @@ function start(ns) {
 
   function portalShaderMat(color) {
     return new TH.ShaderMaterial({
-      transparent: true, side: TH.DoubleSide, depthWrite: false,
+      transparent: true, side: TH.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4,
       uniforms: { uTex: { value: null }, uColor: { value: new TH.Color(color) }, uTime: { value: 0 } },
       vertexShader: `varying vec2 vUv; varying vec4 vScreenPos; 
         void main(){ 
@@ -621,10 +627,10 @@ function start(ns) {
     spawnBeam(portals[pi].color, gunPos, target);
     Network.send({ type: 'fire_beam', pi, start: gunPos.toArray(), end: target.toArray() });
     
+    muzzleFlash(pi);
     if (!hit) { AudioSys.tone(180, 90, 0.1, 'square', 0.05); return; }
     portalsFired++;
     tryPlace(pi, hit);
-    muzzleFlash(pi);
   }
 
   /* =======================================================================
@@ -682,11 +688,11 @@ function start(ns) {
   
 
   const rockets = [];
-  let lastRocketTime = 0;
+  let lastRocketTime = -999;
   function fireRocket() {
-    muzzleT = 1;
     const t = performance.now() / 1000;
     if (t - lastRocketTime < 0.5) return;
+    muzzleT = 1;
     lastRocketTime = t;
     
     AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1);
@@ -718,21 +724,42 @@ function start(ns) {
     const d = end.clone().sub(start);
     const len = d.length();
     if (len < 0.001) return;
-    const geo = new TH.CylinderGeometry(0.04, 0.04, len, 8);
-    geo.translate(0, len / 2, 0);
-    geo.rotateX(Math.PI / 2);
-    const mat = new TH.MeshBasicMaterial({ color: 0xff4444, transparent: true, opacity: 1.0 });
-    const mesh = new TH.Mesh(geo, mat);
-    mesh.position.copy(start);
-    mesh.quaternion.setFromUnitVectors(new TH.Vector3(0, 0, 1), d.clone().normalize());
-    scene.add(mesh);
-    animObjects.push({ type: 'instagib_beam', obj: mesh, life: 1.0 });
+    const beamGroup = new TH.Group();
+    beamGroup.position.copy(start);
+    beamGroup.quaternion.setFromUnitVectors(new TH.Vector3(0, 0, 1), d.clone().normalize());
+    const coreGeo = new TH.CylinderGeometry(0.015, 0.015, len, 8);
+    coreGeo.translate(0, len / 2, 0); coreGeo.rotateX(Math.PI / 2);
+    const coreMat = new TH.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 });
+    const core = new TH.Mesh(coreGeo, coreMat);
+    beamGroup.add(core);
+    const glowGeo = new TH.CylinderGeometry(0.08, 0.08, len, 8);
+    glowGeo.translate(0, len / 2, 0); glowGeo.rotateX(Math.PI / 2);
+    const glowMat = new TH.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.6, blending: TH.AdditiveBlending, depthWrite: false });
+    const glow = new TH.Mesh(glowGeo, glowMat);
+    beamGroup.add(glow);
+    const pCount = Math.min(300, Math.floor(len * 6));
+    const pGeo = new TH.BufferGeometry();
+    const pos = new Float32Array(pCount * 3);
+    const vel = [];
+    for (let i = 0; i < pCount; i++) {
+       const t = Math.random() * len;
+       pos[i*3] = 0; pos[i*3+1] = 0; pos[i*3+2] = t;
+       const ang = Math.random() * Math.PI * 2;
+       const speed = Math.random() * 8 + 4;
+       vel.push(new V3(Math.cos(ang) * speed, Math.sin(ang) * speed, (Math.random()-0.5) * 8));
+    }
+    pGeo.setAttribute('position', new TH.BufferAttribute(pos, 3));
+    const pMat = new TH.PointsMaterial({ color: 0xff6666, size: 0.08, transparent: true, opacity: 1.0, blending: TH.AdditiveBlending, depthWrite: false });
+    const points = new TH.Points(pGeo, pMat);
+    beamGroup.add(points);
+    scene.add(beamGroup);
+    animObjects.push({ type: 'instagib_beam2', obj: beamGroup, core: core, glow: glow, points: points, vel: vel, life: 1.0 });
   }
 
-  let lastInstagibTime = 0;
+  let lastInstagibTime = -999;
   function fireInstagib() {
-    muzzleT = 1;
     if (runTime - lastInstagibTime < 1.0) return;
+    muzzleT = 1;
     lastInstagibTime = runTime;
     AudioSys.tone(1800, 300, 0.4, 'sawtooth', 0.1);
     camera.updateMatrixWorld(true);
@@ -1168,7 +1195,7 @@ function start(ns) {
     pl.pos.copy(spawnPt); pl.vel.set(0, 0, 0); pl.cp.copy(spawnPt);
     pl.yaw = -Math.PI / 2; // forward = +x down the course
     pl.pitch = 0; pl.viewOffset = null; pl.maxSpeed = 0; pl.grounded = false; pl.jumpBuf = -1;
-    won = false; runTime = 0; timerOn = false; portalsFired = 0;
+    won = false; runTime = 0; timerOn = false; portalsFired = 0; lastInstagibTime = -999; lastRocketTime = -999;
     winPanel.classList.add('hidden');
     dom('seedinfo').textContent = seedStr;
   }
@@ -1217,7 +1244,7 @@ function start(ns) {
           pos: pointerLocked ? pl.pos.toArray() : undefined,
           vel: pointerLocked ? pl.vel.toArray() : undefined,
           activeWeapon: activeWeapon,
-          isDead: isDead, });
+          isDead: isDead, grabbedCubeIdx: grabbedCube ? grabCubes.indexOf(grabbedCube) : undefined, grabbedCubePos: grabbedCube ? grabbedCube.pos.toArray() : undefined, grabbedCubeVel: grabbedCube ? grabbedCube.vel.toArray() : undefined });
       }
 
       let rem = dt;
@@ -1244,12 +1271,16 @@ function start(ns) {
         if (m.userData.mirrorInstagibGun) m.userData.mirrorInstagibGun.visible = (rp.activeWeapon === 3);
         if (m.userData.muzzleT !== undefined) {
            m.userData.muzzleT = Math.max(0, m.userData.muzzleT - dt * 6);
-           const rScale = 1 + m.userData.muzzleT * 0.08;
-           m.userData.mirrorGun.scale.setScalar(1); m.userData.mirrorRocketGun.scale.setScalar(1);
-           if (m.userData.mirrorInstagibGun) m.userData.mirrorInstagibGun.scale.setScalar(1);
-           if (rp.activeWeapon === 1 || !rp.activeWeapon) { m.userData.mirrorGun.scale.setScalar(rScale); }
-           else if (rp.activeWeapon === 2) { m.userData.mirrorRocketGun.scale.setScalar(rScale); }
-           else if (rp.activeWeapon === 3 && m.userData.mirrorInstagibGun) { m.userData.mirrorInstagibGun.scale.setScalar(rScale); }
+           const mt = m.userData.muzzleT;
+           const rScale = 1 + mt * 0.12;
+           const rZ = -0.4 + mt * 0.15;
+           const rRot = mt * 0.3;
+           m.userData.mirrorGun.scale.setScalar(1); m.userData.mirrorGun.position.z = -0.4; m.userData.mirrorGun.rotation.x = 0;
+           m.userData.mirrorRocketGun.scale.setScalar(1); m.userData.mirrorRocketGun.position.z = -0.4; m.userData.mirrorRocketGun.rotation.x = 0;
+           if (m.userData.mirrorInstagibGun) { m.userData.mirrorInstagibGun.scale.setScalar(1); m.userData.mirrorInstagibGun.position.z = -0.4; m.userData.mirrorInstagibGun.rotation.x = 0; }
+           const aw = rp.activeWeapon || 1;
+           const activeMir = aw === 1 ? m.userData.mirrorGun : (aw === 2 ? m.userData.mirrorRocketGun : m.userData.mirrorInstagibGun);
+           if (activeMir) { activeMir.scale.setScalar(rScale); activeMir.position.z = rZ; activeMir.rotation.x = rRot; }
         } else { m.userData.muzzleT = 0; }
       }
     }
@@ -1261,12 +1292,27 @@ function start(ns) {
     renderPortalViews();
 
     muzzleT = Math.max(0, muzzleT - dt * 6);
-    const scale = 1 + muzzleT * 0.08;
-    gun.scale.setScalar(1); rocketGun.scale.setScalar(1); instagibGun.scale.setScalar(1);
-    if (playerModel.userData.mirrorGun) { playerModel.userData.mirrorGun.scale.setScalar(1); playerModel.userData.mirrorRocketGun.scale.setScalar(1); if (playerModel.userData.mirrorInstagibGun) playerModel.userData.mirrorInstagibGun.scale.setScalar(1); }
-    if (activeWeapon === 1) { gun.scale.setScalar(scale); gun.userData.core.material.emissiveIntensity = 2.2 + muzzleT * 6; if (playerModel.userData.mirrorGun) playerModel.userData.mirrorGun.scale.setScalar(scale); }
-    else if (activeWeapon === 2) { rocketGun.scale.setScalar(scale); if (playerModel.userData.mirrorRocketGun) playerModel.userData.mirrorRocketGun.scale.setScalar(scale); }
-    else if (activeWeapon === 3) { instagibGun.scale.setScalar(scale); if (playerModel.userData.mirrorInstagibGun) playerModel.userData.mirrorInstagibGun.scale.setScalar(scale); }
+    const mt = muzzleT;
+    const scale = 1 + mt * 0.12;
+    const lZ = -0.5 + mt * 0.2;
+    const lRot = mt * 0.4;
+
+    gun.scale.setScalar(1); gun.position.z = -0.5; gun.rotation.x = 0;
+    rocketGun.scale.setScalar(1); rocketGun.position.z = -0.5; rocketGun.rotation.x = 0;
+    instagibGun.scale.setScalar(1); instagibGun.position.z = -0.5; instagibGun.rotation.x = 0;
+    
+    const pM = playerModel.userData;
+    if (pM.mirrorGun) { pM.mirrorGun.scale.setScalar(1); pM.mirrorGun.position.z = -0.4; pM.mirrorGun.rotation.x = 0; }
+    if (pM.mirrorRocketGun) { pM.mirrorRocketGun.scale.setScalar(1); pM.mirrorRocketGun.position.z = -0.4; pM.mirrorRocketGun.rotation.x = 0; }
+    if (pM.mirrorInstagibGun) { pM.mirrorInstagibGun.scale.setScalar(1); pM.mirrorInstagibGun.position.z = -0.4; pM.mirrorInstagibGun.rotation.x = 0; }
+
+    const aw = activeWeapon || 1;
+    const actHUD = aw === 1 ? gun : (aw === 2 ? rocketGun : instagibGun);
+    const actMir = aw === 1 ? pM.mirrorGun : (aw === 2 ? pM.mirrorRocketGun : pM.mirrorInstagibGun);
+
+    actHUD.scale.setScalar(scale); actHUD.position.z = lZ; actHUD.rotation.x = lRot;
+    if (aw === 1 && gun.userData.core) gun.userData.core.material.emissiveIntensity = 2.2 + mt * 6;
+    if (actMir) { actMir.scale.setScalar(1 + mt * 0.12); actMir.position.z = -0.4 + mt * 0.15; actMir.rotation.x = mt * 0.3; }
 
     for (let i = activeBeams.length - 1; i >= 0; i--) {
       const b = activeBeams[i];
@@ -1536,16 +1582,28 @@ function start(ns) {
            a.obj.rotation.x += dt;
            a.obj.rotation.y += dt;
         }
-      } else if (a.type === 'instagib_beam') {
-        a.life -= dt * 3.0;
+      } else if (a.type === 'instagib_beam2') {
+        a.life -= dt * 2.5;
         if (a.life <= 0) {
            scene.remove(a.obj);
-           a.obj.material.dispose(); a.obj.geometry.dispose();
+           a.core.material.dispose(); a.core.geometry.dispose();
+           a.glow.material.dispose(); a.glow.geometry.dispose();
+           a.points.material.dispose(); a.points.geometry.dispose();
            animObjects.splice(i, 1);
         } else {
-           a.obj.material.opacity = a.life;
-           const s = a.life;
-           a.obj.scale.set(s, 1, s);
+           a.core.material.opacity = a.life;
+           a.glow.material.opacity = a.life * 0.6;
+           a.points.material.opacity = a.life;
+           a.core.scale.set(a.life, 1, a.life);
+           a.glow.scale.set(a.life, 1, a.life);
+           const posAttr = a.points.geometry.attributes.position;
+           for (let j = 0; j < a.vel.length; j++) {
+             posAttr.array[j*3] += a.vel[j].x * dt;
+             posAttr.array[j*3+1] += a.vel[j].y * dt;
+             posAttr.array[j*3+2] += a.vel[j].z * dt;
+             a.vel[j].multiplyScalar(0.9);
+           }
+           posAttr.needsUpdate = true;
         }
       } else if (a.type === 'gib') {
         a.life -= dt;
@@ -1644,6 +1702,26 @@ function start(ns) {
   
   requestAnimationFrame(frame);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

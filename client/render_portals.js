@@ -22,7 +22,7 @@ export function initPortalRendering(ctx) {
   const clipPlane = new TH.Plane(new V3(0, 1, 0), 1e6);
   renderer.clippingPlanes = [clipPlane];
 
-  const vcam = new TH.PerspectiveCamera(115, 1, 0.001, 300);
+  const vcam = new TH.PerspectiveCamera(115, 1, 0.02, 300);
   vcam.matrixAutoUpdate = false;
   vcam.layers.enable(1); // allow virtual camera to see the player model
 
@@ -139,3 +139,4 @@ export function initPortalRendering(ctx) {
 
   return { renderPortalViews, placePortalVisuals, parkClip, makeRTs };
 }
+
