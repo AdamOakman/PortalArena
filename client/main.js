@@ -3,7 +3,7 @@
    Files: index.html (UI shell) + game.js (this). Three.js loaded from CDN.
 
    Mechanics:
-   - Portals: LMB = blue (A), RMB = orange (B). They stick to any flat face of
+   - Portals: LMB = Primary, RMB = Secondary. They stick to any flat face of
      any angle (floor / ceiling / wall / ramp) provided the whole mouth fits
      inside that single face.
    - Momentum conservation: velocity is rotated by the portal-pair transform,
@@ -40,9 +40,16 @@ function showFatal(msg) {
 if (typeof window !== 'undefined') boot();
 
 /* ------------------------------------------------------------- utilities */
-import { generateMap } from '../shared/mapgen.js';
+import { generateMap } from '../shared/mapgen.js?v=2';
 import { CFG, PORT } from '../shared/constants.js';
-import { initPhysics } from '../shared/physics.js';
+import { initPhysics } from '../shared/physics.js?v=2';
+import { AudioSys } from './audio.js';
+import { initTextures } from './textures.js';
+import { initHUD } from './hud.js';
+import { initEngine } from './engine.js';
+import { initNetwork } from './network.js';
+import { initModels } from './models.js';
+import { initPortalRendering } from './render_portals.js';
 
 /* ==========================================================================
    GAME — THREE runtime
@@ -57,94 +64,13 @@ function start(ns) {
 
   /* ------------------------------------------------ renderer / scene core */
   const canvas = document.getElementById('gl');
-  const renderer = new TH.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
-  renderer.setSize(innerWidth, innerHeight);
-  if ('outputColorSpace' in renderer) renderer.outputColorSpace = TH.SRGBColorSpace;
-  else if (TH.sRGBEncoding) renderer.outputEncoding = TH.sRGBEncoding;
-  renderer.toneMapping = TH.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.18;
-  renderer.localClippingEnabled = true;
-
-  const scene = new TH.Scene();
-  scene.fog = new TH.Fog(0x1c2a44, 100, 300);
-
-  const camera = new TH.PerspectiveCamera(115, innerWidth / innerHeight, 0.001, 300);
+  const { renderer, scene, camera, skyGroup } = initEngine(TH, canvas);
   let baseFov = 115;
-
-  const skyGroup = new TH.Group(); scene.add(skyGroup);
   let worldGroup = null; // rebuilt on new map
 
-  /* lights */
-  scene.add(new TH.HemisphereLight(0x8fb4e8, 0x3a4a66, 1.1));
-  const sun = new TH.DirectionalLight(0xfff2dc, 1.9); sun.position.set(36, 64, 22); scene.add(sun);
-  const rimL = new TH.DirectionalLight(0x7fa8ff, 0.8); rimL.position.set(-48, 18, -34); scene.add(rimL);
-  scene.add(new TH.AmbientLight(0x9fb8ff, 0.35));
-
-  /* environment reflections (procedural) */
-  try {
-    const pmrem = new TH.PMREMGenerator(renderer);
-    const envScene = new TH.Scene();
-    const g = new TH.BoxGeometry(1, 1, 1);
-    const addEnv = (col, pos, sc) => {
-      const m = new TH.Mesh(g, new TH.MeshBasicMaterial({ color: col }));
-      m.position.set(...pos); m.scale.set(...sc); envScene.add(m);
-    };
-    addEnv(0x0a1428, [0, 0, 0], [400, 400, 400]);
-    addEnv(0x2eeaff, [-60, 90, -40], [120, 0.5, 120]);
-    addEnv(0xff9a3d, [70, 40, 60], [80, 0.5, 80]);
-    addEnv(0x8f6bff, [0, -80, 0], [200, 0.5, 200]);
-    scene.environment = pmrem.fromScene(envScene, 0.04).texture;
-    pmrem.dispose();
-  } catch (e) { /* older three: skip env map */ }
-
-  // Match background perfectly to fog color to hide clip planes
-  scene.background = new TH.Color(0x1c2a44);
-
   /* --------------------------------------------------------------- audio */
-  let ac = null, muted = false;
-  function ensureAudio() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } }
-  function tone(f0, f1, dur, type = 'sine', vol = 0.12, when = 0) {
-    if (!ac || muted) return;
-    const t0 = ac.currentTime + when;
-    const o = ac.createOscillator(), g = ac.createGain();
-    o.type = type; o.frequency.setValueAtTime(f0, t0);
-    o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
-    g.gain.setValueAtTime(vol, t0);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(g).connect(ac.destination); o.start(t0); o.stop(t0 + dur + 0.02);
-  }
-
   /* ------------------------------------------------------------- textures */
-  function gridTexture(base, line, glow, alpha) {
-    const c = document.createElement('canvas'); c.width = c.height = 512;
-    const g = c.getContext('2d');
-    g.fillStyle = base; g.fillRect(0, 0, 512, 512);
-    g.strokeStyle = line; g.lineWidth = 3; g.globalAlpha = 0.9;
-    for (let i = 0; i <= 8; i++) { const p = i * 64 + 0.5; g.beginPath(); g.moveTo(p, 0); g.lineTo(p, 512); g.moveTo(0, p); g.lineTo(512, p); g.stroke(); }
-    g.globalAlpha = 0.35; g.lineWidth = 1;
-    for (let i = 0; i <= 32; i++) { const p = i * 16 + 0.5; g.beginPath(); g.moveTo(p, 0); g.lineTo(p, 512); g.moveTo(0, p); g.lineTo(512, p); g.stroke(); }
-    g.globalAlpha = alpha; g.fillStyle = glow;
-    for (let i = 0; i <= 8; i++) { const p = i * 64 - 1.5; g.fillRect(p, 0, 3, 512); g.fillRect(0, p, 512, 3); }
-    const t = new TH.CanvasTexture(c);
-    t.wrapS = t.wrapT = TH.RepeatWrapping;
-    if ('colorSpace' in t) t.colorSpace = TH.SRGBColorSpace;
-    return t;
-  }
-
-  function makeSlabMat(kind) {
-    const defs = {
-      plat:   { base: '#1a2f4d', line: '#3f86c4', glow: '#4df0ff', emissive: 0x2fb4dd, edge: 0x2eeaff },
-      ramp:   { base: '#2b2547', line: '#7a63b8', glow: '#c98cff', emissive: 0x9a5df0, edge: 0xb45cff },
-      wall:   { base: '#22314e', line: '#4d6ea0', glow: '#7ab4ff', emissive: 0x4a86e8, edge: 0x4a9aff },
-      gantry: { base: '#3a2b22', line: '#a0763f', glow: '#ffb45c', emissive: 0xf08c32, edge: 0xff9a3d },
-      tower:  { base: '#16304e', line: '#3f7fa8', glow: '#4df0ff', emissive: 0x28a0d8, edge: 0x6adfff },
-    };
-    const d = defs[kind] || defs.plat;
-    const tex = gridTexture(d.base, d.line, d.glow, 0.22);
-    tex.repeat.set(2.5, 2.5);
-    return { mat: new TH.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: d.emissive, emissiveIntensity: 0.85, metalness: 0.45, roughness: 0.3, envMapIntensity: 1.3 }), edge: d.edge };
-  }
+  const { getSlabMat, gridTexture } = initTextures(TH);
 
   /* =======================================================================
      WORLD BUILD from map data (Batched for Performance)
@@ -163,25 +89,7 @@ function start(ns) {
     worldGroup = null; obbs = []; animObjects = [];
   }
 
-  const matCache = {};
-  function getSlabMat(kind) {
-    if (matCache[kind]) return matCache[kind];
-    const defs = {
-      plat:   { base: '#1a2f4d', line: '#3f86c4', glow: '#4df0ff', emissive: 0x2fb4dd, edge: 0x2eeaff },
-      ramp:   { base: '#2b2547', line: '#7a63b8', glow: '#c98cff', emissive: 0x9a5df0, edge: 0xb45cff },
-      wall:   { base: '#22314e', line: '#4d6ea0', glow: '#7ab4ff', emissive: 0x4a86e8, edge: 0x4a9aff },
-      gantry: { base: '#3a2b22', line: '#a0763f', glow: '#ffb45c', emissive: 0xf08c32, edge: 0xff9a3d },
-      tower:  { base: '#16304e', line: '#3f7fa8', glow: '#4df0ff', emissive: 0x28a0d8, edge: 0x6adfff },
-      jumppad:{ base: '#1a4d1a', line: '#3fc43f', glow: '#4dff4d', emissive: 0x2fdd2f, edge: 0x2eff2e },
-    };
-    const d = defs[kind] || defs.plat;
-    const tex = gridTexture(d.base, d.line, d.glow, 0.22);
-    tex.repeat.set(2.5, 2.5);
-    const mat = new TH.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: d.emissive, emissiveIntensity: 0.85, metalness: 0.45, roughness: 0.3, envMapIntensity: 1.3 });
-    const edgeMat = new TH.LineBasicMaterial({ color: d.edge, transparent: true, opacity: 0.42 });
-    matCache[kind] = { mat, edgeMat };
-    return matCache[kind];
-  }
+  
 
   function mergeBufferGeometries(geometries, useNormalsAndUVs) {
     if (geometries.length === 0) return null;
@@ -263,7 +171,7 @@ function start(ns) {
     if (pointerLocked) menuPanel.classList.add(String.fromCharCode(104,105,100,100,101,110));
 
   });
-  canvas.addEventListener('click', () => { ensureAudio(); if (started && !pointerLocked && !won) requestLock(); });
+  canvas.addEventListener('click', () => { AudioSys.ensure(); if (started && !pointerLocked && !won) requestLock(); });
 
   document.addEventListener('mousemove', e => {
     if (!pointerLocked) return;
@@ -272,18 +180,25 @@ function start(ns) {
   });
 
   document.addEventListener('mousedown', e => {
-    if (!pointerLocked || won) return;
-    ensureAudio();
+    if (!pointerLocked || won || isDead) return;
+    AudioSys.ensure();
     if (e.button === 0) {
       if (grabbedCube) {
          // Throw cube
          const dir = new TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
          grabbedCube.vel.copy(dir).multiplyScalar(22).add(pl.vel);
          grabbedCube.rotVel.set(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).multiplyScalar(15);
+         Network.send({
+               type: 'throw_cube',
+               idx: grabCubes.indexOf(grabbedCube),
+               pos: grabbedCube.pos.toArray(),
+               vel: grabbedCube.vel.toArray()
+            });
          grabbedCube = null;
       } else {
          if (activeWeapon === 1) firePortal(localPlayerIndex * 2);
-         else fireRocket();
+         else if (activeWeapon === 2) fireRocket();
+         else if (activeWeapon === 3) fireInstagib();
       }
     }
     else if (e.button === 2 && activeWeapon === 1 && !grabbedCube) {
@@ -292,7 +207,7 @@ function start(ns) {
   });
   document.addEventListener('contextmenu', e => e.preventDefault());
 
-  document.addEventListener('wheel', e => {
+  document.addEventListener('wheel', () => {
     if (!pointerLocked || won || !started) return;
     activeWeapon = (activeWeapon === 1) ? 2 : 1;
     if (activeWeapon === 1) { gun.visible = true; rocketGun.visible = false; }
@@ -300,12 +215,14 @@ function start(ns) {
   });
 
   document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
     const c = e.code;
-    if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2'].includes(c)) e.preventDefault();
+    if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) e.preventDefault();
     keys[c] = true;
-    if (!started) return;
-    if (c === 'Digit1') { activeWeapon = 1; gun.visible = true; rocketGun.visible = false; }
-    if (c === 'Digit2') { activeWeapon = 2; gun.visible = false; rocketGun.visible = true; }
+    if (!started || isDead) return;
+    if (c === 'Digit1') { activeWeapon = 1; gun.visible = true; rocketGun.visible = false; instagibGun.visible = false; }
+    if (c === 'Digit2') { activeWeapon = 2; gun.visible = false; rocketGun.visible = true; instagibGun.visible = false; }
+    if (c === 'Digit3') { activeWeapon = 3; gun.visible = false; rocketGun.visible = false; instagibGun.visible = true; }
     if (c === 'Space') pl.jumpBuf = nowT;
     if (c === 'KeyV') { autohop = !autohop; dom('hopinf').textContent = autohop ? 'on' : 'off'; syncHopBtn(); }
     if (c === 'KeyF') toggleFullscreen();
@@ -333,7 +250,7 @@ function start(ns) {
          if (bestC) grabbedCube = bestC;
       }
     }
-    if (c === 'KeyM') { muted = !muted; dom('muteinf').textContent = muted ? 'off' : 'on'; syncMuteBtn(); }
+    if (c === 'KeyM') { AudioSys.toggleMute(); dom('muteinf').textContent = AudioSys.muted ? 'off' : 'on'; syncMuteBtn(); }
     if (c === 'BracketLeft') setFov(baseFov - 5);
     if (c === 'BracketRight') setFov(baseFov + 5);
   });
@@ -352,29 +269,14 @@ function start(ns) {
   dom('fovslider').addEventListener('input', e => setFov(+e.target.value));
   dom('fovslider2').addEventListener('input', e => setFov(+e.target.value));
   function syncHopBtn() { const b = dom('btnhop'); if (b) b.textContent = 'AUTOHOP: ' + (autohop ? 'ON' : 'OFF'); }
-  function syncMuteBtn() { const b = dom('btnmute'); if (b) b.textContent = 'SOUND: ' + (muted ? 'OFF' : 'ON'); const i = dom('muteinf'); if (i) i.textContent = muted ? 'off' : 'on'; }
+  function syncMuteBtn() { const b = dom('btnmute'); if (b) b.textContent = 'SOUND: ' + (AudioSys.muted ? 'OFF' : 'ON'); const i = dom('muteinf'); if (i) i.textContent = AudioSys.muted ? 'off' : 'on'; }
   dom('btnhop').addEventListener('click', () => { autohop = !autohop; syncHopBtn(); dom('hopinf').textContent = autohop ? 'on' : 'off'; });
-  dom('btnmute').addEventListener('click', () => { muted = !muted; syncMuteBtn(); });
+  dom('btnmute').addEventListener('click', () => { AudioSys.toggleMute(); syncMuteBtn(); });
   dom('btnfs').addEventListener('click', toggleFullscreen);
 
-  let ws = null;
-  let localPlayerId = null;
-  let localPlayerIndex = 0;
-  const remotePlayers = {}; // { id: { pos, vel, yaw, pitch } }
-  const remotePlayerMeshes = {};
-
-  dom('btnstart').addEventListener('click', () => {
-    const ipInput = document.getElementById('ipinput');
-    const passInput = document.getElementById('passinput');
-    const ip = (ipInput && ipInput.value.trim()) ? ipInput.value.trim() : 'localhost:3001';
-    const pass = (passInput && passInput.value.trim()) ? passInput.value.trim() : 'secret';
-    const actualIp = ip || 'localhost:3001';
-    ws = new WebSocket('ws://' + actualIp);
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'auth', password: pass }));
-    };
-    ws.onmessage = (msg) => {
-      const data = JSON.parse(msg.data);
+  
+  const Network = initNetwork({
+    onMessage: (data) => {
       if (data.type === 'init') {
         localPlayerId = data.playerId;
         localPlayerIndex = data.playerIndex;
@@ -421,8 +323,10 @@ function start(ns) {
           }
         }
       } else if (data.type === 'fire_beam') {
+        if (data.playerId !== localPlayerId && remotePlayerMeshes[data.playerId]) remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
         spawnBeam(portals[data.pi].color, new V3(...data.start), new V3(...data.end));
       } else if (data.type === 'fire_rocket') {
+        if (data.playerId !== localPlayerId && remotePlayerMeshes[data.playerId]) remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
         const rMesh = new TH.Group();
         const bGeo = new TH.CylinderGeometry(0.06, 0.06, 0.4, 8);
         const bMat = new TH.MeshStandardMaterial({ color: 0x222222 });
@@ -438,16 +342,51 @@ function start(ns) {
         rMesh.position.fromArray(data.pos);
         scene.add(rMesh);
         rockets.push({ pos: new V3(...data.pos), vel: new V3(...data.vel), mesh: rMesh, life: 5 });
-        tone(300, 150, 0.3, 'sawtooth', 0.1);
+        AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1);
+      } else if (data.type === 'fire_instagib') {
+        if (data.playerId !== localPlayerId && remotePlayerMeshes[data.playerId]) remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
+        const pts = data.pts.map(a => new V3(...a));
+        if (data.playerId !== localPlayerId && remotePlayerMeshes[data.playerId]) {
+           const rm = remotePlayerMeshes[data.playerId];
+           if (rm.userData.mirrorInstagibGun) {
+             rm.updateMatrixWorld(true);
+             rm.userData.mirrorInstagibGun.updateMatrixWorld(true);
+             pts[0].set(0, 0, -0.4).applyMatrix4(rm.userData.mirrorInstagibGun.matrixWorld);
+           }
+        }
+        for (let i = 0; i < pts.length; i += 2) spawnInstagibBeam(pts[i], pts[i+1]);
+        AudioSys.tone(1800, 300, 0.4, 'sawtooth', 0.1);
+        
+        if (data.hitPlayerId === localPlayerId) {
+           die();
+        }
+      } else if (data.type === 'player_died') {
+        const pos = new V3(...data.pos);
+        spawnDeathAnimation(pos);
       }
-    };
-    ws.onerror = (e) => {
-      console.error('Connection error', e);
-      showFatal('Could not connect to server at ' + actualIp);
-    };
-    ws.onclose = () => {
-      showFatal('Connection lost to server.');
-    };
+    },
+    onError: () => {
+      showFatal('WebSocket error. Server might be down.');
+    },
+    onClose: () => {
+      showFatal('Disconnected from server.');
+    }
+  });
+    
+  let localPlayerId = null;
+  let localPlayerIndex = 0;
+  const remotePlayers = {}; // { id: { pos, vel, yaw, pitch } }
+  const remotePlayerMeshes = {};
+
+  dom('btnstart').addEventListener('click', () => {
+    const ipInput = document.getElementById('ipinput');
+    const passInput = document.getElementById('passinput');
+    const ip = (ipInput && ipInput.value.trim()) ? ipInput.value.trim() : 'localhost:3001';
+    const pass = (passInput && passInput.value.trim()) ? passInput.value.trim() : 'secret';
+    const actualIp = ip || 'localhost:3001';
+    
+    Network.connect(actualIp, pass);
+
   });
   dom('btnresume').addEventListener('click', requestLock);
   dom('btnnewmap').addEventListener('click', () => {
@@ -456,7 +395,7 @@ function start(ns) {
   });
   dom('btnagain').addEventListener('click', () => newMap(String(Math.floor(Math.random() * 1e9))));
   dom('btnsame').addEventListener('click', () => {
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'new_map', seed: currentSeed }));
+    Network.send({ type: 'new_map', seed: currentSeed });
     winPanel.classList.add('hidden'); requestLock(); 
   });
 
@@ -580,7 +519,7 @@ function start(ns) {
       
       if (limit < 0) {
         // Platform is physically too small for this portal
-        tone(220, 120, 0.15, 'square', 0.06); 
+        AudioSys.tone(220, 120, 0.15, 'square', 0.06); 
         return false; 
       }
       
@@ -603,19 +542,17 @@ function start(ns) {
         if (sameFace) {
           const d = c.clone().sub(Q.c);
           const du = Math.abs(d.dot(f.r)), dv = Math.abs(d.dot(f.u));
-          if (du < PORT.hw * 2 + 0.35 && dv < PORT.hh * 2 + 0.35) { tone(220, 120, 0.15, 'square', 0.06); return false; }
+          if (du < PORT.hw * 2 + 0.35 && dv < PORT.hh * 2 + 0.35) { AudioSys.tone(220, 120, 0.15, 'square', 0.06); return false; }
         }
       }
     }
     P.placed = true; P.c.copy(c); P.n.copy(n); P.r.copy(f.r); P.u.copy(f.u); P.openTime = performance.now() / 1000;
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify({
+    Network.send({
         type: 'portal_place', pi,
         c: P.c.toArray(), n: P.n.toArray(), r: P.r.toArray(), u: P.u.toArray()
-      }));
-    }
+      });
     updatePair();
-    tone(700, 1400, 0.09, 'sine', 0.08); tone(1400, 2400, 0.12, 'triangle', 0.05, 0.03);
+    AudioSys.tone(700, 1400, 0.09, 'sine', 0.08); AudioSys.tone(1400, 2400, 0.12, 'triangle', 0.05, 0.03);
     return true;
   }
 
@@ -682,11 +619,9 @@ function start(ns) {
     const gunPos = new V3(0, 0.02, -0.45).applyMatrix4(gun.matrixWorld);
     const target = hit ? hit.point : camera.position.clone().addScaledVector(dir, 140);
     spawnBeam(portals[pi].color, gunPos, target);
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'fire_beam', pi, start: gunPos.toArray(), end: target.toArray() }));
-    }
+    Network.send({ type: 'fire_beam', pi, start: gunPos.toArray(), end: target.toArray() });
     
-    if (!hit) { tone(180, 90, 0.1, 'square', 0.05); return; }
+    if (!hit) { AudioSys.tone(180, 90, 0.1, 'square', 0.05); return; }
     portalsFired++;
     tryPlace(pi, hit);
     muzzleFlash(pi);
@@ -702,14 +637,15 @@ function start(ns) {
   const _tpFlash = document.getElementById('flash');
 
   function physStep(dt, activeKeys) {
+    const k = isDead ? {} : activeKeys;
     const tpState = { nowT, tpGracePortal, tpGraceT, R_AB, R_BA };
     const events = {
-      onJumppad: () => { tone(200, 600, 0.4, 'sine', 0.15); },
+      onJumppad: () => { AudioSys.tone(200, 600, 0.4, 'sine', 0.15); },
       onLand: (vol) => { landingThump = vol; },
-      onJump: () => { tone(340, 520, 0.06, 'triangle', 0.04); },
+      onJump: () => { AudioSys.tone(340, 520, 0.06, 'triangle', 0.04); },
       onTeleport: () => { _tpFlash.classList.remove('fadeflash'); void _tpFlash.offsetWidth; _tpFlash.classList.add('fadeflash'); }
     };
-    physics.physStep(pl, activeKeys, autohop, dt, obbs, portals, grabCubes, grabbedCube, tpState, events);
+    physics.physStep(pl, k, autohop, dt, obbs, portals, grabCubes, grabbedCube, tpState, events);
     tpGracePortal = tpState.tpGracePortal;
     tpGraceT = tpState.tpGraceT;
     if (pl.pos.y < -40.5) respawn();
@@ -726,31 +662,14 @@ function start(ns) {
 
   function respawn() {
     pl.pos.copy(spawnPt); pl.vel.set(0, 0, 0);
-    tone(120, 60, 0.4, 'sawtooth', 0.08);
+    AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
   }
-
   /* =======================================================================
-     GUN MODEL attached to camera
+     MODELS (Gun & Player)
      ======================================================================= */
-  const gun = new TH.Group();
-  {
-    const bodyMat = new TH.MeshStandardMaterial({ color: 0x1a2230, metalness: 0.85, roughness: 0.25 });
-    const glowA = new TH.MeshStandardMaterial({ color: 0x0affff, emissive: 0x2eeaff, emissiveIntensity: 2.2 });
-    const glowB = new TH.MeshStandardMaterial({ color: 0xff8a2a, emissive: 0xff9a3d, emissiveIntensity: 2.2 });
-    const body = new TH.Mesh(new TH.BoxGeometry(0.16, 0.14, 0.42), bodyMat);
-    const barrel = new TH.Mesh(new TH.CylinderGeometry(0.055, 0.075, 0.3, 12), bodyMat);
-    barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.02, -0.3);
-    const core = new TH.Mesh(new TH.SphereGeometry(0.045, 12, 8), glowA);
-    core.position.set(0, 0.06, -0.05);
-    const ring = new TH.Mesh(new TH.TorusGeometry(0.07, 0.012, 8, 24), glowB);
-    ring.position.set(0, 0.02, -0.42);
-    const prong1 = new TH.Mesh(new TH.BoxGeometry(0.03, 0.16, 0.05), bodyMat); prong1.position.set(-0.09, 0.08, -0.2);
-    const prong2 = prong1.clone(); prong2.position.x = 0.09;
-    gun.add(body, barrel, core, ring, prong1, prong2);
-    gun.userData.core = core; gun.userData.ring = ring;
-    gun.position.set(0.3, -0.26, -0.5);
-    camera.add(gun); scene.add(camera);
-  }
+  const { gun, rocketGun, instagibGun, createPlayerModel } = initModels(TH, camera, scene);
+  
+  
   let muzzleT = 0;
   function muzzleFlash(pi) {
     muzzleT = 1;
@@ -759,28 +678,18 @@ function start(ns) {
     gun.userData.ring.material.emissive.setHex(hex);
   }
   
-  const rocketGun = new TH.Group();
-  {
-    const bodyMat = new TH.MeshStandardMaterial({ color: 0x2e3532, metalness: 0.9, roughness: 0.2 });
-    const barrel = new TH.Mesh(new TH.CylinderGeometry(0.12, 0.12, 0.8, 12), bodyMat);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0, -0.2);
-    const handle = new TH.Mesh(new TH.BoxGeometry(0.08, 0.2, 0.1), bodyMat);
-    handle.position.set(0, -0.15, 0.1);
-    rocketGun.add(barrel, handle);
-    rocketGun.position.set(0.3, -0.26, -0.5);
-    rocketGun.visible = false;
-    camera.add(rocketGun);
-  }
+  
+  
 
   const rockets = [];
   let lastRocketTime = 0;
   function fireRocket() {
+    muzzleT = 1;
     const t = performance.now() / 1000;
     if (t - lastRocketTime < 0.5) return;
     lastRocketTime = t;
     
-    tone(300, 150, 0.3, 'sawtooth', 0.1);
+    AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1);
     camera.updateMatrixWorld(true);
     const pos = camera.getWorldPosition(new TH.Vector3());
     const dir = new TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
@@ -802,13 +711,153 @@ function start(ns) {
     scene.add(rMesh);
     
     rockets.push({ pos: pos.clone(), vel: dir.multiplyScalar(70), mesh: rMesh, life: 5 });
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'fire_rocket', pos: pos.toArray(), vel: dir.toArray() }));
+    Network.send({ type: 'fire_rocket', pos: pos.toArray(), vel: dir.toArray() });
+  }
+
+  function spawnInstagibBeam(start, end) {
+    const d = end.clone().sub(start);
+    const len = d.length();
+    if (len < 0.001) return;
+    const geo = new TH.CylinderGeometry(0.04, 0.04, len, 8);
+    geo.translate(0, len / 2, 0);
+    geo.rotateX(Math.PI / 2);
+    const mat = new TH.MeshBasicMaterial({ color: 0xff4444, transparent: true, opacity: 1.0 });
+    const mesh = new TH.Mesh(geo, mat);
+    mesh.position.copy(start);
+    mesh.quaternion.setFromUnitVectors(new TH.Vector3(0, 0, 1), d.clone().normalize());
+    scene.add(mesh);
+    animObjects.push({ type: 'instagib_beam', obj: mesh, life: 1.0 });
+  }
+
+  let lastInstagibTime = 0;
+  function fireInstagib() {
+    muzzleT = 1;
+    if (runTime - lastInstagibTime < 1.0) return;
+    lastInstagibTime = runTime;
+    AudioSys.tone(1800, 300, 0.4, 'sawtooth', 0.1);
+    camera.updateMatrixWorld(true);
+    instagibGun.updateMatrixWorld(true);
+    
+    let curPos = camera.position.clone();
+    let curDir = new TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+    let remaining = 300;
+    const pts = [];
+    let curStart = new TH.Vector3(0, 0, -0.4).applyMatrix4(instagibGun.matrixWorld);
+
+    for (let iter = 0; iter < 4; iter++) {
+        let hit = raycast(curPos, curDir, remaining);
+        let bestPortal = null, bestT = hit ? hit.distance : remaining;
+        
+        for (let i = 0; i < portals.length; i++) {
+           const P = portals[i];
+           if (!P.placed) continue;
+           const denom = curDir.dot(P.n);
+           if (denom < -0.001) {
+              const pt = P.c.clone().sub(curPos).dot(P.n) / denom;
+              if (pt > 0.01 && pt < bestT) {
+                 const hitPt = curPos.clone().addScaledVector(curDir, pt);
+                 const d = hitPt.clone().sub(P.c);
+                 if (Math.abs(d.dot(P.r)) < 2.3 && Math.abs(d.dot(P.u)) < 3.2) {
+                    bestT = pt;
+                    bestPortal = i;
+                 }
+              }
+           }
+        }
+        
+        let hitPlayerId = null;
+        let hitPlayerT = bestT;
+        for (const id in remotePlayers) {
+            const rp = remotePlayers[id];
+            const rpPos = new TH.Vector3().fromArray(rp.pos);
+            const box = new TH.Box3();
+            box.min.copy(rpPos).add(new TH.Vector3(-0.4, 0, -0.4));
+            box.max.copy(rpPos).add(new TH.Vector3(0.4, CFG.H, 0.4));
+            const ray = new TH.Ray(curPos, curDir);
+            const playerHit = ray.intersectBox(box, new TH.Vector3());
+            if (playerHit) {
+               const dist = curPos.distanceTo(playerHit);
+               if (dist < hitPlayerT) {
+                   hitPlayerT = dist;
+                   hitPlayerId = id;
+               }
+            }
+        }
+        
+        if (hitPlayerId !== null) {
+            bestT = hitPlayerT;
+            const trueHitPt = curPos.clone().addScaledVector(curDir, bestT);
+            pts.push(curStart, trueHitPt);
+            Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()), hitPlayerId });
+            if (remotePlayers[hitPlayerId]) {
+               remotePlayers[hitPlayerId].isDead = true;
+               remotePlayers[hitPlayerId].predictedDeadUntil = runTime + 3.0;
+            }
+            if (remotePlayerMeshes[hitPlayerId]) remotePlayerMeshes[hitPlayerId].visible = false;
+            for (let i = 0; i < pts.length; i += 2) spawnInstagibBeam(pts[i], pts[i+1]);
+            return;
+        }
+        
+        const hitPt = curPos.clone().addScaledVector(curDir, bestT);
+        pts.push(curStart, hitPt);
+        
+        if (bestPortal !== null) {
+           const other = portals[bestPortal ^ 1];
+           if (other.placed) {
+              const local = hitPt.clone().sub(portals[bestPortal].c);
+              const lx = local.dot(portals[bestPortal].r), ly = local.dot(portals[bestPortal].u);
+              curPos = other.c.clone().addScaledVector(other.r, -lx).addScaledVector(other.u, ly).addScaledVector(other.n, 0.02);
+              
+              const m = new TH.Matrix4().makeBasis(portals[bestPortal].r, portals[bestPortal].u, portals[bestPortal].n);
+              const inv = m.clone().invert();
+              const om = new TH.Matrix4().makeBasis(other.r.clone().negate(), other.u, other.n.clone().negate());
+              curDir.applyMatrix4(inv).applyMatrix4(om).normalize();
+              curStart = curPos.clone();
+              remaining -= bestT;
+              continue;
+           }
+        }
+        break;
+    }
+    
+    for (let i = 0; i < pts.length; i += 2) spawnInstagibBeam(pts[i], pts[i+1]);
+    
+    Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()) });
+  }
+
+  function spawnDeathAnimation(pos) {
+    AudioSys.tone(200, 500, 0.5, 'square', 0.1);
+    for (let i = 0; i < 20; i++) {
+       const geo = new TH.BoxGeometry(0.2, 0.2, 0.2);
+       const mat = new TH.MeshStandardMaterial({ color: 0xaa0000 });
+       const mesh = new TH.Mesh(geo, mat);
+       mesh.position.copy(pos).add(new TH.Vector3((Math.random()-0.5)*0.6, Math.random()*1.5, (Math.random()-0.5)*0.6));
+       scene.add(mesh);
+       const vel = new TH.Vector3((Math.random()-0.5)*10, Math.random()*6+2, (Math.random()-0.5)*10);
+       animObjects.push({ type: 'gib', obj: mesh, vel, life: 3.0 });
     }
   }
 
+  let isDead = false;
+  function die() {
+     if (!started || won || isDead) return;
+     isDead = true;
+     Network.send({ type: 'player_died', pos: pl.pos.toArray() });
+     spawnDeathAnimation(pl.pos);
+     
+     gun.visible = false; rocketGun.visible = false; instagibGun.visible = false;
+     
+     setTimeout(() => {
+        isDead = false;
+        if (activeWeapon === 1) gun.visible = true;
+        if (activeWeapon === 2) rocketGun.visible = true;
+        if (activeWeapon === 3) instagibGun.visible = true;
+        respawn(false);
+     }, 3000);
+  }
+
   function explosion(pos) {
-    tone(100, 40, 0.4, 'square', 0.2);
+    AudioSys.tone(100, 40, 0.4, 'square', 0.2);
     const expl = new TH.Mesh(new TH.SphereGeometry(3.5, 16, 16), new TH.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 1 }));
     expl.position.copy(pos);
     scene.add(expl);
@@ -923,7 +972,7 @@ function start(ns) {
     // Spawn physical debris chunks
     const mMat = getSlabMat('wall');
     const blastNormal = normal ? normal.clone() : new V3(0, 1, 0);
-    
+    const rr = (min, max) => min + Math.random() * (max - min);
     for (let i = 0; i < 24; i++) {
       const bs = rr(0.9, 2.2);
       const bGeo = new TH.BoxGeometry(bs, bs, bs);
@@ -944,56 +993,8 @@ function start(ns) {
       animObjects.push({ type: 'debris', obj: bMesh, vel, rot, life: 4.0 });
     }
   }
-
-  /* =======================================================================
-     PLAYER MODEL (Visible in portals only)
-     ======================================================================= */
   const playerClipPlane = new TH.Plane(new V3(0, 1, 0), 1e6);
-  function createPlayerModel(color, layer, clipPlane) {
-    const model = new TH.Group();
-    
-    const bodyGeo = new TH.CylinderGeometry(0.3, 0.3, 1.2, 16);
-    bodyGeo.translate(0, 0.6, 0);
-    const bodyMat = new TH.MeshStandardMaterial({ color: color, metalness: 0.2, roughness: 0.7 });
-    const bodyMesh = new TH.Mesh(bodyGeo, bodyMat);
-    bodyMesh.name = 'bodyMesh';
-    model.add(bodyMesh);
-    
-    const headGroup = new TH.Group();
-    headGroup.position.set(0, 1.58, 0);
-    
-    const headGeo = new TH.SphereGeometry(0.25, 16, 16);
-    const headMat = new TH.MeshStandardMaterial({ color: 0xffd9a8, metalness: 0.1, roughness: 0.8 });
-    const headMesh = new TH.Mesh(headGeo, headMat);
-    
-    const visorGeo = new TH.BoxGeometry(0.35, 0.12, 0.15);
-    const visorMat = new TH.MeshStandardMaterial({ color: 0x111111, metalness: 0.8, roughness: 0.2 });
-    const visorMesh = new TH.Mesh(visorGeo, visorMat);
-    visorMesh.position.set(0, 0, -0.22);
-    
-    const mirrorGun = gun.clone();
-    mirrorGun.position.set(0.35, -0.38, -0.4);
-    mirrorGun.rotation.set(-0.1, 0, 0);
-    const mirrorRocketGun = rocketGun.clone();
-    mirrorRocketGun.position.set(0.35, -0.38, -0.4);
-    mirrorRocketGun.rotation.set(-0.1, 0, 0);
-    
-    headGroup.add(headMesh, visorMesh, mirrorGun, mirrorRocketGun);
-    mirrorRocketGun.visible = false;
-    model.add(headGroup);
-    
-    model.userData = { mirrorGun, mirrorRocketGun, headGroup };
-    
-    model.traverse(c => { 
-      if (c.isMesh) { 
-        c.material = c.material.clone();
-        if (clipPlane) c.material.clippingPlanes = [clipPlane];
-        if (layer !== undefined) c.layers.set(layer); 
-      } 
-    });
-    
-    return model;
-  }
+  
   
   const playerModel = createPlayerModel(0x4a86e8, 1, playerClipPlane);
   scene.add(playerModel);
@@ -1004,140 +1005,9 @@ function start(ns) {
   // The real player model on Layer 1 is sufficient for portals to render you.
 
   /* =======================================================================
-     PORTAL RENDERING — render target + virtual camera + clip plane
+     PORTAL RENDERING (Extracted)
      ======================================================================= */
-  const MAX_DEPTH = 3;
-  const portalRTs = [];
-  function makeRTs() {
-    const w = Math.max(256, Math.floor(innerWidth * 0.7)), h = Math.max(256, Math.floor(innerHeight * 0.7));
-    for (let d = 0; d < MAX_DEPTH; d++) {
-      const dw = Math.max(64, Math.floor(w / (d + 1)));
-      const dh = Math.max(64, Math.floor(h / (d + 1)));
-      if (!portalRTs[d]) portalRTs[d] = [null, null, null, null];
-      for (let i = 0; i < 4; i++) {
-        if (portalRTs[d][i]) portalRTs[d][i].dispose();
-        portalRTs[d][i] = new TH.WebGLRenderTarget(dw, dh, { minFilter: TH.LinearFilter, magFilter: TH.LinearFilter });
-      }
-    }
-  }
-  makeRTs();
-
-  const clipPlane = new TH.Plane(new V3(0, 1, 0), 1e6);
-  renderer.clippingPlanes = [clipPlane];
-
-  const vcam = new TH.PerspectiveCamera(115, 1, 0.001, 300);
-  vcam.matrixAutoUpdate = false;
-  vcam.layers.enable(1); // allow virtual camera to see the player model
-
-  const _frustum = new TH.Frustum(), _projScreen = new TH.Matrix4();
-  function renderPortalRecursive(i, parentCamMatrix, depth) {
-    const pairIdx = Math.floor(i / 2);
-    const qIdx = i % 2 === 0 ? i + 1 : i - 1;
-    const P = portals[i], Q = portals[qIdx];
-    
-    vcam.matrixWorld.copy(parentCamMatrix);
-    vcam.matrixWorldInverse.copy(parentCamMatrix).invert();
-    vcam.fov = camera.fov; vcam.aspect = camera.aspect;
-    vcam.updateProjectionMatrix();
-    
-    const parentPos = new V3().setFromMatrixPosition(parentCamMatrix);
-    const dot = new V3().subVectors(parentPos, P.c).dot(P.n);
-    if (dot <= 0.01) return null; // Camera is behind or flush with the portal plane
-    
-    _projScreen.multiplyMatrices(vcam.projectionMatrix, vcam.matrixWorldInverse);
-    _frustum.setFromProjectionMatrix(_projScreen);
-    const maxRad = Math.hypot(PORT.hw, PORT.hh) + 0.5;
-    if (!_frustum.intersectsSphere(new TH.Sphere(P.c, maxRad))) return null;
-
-    const R = i % 2 === 0 ? R_AB[pairIdx] : R_BA[pairIdx];
-    if (!R) return null;
-    const T1 = new M4().makeTranslation(-P.c.x, -P.c.y, -P.c.z);
-    const T2 = new M4().makeTranslation(Q.c.x, Q.c.y, Q.c.z);
-    const camMatrix = new M4().multiplyMatrices(T2, new M4().multiplyMatrices(R, new M4().multiplyMatrices(T1, parentCamMatrix)));
-    
-    let texs = [null, null, null, null];
-    if (depth < PORT.recursion) {
-      for (let j = 0; j < 4; j++) {
-        if (portals[j].placed && portals[j%2 === 0 ? j+1 : j-1].placed) {
-          texs[j] = renderPortalRecursive(j, camMatrix, depth + 1);
-        }
-      }
-    }
-    
-    vcam.matrixAutoUpdate = false;
-    vcam.matrixWorld.copy(camMatrix);
-    vcam.matrixWorldInverse.copy(camMatrix).invert();
-    vcam.fov = camera.fov; vcam.aspect = camera.aspect;
-    vcam.updateProjectionMatrix();
-    
-    const dP = (parentPos.x - P.c.x) * P.n.x + (parentPos.y - P.c.y) * P.n.y + (parentPos.z - P.c.z) * P.n.z;
-    if (Math.abs(dP) > 0.05) {
-      const s = dP >= 0 ? 1 : -1;
-      clipPlane.normal.copy(Q.n).multiplyScalar(s);
-      clipPlane.constant = -s * Q.n.dot(Q.c) + 0.02;
-    } else { parkClip(); }
-    
-    const exitIdx = qIdx;
-    const oldFrameVis = frames[exitIdx].visible;
-    const oldSparkVis = sparkles[exitIdx].mesh.visible;
-    const oldQuadVis = quads[exitIdx].visible;
-    frames[exitIdx].visible = false;
-    sparkles[exitIdx].mesh.visible = false;
-    quads[exitIdx].visible = false;
-    
-    for (let j = 0; j < 4; j++) {
-      if (quadMats[j]) quadMats[j].uniforms.uTex.value = texs[j];
-    }
-    
-    const rt = portalRTs[depth][i];
-    renderer.setRenderTarget(rt);
-    renderer.clear();
-    renderer.render(scene, vcam);
-    renderer.setRenderTarget(null);
-    
-    frames[exitIdx].visible = oldFrameVis;
-    sparkles[exitIdx].mesh.visible = oldSparkVis;
-    quads[exitIdx].visible = oldQuadVis;
-    return rt.texture;
-  }
-
-  function renderPortalViews() {
-    camera.updateMatrixWorld(true);
-    let texs = [null, null, null, null];
-    for (let i = 0; i < 4; i++) {
-       const qIdx = i % 2 === 0 ? i + 1 : i - 1;
-       if (portals[i].placed && portals[qIdx].placed) {
-          texs[i] = renderPortalRecursive(i, camera.matrixWorld, 0);
-       }
-    }
-    for (let i = 0; i < 4; i++) {
-       if (quadMats[i]) {
-          quadMats[i].uniforms.uTex.value = texs[i];
-          quads[i].visible = portals[i].placed;
-       }
-    }
-    parkClip();
-  }
-  function parkClip() { clipPlane.normal.set(0, 1, 0); clipPlane.constant = 1e6; }
-
-  function placePortalVisuals() {
-    for (let i = 0; i < 4; i++) {
-      const P = portals[i];
-      if (!P.placed) { quads[i].visible = false; frames[i].visible = false; glowLights[i].intensity = 0; sparkles[i].mesh.visible = false; continue; }
-      frames[i].visible = true;
-      const q = quads[i], f = frames[i], lt = glowLights[i];
-      q.position.copy(P.c).addScaledVector(P.n, 0.015);
-      const m = new M4().makeBasis(P.r, P.u, P.n);
-      q.quaternion.setFromRotationMatrix(m);
-      f.position.copy(q.position).addScaledVector(P.n, 0.02);
-      f.quaternion.copy(q.quaternion);
-      lt.position.copy(P.c).addScaledVector(P.n, 0.5);
-      lt.intensity = 5.0;
-      sparkles[i].mesh.visible = true;
-      sparkles[i].mesh.position.copy(q.position);
-      sparkles[i].mesh.quaternion.copy(q.quaternion);
-    }
-  }
+  const { renderPortalViews, placePortalVisuals, makeRTs } = initPortalRendering({ TH, innerWidth, innerHeight, renderer, camera, scene, portals, PORT, R_AB, R_BA, frames, sparkles, quads, quadMats, glowLights, skyGroup });
 
   /* =======================================================================
      MAP LOADING / RESET
@@ -1303,7 +1173,7 @@ function start(ns) {
     dom('seedinfo').textContent = seedStr;
   }
   function newMap(s) { 
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'new_map', seed: s }));
+    Network.send({ type: 'new_map', seed: s });
     menuPanel.classList.add('hidden'); 
     requestLock(); 
   }
@@ -1311,43 +1181,7 @@ function start(ns) {
   /* =======================================================================
      HUD
      ======================================================================= */
-  const hud = { speed: dom('speedval'), fill: dom('barfill'), hint: dom('hint'), dist: dom('exitdist'), compass: dom('compass'), timer: dom('timer'), aim: dom('aimring') };
-  let lastHintMsg = '';
-  function updateHUD(dt) {
-    const sp = Math.hypot(pl.vel.x, pl.vel.z);
-    hud.speed.innerHTML = Math.round(sp * 10) + '<span>u/s</span>';
-    hud.fill.style.width = Math.min(100, (sp / 34) * 100) + '%';
-    hud.fill.classList.toggle('hot', sp > CFG.GMAX + 2);
-    const d = pl.pos.distanceTo(exitPos);
-    hud.dist.textContent = Math.round(d);
-    const tAng = Math.atan2(exitPos.x - pl.pos.x, exitPos.z - pl.pos.z);
-    const fAng = Math.atan2(-Math.sin(pl.yaw), -Math.cos(pl.yaw));
-    let rel = tAng - fAng; while (rel > Math.PI) rel -= 2 * Math.PI; while (rel < -Math.PI) rel += 2 * Math.PI;
-    hud.compass.style.transform = 'rotate(' + (-rel) + 'rad)';
-    if (timerOn && !won) runTime += dt;
-    const t = runTime, mm = String(Math.floor(t / 60)).padStart(2, '0'), ss = String(Math.floor(t % 60)).padStart(2, '0'), ms = Math.floor((t * 10) % 10);
-    hud.timer.textContent = `${mm}:${ss}.${ms}`;
-    let msg = '';
-    for (const z of hintZones) {
-      if (pl.pos.x > z.min.x && pl.pos.x < z.max.x && pl.pos.y > z.min.y && pl.pos.y < z.max.y && pl.pos.z > z.min.z && pl.pos.z < z.max.z) msg = z.msg;
-    }
-    if (!msg) {
-      const offset = localPlayerIndex * 2;
-      if (!portals[offset].placed && !portals[offset+1].placed) msg = 'FIRE PORTALS: LMB = blue, RMB = orange — they stick to any flat face (floor / ceiling / wall / ramp).';
-      else if (!(portals[offset].placed && portals[offset+1].placed)) msg = 'Place the second portal. Speed is conserved through a pair: what falls in, flies out.';
-      else msg = 'Hold SPACE and land to bunnyhop — strafe + turn (circle-jump) to build speed past run speed.';
-    }
-    if (msg !== lastHintMsg) { hud.hint.textContent = msg; lastHintMsg = msg; }
-    const dir = new V3(); camera.getWorldDirection(dir);
-    const hit = raycast(camera.position.clone(), dir, 140);
-    hud.aim.classList.toggle('valid', !!hit);
-    if (!won && Math.abs(pl.pos.x - exitPos.x) < 1.9 && Math.abs(pl.pos.z - exitPos.z) < 1.9 && Math.abs((pl.pos.y + CFG.H / 2) - exitPos.y) < 2.4) {
-      won = true; document.exitPointerLock();
-      tone(523, 523, 0.12, 'triangle', 0.1); tone(659, 659, 0.12, 'triangle', 0.1, 0.12); tone(784, 784, 0.12, 'triangle', 0.1, 0.24); tone(1046, 1046, 0.3, 'triangle', 0.12, 0.36);
-      dom('winstats').innerHTML = `time <b>${hud.timer.textContent}</b> · max speed <b>${Math.round(pl.maxSpeed * 10)} u/s</b> · portals fired <b>${portalsFired}</b> · seed <b>${currentSeed}</b>`;
-      winPanel.classList.remove('hidden');
-    }
-  }
+  const { updateHUD } = initHUD(document);
 
   /* =======================================================================
      MAIN LOOP
@@ -1370,8 +1204,7 @@ function start(ns) {
         if ((keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD) && !timerOn) timerOn = true;
       }
         
-      if (ws && ws.readyState === 1 && localPlayerId != null) {
-        ws.send(JSON.stringify({
+      if (localPlayerId != null) { Network.send({
           type: 'input',
           dt: dt,
           keys: {
@@ -1384,7 +1217,7 @@ function start(ns) {
           pos: pointerLocked ? pl.pos.toArray() : undefined,
           vel: pointerLocked ? pl.vel.toArray() : undefined,
           activeWeapon: activeWeapon,
-        }));
+          isDead: isDead, });
       }
 
       let rem = dt;
@@ -1401,11 +1234,23 @@ function start(ns) {
         }
         const rp = remotePlayers[pid];
         const m = remotePlayerMeshes[pid];
+        if (rp.predictedDeadUntil && runTime < rp.predictedDeadUntil) rp.isDead = true;
+        m.visible = !rp.isDead;
         m.position.set(rp.pos[0], rp.pos[1], rp.pos[2]);
         m.rotation.y = rp.yaw;
         m.userData.headGroup.rotation.x = rp.pitch;
         m.userData.mirrorGun.visible = (rp.activeWeapon === 1 || !rp.activeWeapon);
         m.userData.mirrorRocketGun.visible = (rp.activeWeapon === 2);
+        if (m.userData.mirrorInstagibGun) m.userData.mirrorInstagibGun.visible = (rp.activeWeapon === 3);
+        if (m.userData.muzzleT !== undefined) {
+           m.userData.muzzleT = Math.max(0, m.userData.muzzleT - dt * 6);
+           const rScale = 1 + m.userData.muzzleT * 0.08;
+           m.userData.mirrorGun.scale.setScalar(1); m.userData.mirrorRocketGun.scale.setScalar(1);
+           if (m.userData.mirrorInstagibGun) m.userData.mirrorInstagibGun.scale.setScalar(1);
+           if (rp.activeWeapon === 1 || !rp.activeWeapon) { m.userData.mirrorGun.scale.setScalar(rScale); }
+           else if (rp.activeWeapon === 2) { m.userData.mirrorRocketGun.scale.setScalar(rScale); }
+           else if (rp.activeWeapon === 3 && m.userData.mirrorInstagibGun) { m.userData.mirrorInstagibGun.scale.setScalar(rScale); }
+        } else { m.userData.muzzleT = 0; }
       }
     }
 
@@ -1416,8 +1261,12 @@ function start(ns) {
     renderPortalViews();
 
     muzzleT = Math.max(0, muzzleT - dt * 6);
-    gun.scale.setScalar(1 + muzzleT * 0.08);
-    gun.userData.core.material.emissiveIntensity = 2.2 + muzzleT * 6;
+    const scale = 1 + muzzleT * 0.08;
+    gun.scale.setScalar(1); rocketGun.scale.setScalar(1); instagibGun.scale.setScalar(1);
+    if (playerModel.userData.mirrorGun) { playerModel.userData.mirrorGun.scale.setScalar(1); playerModel.userData.mirrorRocketGun.scale.setScalar(1); if (playerModel.userData.mirrorInstagibGun) playerModel.userData.mirrorInstagibGun.scale.setScalar(1); }
+    if (activeWeapon === 1) { gun.scale.setScalar(scale); gun.userData.core.material.emissiveIntensity = 2.2 + muzzleT * 6; if (playerModel.userData.mirrorGun) playerModel.userData.mirrorGun.scale.setScalar(scale); }
+    else if (activeWeapon === 2) { rocketGun.scale.setScalar(scale); if (playerModel.userData.mirrorRocketGun) playerModel.userData.mirrorRocketGun.scale.setScalar(scale); }
+    else if (activeWeapon === 3) { instagibGun.scale.setScalar(scale); if (playerModel.userData.mirrorInstagibGun) playerModel.userData.mirrorInstagibGun.scale.setScalar(scale); }
 
     for (let i = activeBeams.length - 1; i >= 0; i--) {
       const b = activeBeams[i];
@@ -1523,6 +1372,7 @@ function start(ns) {
       if (playerModel.userData.mirrorGun) {
         playerModel.userData.mirrorGun.visible = (activeWeapon === 1);
         playerModel.userData.mirrorRocketGun.visible = (activeWeapon === 2);
+        if (playerModel.userData.mirrorInstagibGun) playerModel.userData.mirrorInstagibGun.visible = (activeWeapon === 3);
       }
 
       let closestPortal = -1, minDist = 3.5;
@@ -1578,38 +1428,7 @@ function start(ns) {
           c.vel.y -= CFG.G * dt;
           const step = c.vel.clone().multiplyScalar(dt);
           
-          // Portal Check
-          let teleported = false;
-          for (let pairIdx = 0; pairIdx < 2; pairIdx++) {
-             if (teleported) break;
-             const offset = pairIdx * 2;
-             if (portals[offset].placed && portals[offset+1].placed) {
-                const nextPos = c.pos.clone().add(step);
-                for (let idx = 0; idx < 2; idx++) {
-                   const pi = offset + idx;
-                   const P = portals[pi], Q = portals[offset + (1 - idx)];
-                   const a = (c.pos.x - P.c.x) * P.n.x + (c.pos.y - P.c.y) * P.n.y + (c.pos.z - P.c.z) * P.n.z;
-                   const b = (nextPos.x - P.c.x) * P.n.x + (nextPos.y - P.c.y) * P.n.y + (nextPos.z - P.c.z) * P.n.z;
-                   if ((a > 0) !== (b > 0)) {
-                      const t = Math.max(0, Math.min(1, a / (a - b)));
-                      const cx = c.pos.x + (nextPos.x - c.pos.x) * t;
-                      const cy = c.pos.y + (nextPos.y - c.pos.y) * t;
-                      const cz = c.pos.z + (nextPos.z - c.pos.z) * t;
-                      const du = Math.abs((cx - P.c.x) * P.r.x + (cy - P.c.y) * P.r.y + (cz - P.c.z) * P.r.z);
-                      const dv = Math.abs((cx - P.c.x) * P.u.x + (cy - P.c.y) * P.u.y + (cz - P.c.z) * P.u.z);
-                      if (du <= PORT.hw && dv <= PORT.hh) {
-                         const R = idx === 0 ? R_AB[pairIdx] : R_BA[pairIdx];
-                         c.vel.applyMatrix4(R);
-                         const rel = new V3(cx, cy, cz).sub(P.c).applyMatrix4(R);
-                         c.pos.copy(Q.c).add(rel).addScaledVector(c.vel, dt * (1 - t));
-                         teleported = true;
-                         break;
-                      }
-                   }
-                }
-             }
-          }
-          
+          const teleported = physics.teleportCube(c, dt, portals, R_AB, R_BA);
           if (!teleported) {
              c.pos.add(step);
              collideCube(c, c.rad);
@@ -1648,7 +1467,7 @@ function start(ns) {
        if (!sp.mesh.visible) continue;
        
        const age = (performance.now() / 1000) - (P.openTime || 0);
-       let scl = Math.min(1.0, age / 0.3); // open quickly
+       let scl;
        // overshoot elastic bounce
        if (age < 0.5) {
            const t = age / 0.5;
@@ -1717,6 +1536,39 @@ function start(ns) {
            a.obj.rotation.x += dt;
            a.obj.rotation.y += dt;
         }
+      } else if (a.type === 'instagib_beam') {
+        a.life -= dt * 3.0;
+        if (a.life <= 0) {
+           scene.remove(a.obj);
+           a.obj.material.dispose(); a.obj.geometry.dispose();
+           animObjects.splice(i, 1);
+        } else {
+           a.obj.material.opacity = a.life;
+           const s = a.life;
+           a.obj.scale.set(s, 1, s);
+        }
+      } else if (a.type === 'gib') {
+        a.life -= dt;
+        if (a.life <= 0) {
+           scene.remove(a.obj);
+           a.obj.material.dispose(); a.obj.geometry.dispose();
+           animObjects.splice(i, 1);
+        } else {
+           a.vel.y -= 25.0 * dt; // gravity CFG.G is usually ~25
+           a.obj.position.addScaledVector(a.vel, dt);
+           
+           if (a.obj.position.y < 0.15 && a.vel.y < 0) {
+              a.obj.position.y = 0.15;
+              a.vel.y *= -0.6;
+              a.vel.x *= 0.8;
+              a.vel.z *= 0.8;
+           }
+           
+           if (a.life < 1.0) {
+              a.obj.material.transparent = true;
+              a.obj.material.opacity = a.life;
+           }
+        }
       } else if (a.type === 'debris') {
         a.life -= dt;
         if (a.life <= 0) {
@@ -1748,7 +1600,25 @@ function start(ns) {
     }
     if (beacon) { const s = 1 + 0.06 * Math.sin(now * 0.004); beacon.ring.scale.set(s, s, s); }
 
-    updateHUD(dt);
+    if (timerOn && !won) runTime += dt;
+    let mm, ss, ms, msg = '';
+    if (runTime > 0) {
+      const msTot = Math.floor(runTime * 1000);
+      mm = String(Math.floor(msTot / 60000)).padStart(2, '0');
+      ss = String(Math.floor((msTot % 60000) / 1000)).padStart(2, '0');
+      ms = String(Math.floor((msTot % 1000) / 100));
+    }
+    for (const h of hintZones) {
+       if (pl.pos.x >= h.min.x && pl.pos.x <= h.max.x && pl.pos.y >= h.min.y && pl.pos.y <= h.max.y && pl.pos.z >= h.min.z && pl.pos.z <= h.max.z) {
+          msg = h.msg;
+          break;
+       }
+    }
+    camera.updateMatrixWorld(true);
+    const aimDir = new TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+    const hit = raycast(camera.getWorldPosition(new TH.Vector3()), aimDir, 140);
+
+    updateHUD({ pl, CFG, currentSeed, portalsFired, exitPos, hit, won, mm, ss, ms, msg });
     renderer.setRenderTarget(null);
     renderer.render(scene, camera);
   }
@@ -1774,3 +1644,21 @@ function start(ns) {
   
   requestAnimationFrame(frame);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

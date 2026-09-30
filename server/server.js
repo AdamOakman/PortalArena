@@ -62,7 +62,13 @@ wss.on('connection', (ws) => {
       P.r.fromArray(data.r);
       P.u.fromArray(data.u);
       updatePair();
-    } else if (data.type === 'fire_beam' || data.type === 'fire_rocket') {
+    } else if (data.type === String.fromCharCode(116,104,114,111,119,95,99,117,98,101)) {
+      const c = gameState.grabCubes[data.idx];
+      if (c) {
+         c.pos.fromArray(data.pos);
+         c.vel.fromArray(data.vel);
+      }
+    } else if (data.type === 'fire_beam' || data.type === 'fire_rocket' || data.type === 'fire_instagib' || data.type === 'player_died') {
       data.playerId = playerId;
       const msg = JSON.stringify(data);
       wss.clients.forEach(c => {
@@ -132,6 +138,7 @@ setInterval(() => {
       if (input.pos) pl.pos.fromArray(input.pos);
       if (input.vel) pl.vel.fromArray(input.vel);
       if (input.activeWeapon !== undefined) pl.activeWeapon = input.activeWeapon;
+      if (input.isDead !== undefined) pl.isDead = input.isDead;
     }
     
     physics.physStep(
@@ -158,9 +165,12 @@ setInterval(() => {
       }
       if (!isGrabbed) {
           c.vel.y -= CFG.G * DT;
-          const step = c.vel.clone().multiplyScalar(DT);
-          c.pos.add(step);
-          physics.collideCube(c, obbs, gameState.portals, 0.75);
+          const teleported = physics.teleportCube(c, DT, gameState.portals, R_AB, R_BA);
+          if (!teleported) {
+             const step = c.vel.clone().multiplyScalar(DT);
+             c.pos.add(step);
+             physics.collideCube(c, obbs, gameState.portals, 0.75);
+          }
       }
   }
   physics.resolveCubeCollisions(gameState.grabCubes, null);
@@ -195,3 +205,4 @@ setInterval(() => {
 }, 1000 / TICK_RATE);
 
 console.log("PORTAL//FLUX Server running on ws://localhost:3001");
+

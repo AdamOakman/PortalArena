@@ -4,7 +4,7 @@ A browser portal game with Portal-style momentum physics and Warsow/Quake moveme
 
 ## Features
 
-- **Multiplayer**: Jump in with a friend! Player 1 controls Light Blue and Dark Blue portals, while Player 2 controls Orange and Red portals. You can seamlessly travel through each other's portals!
+- **Multiplayer**: Jump in with a friend! Player 1 controls Green and Dark Green portals, while Player 2 controls Light Red and Dark Red portals. You can seamlessly travel through each other's portals!
 - **Momentum through portals**: Velocity is rotated by the portal-pair transform. Fall into a floor portal, exit a wall portal - your falling speed becomes sideways speed. Speed magnitude is preserved (energy-conserving, like Portal).
 - **Portals stick to any flat face**: Floors, ceilings, vertical walls, and ramps of any angle - as long as the whole mouth fits on that one face. Shots that would clip a face edge are refused (buzz sound).
 - **Strafe-jump / circle-jump acceleration**: Quake movement model. Ground friction, ground accel capped at run speed, but *air* acceleration with a very high cap. Timing jumps and strafing builds speed far past run speed. The HUD bar goes hot/orange past run speed; FOV widens with speed.
@@ -29,12 +29,11 @@ node server/server.js
 ```
 
 ### 3. Launch the Client
-Serve the web client with the `http-server` npm package (installed with the step 1 `npm install`). Run it **from the `client/` directory** so its relative asset paths (`./main.js`) resolve:
+Serve the web client with the `http-server` npm package (installed with the step 1 `npm install`). Run it from the project root directory:
 ```bash
-cd client
 npx http-server -p 3000
 ```
-Open your browser and navigate to `http://localhost:3000`. 
+Open your browser and navigate to `http://localhost:3000/client/`. 
 To test multiplayer locally, simply open a second tab or window to the same address!
 
 ## Controls
@@ -61,3 +60,21 @@ To test multiplayer locally, simply open a second tab or window to the same addr
 - `server/` - Node.js authoritative server (`server.js`) and global state (`gamestate.js`)
 - `client/` - Web client (`index.html`) and game engine / renderer (`main.js`)
 - `shared/` - Shared logic executed by both the server and client (`physics.js`, `constants.js`, `mapgen.js`)
+
+## Development & LLM Guidelines
+
+When working on this codebase (especially when collaborating with AI assistants), the codebase heavily leverages ES Modules and decoupled logic. To avoid subtle bugs, broken imports, or accidental logic deletions during complex refactors, please adhere to the following rule:
+
+**Always run the static analyzer after making significant edits!**
+```bash
+npm run lint
+```
+
+ESLint is configured via `eslint.config.js` to strictly catch:
+- Undefined variables (`no-undef`)
+- Unused variables and useless assignments
+- Basic JavaScript syntax errors
+
+If ESLint returns any errors, you must fix them before attempting to start the client or server. Do not deploy untested code with active linter errors.
+
+
