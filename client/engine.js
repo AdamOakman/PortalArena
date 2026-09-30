@@ -11,7 +11,7 @@ export function initEngine(TH, canvas) {
   const scene = new TH.Scene();
   scene.fog = new TH.Fog(0x1c2a44, 100, 300);
 
-  const camera = new TH.PerspectiveCamera(115, innerWidth / innerHeight, 0.001, 300);
+  const camera = new TH.PerspectiveCamera(115, innerWidth / innerHeight, 0.02, 300);
   camera.layers.enable(2);
   
   const skyGroup = new TH.Group(); 
@@ -48,5 +48,8 @@ export function initEngine(TH, canvas) {
 
   return { renderer, scene, camera, skyGroup };
 }
+
+
+
 
 

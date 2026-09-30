@@ -36,19 +36,32 @@ export function initModels(TH, camera, scene) {
 
   const instagibGun = new TH.Group();
   {
-    const igBarrel = new TH.Mesh(new TH.BoxGeometry(0.04, 0.04, 0.6), new TH.MeshStandardMaterial({color: 0x333333, metalness: 0.8, roughness: 0.2}));
-    igBarrel.position.z = -0.3;
-    const igRailL = new TH.Mesh(new TH.BoxGeometry(0.02, 0.08, 0.5), new TH.MeshStandardMaterial({color: 0xaa2222}));
-    igRailL.position.set(-0.04, 0, -0.25);
-    const igRailR = new TH.Mesh(new TH.BoxGeometry(0.02, 0.08, 0.5), new TH.MeshStandardMaterial({color: 0xaa2222}));
-    igRailR.position.set(0.04, 0, -0.25);
-    const igCore = new TH.Mesh(new TH.CylinderGeometry(0.015, 0.015, 0.5, 8), new TH.MeshBasicMaterial({color: 0xff4444}));
-    igCore.rotation.x = Math.PI/2;
-    igCore.position.z = -0.25;
-    const igHandle = new TH.Mesh(new TH.BoxGeometry(0.06, 0.15, 0.1), new TH.MeshStandardMaterial({color: 0x111111}));
-    igHandle.position.set(0, -0.1, 0);
-    igHandle.rotation.x = 0.2;
-    instagibGun.add(igBarrel, igRailL, igRailR, igCore, igHandle);
+    const metalMat = new TH.MeshStandardMaterial({color: 0x222222, metalness: 0.9, roughness: 0.2});
+    const redMat = new TH.MeshStandardMaterial({color: 0xaa1111});
+    const glowMat = new TH.MeshStandardMaterial({color: 0xff0000, emissive: 0xff2222, emissiveIntensity: 4.0});
+    const body = new TH.Mesh(new TH.BoxGeometry(0.14, 0.18, 0.45), metalMat);
+    body.position.set(0, 0, 0.1);
+    const railL = new TH.Mesh(new TH.BoxGeometry(0.03, 0.08, 0.8), redMat);
+    railL.position.set(-0.06, 0.02, -0.4);
+    const railR = new TH.Mesh(new TH.BoxGeometry(0.03, 0.08, 0.8), redMat);
+    railR.position.set(0.06, 0.02, -0.4);
+    const core = new TH.Mesh(new TH.CylinderGeometry(0.03, 0.03, 0.85, 12), glowMat);
+    core.rotation.x = Math.PI / 2;
+    core.position.set(0, 0.02, -0.4);
+    const r1 = new TH.Mesh(new TH.TorusGeometry(0.06, 0.015, 8, 16), metalMat);
+    r1.position.set(0, 0.02, -0.3);
+    const r2 = r1.clone(); r2.position.set(0, 0.02, -0.5);
+    const r3 = r1.clone(); r3.position.set(0, 0.02, -0.7);
+    const scope = new TH.Mesh(new TH.CylinderGeometry(0.025, 0.03, 0.2, 8), metalMat);
+    scope.rotation.x = Math.PI / 2;
+    scope.position.set(0, 0.13, 0.05);
+    const scopeGlow = new TH.Mesh(new TH.CylinderGeometry(0.02, 0.02, 0.21, 8), glowMat);
+    scopeGlow.rotation.x = Math.PI / 2;
+    scopeGlow.position.set(0, 0.13, 0.05);
+    const handle = new TH.Mesh(new TH.BoxGeometry(0.06, 0.2, 0.12), metalMat);
+    handle.position.set(0, -0.15, 0.15);
+    handle.rotation.x = 0.25;
+    instagibGun.add(body, railL, railR, core, r1, r2, r3, scope, scopeGlow, handle);
     instagibGun.position.set(0.3, -0.26, -0.5);
     instagibGun.visible = false;
     camera.add(instagibGun);
@@ -115,6 +128,8 @@ export function initModels(TH, camera, scene) {
   [gun, rocketGun, instagibGun].forEach(g => g.traverse(c => { if (c.isMesh) c.layers.set(2); }));
   return { gun, rocketGun, instagibGun, createPlayerModel };
 }
+
+
 
 
 
