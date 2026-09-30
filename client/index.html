@@ -71,6 +71,9 @@
   .row{ display:flex; gap:12px; justify-content:center; align-items:center; margin-top:18px; font-size:13px; color:#8fb6d6; flex-wrap:wrap; }
   input[type=text]{ background:rgba(0,0,0,.4); border:1px solid rgba(46,234,255,.35); color:#eafcff;
     font-family:inherit; padding:7px 10px; width:130px; border-radius:6px; text-align:center; }
+  .row label{ display:flex; align-items:center; gap:8px; }
+  .row label.grow{ flex:1 1 200px; }
+  #ipinput{ flex:1 1 0; width:100%; min-width:0; text-align:left; }
   input[type=range]{ accent-color:#2eeaff; pointer-events:auto; }
   #winpanel h1{ color:#ffe9c8; text-shadow:0 0 26px rgba(255,180,80,.9); }
   #winstats{ font-size:15px; color:#cfe6ff; line-height:2; margin-bottom:10px; }
@@ -92,7 +95,7 @@
     <div id="speedval">0<span>u/s</span></div>
     <div id="bar"><div id="barfill"></div></div>
   </div>
-  <div id="hint">CLICK TO CAPTURE MOUSE — LMB blue portal · RMB orange portal</div>
+  <div id="hint" style="display:none"></div>
   <div id="infoline">seed <b id="seedinfo">–</b> · fov <b id="fovinf">115</b> · autohop <b id="hopinf">on</b> · sound <b id="muteinf">on</b><br>
     [ ] fov · V autohop · F fullscreen · R respawn · N new universe · M mute</div>
   <div id="flash"></div>
@@ -110,7 +113,7 @@
     </div>
     <div class="btnrow"><button id="btnstart">▶ ENTER THE CHAMBER</button></div>
     <div class="row">
-      <label>Server IP <input type="text" id="ipinput" placeholder="localhost:3000"></label>
+      <label class="grow">Server IP <input type="text" id="ipinput" placeholder="localhost:3001"></label>
       <label>Password <input type="text" id="passinput" placeholder="secret"></label>
     </div>
     <div class="row"><label>seed <input type="text" id="seedinput" placeholder="random"></label>
@@ -148,3 +151,5 @@
 <script type="module" src="./main.js"></script>
 </body>
 </html>
+
+

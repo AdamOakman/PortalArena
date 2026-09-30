@@ -388,15 +388,53 @@ export function initPhysics(TH, CFG, PORT) {
       
       const point = origin.clone().addScaledVector(dir, tmin);
       const normal = obb.ax[hitAxis].clone().multiplyScalar(-hitSign);
-      best = { point, normal, obb }; bestT = tmin;
+      best = { point, normal, obb, distance: tmin }; bestT = tmin;
     }
     return best;
+  }
+
+  function teleportCube(c, dt, portals, R_AB, R_BA) {
+    let teleported = false;
+    const step = c.vel.clone().multiplyScalar(dt);
+    for (let pairIdx = 0; pairIdx < 2; pairIdx++) {
+      if (teleported) break;
+      const offset = pairIdx * 2;
+      if (portals[offset].placed && portals[offset+1].placed) {
+        const nextPos = c.pos.clone().add(step);
+        for (let idx = 0; idx < 2; idx++) {
+          const pi = offset + idx;
+          const P = portals[pi], Q = portals[offset + (1 - idx)];
+          const a = (c.pos.x - P.c.x) * P.n.x + (c.pos.y - P.c.y) * P.n.y + (c.pos.z - P.c.z) * P.n.z;
+          const b = (nextPos.x - P.c.x) * P.n.x + (nextPos.y - P.c.y) * P.n.y + (nextPos.z - P.c.z) * P.n.z;
+          if ((a > 0) !== (b > 0)) {
+            const t = Math.max(0, Math.min(1, a / (a - b)));
+            const cx = c.pos.x + (nextPos.x - c.pos.x) * t;
+            const cy = c.pos.y + (nextPos.y - c.pos.y) * t;
+            const cz = c.pos.z + (nextPos.z - c.pos.z) * t;
+            const du = Math.abs((cx - P.c.x) * P.r.x + (cy - P.c.y) * P.r.y + (cz - P.c.z) * P.r.z);
+            const dv = Math.abs((cx - P.c.x) * P.u.x + (cy - P.c.y) * P.u.y + (cz - P.c.z) * P.u.z);
+            if (du <= PORT.hw && dv <= PORT.hh) {
+              const R = idx === 0 ? R_AB[pairIdx] : R_BA[pairIdx];
+              c.vel.applyMatrix4(R);
+              const rel = new V3(cx, cy, cz).sub(P.c).applyMatrix4(R);
+              c.pos.copy(Q.c).add(rel).addScaledVector(c.vel, dt * (1 - t));
+              teleported = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return teleported;
   }
 
   return {
     physStep,
     collideCube,
     resolveCubeCollisions,
-    raycast
+    raycast,
+    teleportCube
   };
 }
+
+

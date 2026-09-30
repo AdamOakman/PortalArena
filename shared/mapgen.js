@@ -119,8 +119,6 @@ export function generateMap(seedStr) {
       add(padX, padY + 0.25, padZ, rr(6.8, 7.5), 0.5, rr(6.8, 7.5), GANTRY);
       const rlen = 7.5, rang = Math.atan2(rr(3.6, 4.2), rlen);
       add(padX - rr(3.5, 5), Math.tan(rang) * rlen / 2, padZ + rr(-1, 1), rlen / Math.cos(rang), 0.45, rr(5.0, 6.0), RAMP, 0, rang);
-      hints.push({ min: [padX - 9, -1, padZ - 8], max: [padX + 9, padY + 6, padZ + 8],
-        msg: 'LAUNCH PAD — portal A on the corridor floor below, portal B on the orange pad overhead. Climb the ramp and leap into A: your fall speed comes back as a launch above the pad.' });
       lx = padX + rr(3.5, 5); ly = Math.min(padY + rr(4.8, 7.2), 33.9);
     } else {
       lx = nextX; ly += rr(1.05, 1.5);
@@ -138,11 +136,6 @@ export function generateMap(seedStr) {
   add(ex, ey - 0.3, ez, rr(6.6, 7.6), 0.6, rr(6.6, 7.6), GANTRY);
   add(ex, (ey - 0.6) / 2, ez, 1.2, ey - 0.6, 1.2, WALL);
   const exit = { x: ex, y: ey + 0.05, z: ez };
-  hints.push({ min: [ex - 9, ey - 8, ez - 9], max: [ex + 9, ey + 10, ez + 9],
-    msg: 'EXIT — the golden pad up ahead. Keep climbing the ledge chain; use launch pads (orange) for the big rises.' });
-
-  hints.push({ min: [x0, -1, -halfW], max: [x0 + 26, 6, halfW],
-    msg: 'CORRIDOR TEST — portals stick to walls (vertical), ceiling slabs (down-facing), ramps and the leaning colored panels at odd angles. The ledge chain climbs higher as you go.' });
 
   const pillars = [];
   for (let s = -1; s <= 1; s += 2) {
