@@ -55,6 +55,14 @@
   #matchbar .mtimer{ font-size:24px; font-weight:700; color:#eafcff; text-shadow:0 0 12px rgba(46,234,255,.6);
     min-width:132px; text-align:center; letter-spacing:.04em; }
   #matchbar .mtimer.dim{ font-size:14px; color:#9fc6e4; letter-spacing:.14em; text-shadow:none; }
+  #statsboard{ position:absolute; top:14px; left:16px; min-width:330px;
+    background:rgba(6,14,24,.55); border:1px solid rgba(46,234,255,.35); border-radius:8px; padding:10px 14px 12px; }
+  #statsboard .sbtitle{ font-size:10px; letter-spacing:.26em; color:#7fd8ef; margin-bottom:6px; }
+  #statstable{ width:100%; border-collapse:collapse; font-size:13px; color:#cfe6ff; }
+  #statstable th{ text-align:left; font-size:9px; letter-spacing:.16em; color:#5f86a5; font-weight:600; padding:0 12px 4px 0; }
+  #statstable td{ padding:3px 12px 3px 0; }
+  #statstable tr.me td{ color:#eaffff; font-weight:700; text-shadow:0 0 8px rgba(46,234,255,.5); }
+  #statsboard .sbnote{ font-size:10px; color:#5f86a5; margin-top:6px; letter-spacing:.04em; }
   #flash{ position:absolute; inset:0; background:radial-gradient(circle,#bfeaff 0%,transparent 60%); opacity:0; }
   .fadeflash{ animation:fl .45s ease-out forwards; }
   @keyframes fl{ from{opacity:.5} to{opacity:0} }
@@ -111,6 +119,14 @@
       <div class="mready" id="readyB"></div>
     </div>
   </div>
+  <div id="statsboard" class="hidden">
+    <div class="sbtitle">PLAYERS — HOLD TAB</div>
+    <table id="statstable">
+      <thead><tr><th>#</th><th>NAME</th><th>PING</th><th>ACC</th><th>SCORE</th></tr></thead>
+      <tbody id="statsbody"></tbody>
+    </table>
+    <div class="sbnote">acc = instagib beams that hit a player ÷ beams fired (this round)</div>
+  </div>
   <div id="eventlog"></div>  
   <div id="speedbox">
     <div id="speedlabel">SPEED</div>
@@ -119,7 +135,7 @@
   </div>
   <div id="hint" style="display:none"></div>
   <div id="infoline">seed <b id="seedinfo">–</b> · fov <b id="fovinf">115</b> · autohop <b id="hopinf">on</b> · sound <b id="muteinf">on</b><br>
-    [ ] fov · V autohop · F fullscreen · R ready · N new universe · M mute</div>
+    [ ] fov · V autohop · F fullscreen · R ready · N new universe · TAB stats · M mute</div>
   <div id="flash"></div>
 </div>
 
@@ -131,7 +147,7 @@
       <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold to bunnyhop</span>
       <span><b>MOUSE</b> — look · circle-jump to gain speed</span><span><b>LMB / RMB</b> — fire / action</span>
       <span><b>1 / 2</b> or <b>SCROLL</b> — change weapons</span><span><b>E</b> — grab / drop cubes</span>
-      <span><b>[ ]</b> — FOV · <b>V</b> — autohop · <b>F</b> — fullscreen</span><span><b>R</b> — ready up · <b>N</b> — new map · <b>ESC</b> — menu</span>
+      <span><b>[ ]</b> — FOV · <b>V</b> — autohop · <b>F</b> — fullscreen</span><span><b>R</b> — ready up · <b>N</b> — new map · <b>TAB</b> — stats · <b>ESC</b> — menu</span>
     </div>
     <div class="btnrow"><button id="btnstart">▶ ENTER THE CHAMBER</button></div>
     <div class="row">

@@ -21,7 +21,9 @@ export function initHUD(document) {
     readyA: dom('readyA'),
     readyB: dom('readyB'),
     aim: dom('aimring'),
-    winstats: dom('winstats')
+    winstats: dom('winstats'),
+    statsboard: dom('statsboard'),
+    statsbody: dom('statsbody')
   };
   let lastHintMsg = '';
 
@@ -48,8 +50,24 @@ export function initHUD(document) {
     }
   }
 
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let lastStatsT = -1e9;
+  function renderStats(match, statsOpen, localPid) {
+    if (!hud.statsboard) return;
+    if (!statsOpen || !match) { hud.statsboard.classList.add('hidden'); return; }
+    hud.statsboard.classList.remove('hidden');
+    const now = performance.now();
+    if (now - lastStatsT < 100) return;
+    lastStatsT = now;
+    const rows = Object.keys(match.players).map(pid => ({ pid, p: match.players[pid] }))
+      .sort((a, b) => (b.p.score - a.p.score) || (b.p.hits - a.p.hits) || String(a.p.name).localeCompare(String(b.p.name)));
+    hud.statsbody.innerHTML = rows.map((r, i) =>
+      `<tr class="${r.pid === localPid ? 'me' : ''}"><td>${i + 1}</td><td>${esc(r.p.name)}</td><td>${r.p.ping} ms</td><td>${r.p.acc}%</td><td>${r.p.score}</td></tr>`
+    ).join('');
+  }
+
   function updateHUD(state) {
-    const { pl, CFG, currentSeed, exitPos, hit, msg, match, localReady, localIndex } = state;
+    const { pl, CFG, currentSeed, exitPos, hit, msg, match, localReady, localIndex, statsOpen, localPid } = state;
     
     // Speed
     const sp = pl.vel.length();
@@ -121,6 +139,7 @@ export function initHUD(document) {
         `<span style="display:block;font-size:15px">${B ? B.name : '—'} <b style="font-size:20px">${B ? B.score : 0}</b> kills</span>` +
         `<span style="display:block;font-size:13px;color:#8fb6d6;margin-top:8px">rounds won ${rwA} – ${rwB} · seed <b>${currentSeed}</b></span>`;
     }
+    renderStats(match, statsOpen, localPid);
   }
 
   return { updateHUD };
