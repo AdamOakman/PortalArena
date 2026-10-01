@@ -43,8 +43,18 @@
   #eventlog{ position:absolute; right:24px; top:24px; text-align:right; font-size:13px; color:#a8d4ee; text-shadow:0 0 10px rgba(0,0,0,0.8); pointer-events:none; }
   #eventlog .event{ margin-bottom: 6px; animation: slideIn 0.3s ease-out; }
   @keyframes slideIn{ from{opacity:0; transform:translateX(20px);} to{opacity:1; transform:translateX(0);} }
-  #timerline{ position:absolute; left:24px; top:22px; font-size:13px; color:#9fc6e4; letter-spacing:.08em; }
-  #timerline .t{ font-size:20px; font-weight:700; color:#eafcff; text-shadow:0 0 10px rgba(46,234,255,.6); }
+  #matchbar{ position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    display:flex; align-items:center; gap:26px; }
+  #matchbar .mseat{ display:flex; flex-direction:column; align-items:center; width:150px; }
+  #matchbar .mname{ font-size:14px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#cfe6ff; }
+  #matchbar .mname.a{ color:#7dffb0; text-shadow:0 0 10px rgba(51,255,51,.45); }
+  #matchbar .mname.b{ color:#ff8d7d; text-shadow:0 0 10px rgba(255,51,51,.45); }
+  #matchbar .mscore{ font-size:26px; font-weight:700; color:#eafcff; text-shadow:0 0 12px rgba(46,234,255,.55); line-height:1.15; }
+  #matchbar .mready{ font-size:10px; letter-spacing:.22em; color:#5f86a5; min-height:14px; margin-top:2px; }
+  #matchbar .mready.on{ color:#7dff9e; text-shadow:0 0 8px rgba(125,255,158,.6); }
+  #matchbar .mtimer{ font-size:24px; font-weight:700; color:#eafcff; text-shadow:0 0 12px rgba(46,234,255,.6);
+    min-width:132px; text-align:center; letter-spacing:.04em; }
+  #matchbar .mtimer.dim{ font-size:14px; color:#9fc6e4; letter-spacing:.14em; text-shadow:none; }
   #flash{ position:absolute; inset:0; background:radial-gradient(circle,#bfeaff 0%,transparent 60%); opacity:0; }
   .fadeflash{ animation:fl .45s ease-out forwards; }
   @keyframes fl{ from{opacity:.5} to{opacity:0} }
@@ -88,7 +98,19 @@
 <div id="hud">
   <div id="crosshair"></div>
   <div id="aimring"></div>
-  <div id="timerline">TIME <span class="t" id="timer">00:00.0</span></div>
+  <div id="matchbar">
+    <div class="mseat">
+      <div class="mname a" id="nameA">—</div>
+      <div class="mscore" id="scoreA">0</div>
+      <div class="mready" id="readyA"></div>
+    </div>
+    <div class="mtimer dim" id="matchtimer">WAITING FOR OPPONENT</div>
+    <div class="mseat">
+      <div class="mname b" id="nameB">—</div>
+      <div class="mscore" id="scoreB">0</div>
+      <div class="mready" id="readyB"></div>
+    </div>
+  </div>
   <div id="eventlog"></div>  
   <div id="speedbox">
     <div id="speedlabel">SPEED</div>
@@ -97,7 +119,7 @@
   </div>
   <div id="hint" style="display:none"></div>
   <div id="infoline">seed <b id="seedinfo">–</b> · fov <b id="fovinf">115</b> · autohop <b id="hopinf">on</b> · sound <b id="muteinf">on</b><br>
-    [ ] fov · V autohop · F fullscreen · R respawn · N new universe · M mute</div>
+    [ ] fov · V autohop · F fullscreen · R ready · N new universe · M mute</div>
   <div id="flash"></div>
 </div>
 
@@ -109,7 +131,7 @@
       <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold to bunnyhop</span>
       <span><b>MOUSE</b> — look · circle-jump to gain speed</span><span><b>LMB / RMB</b> — fire / action</span>
       <span><b>1 / 2</b> or <b>SCROLL</b> — change weapons</span><span><b>E</b> — grab / drop cubes</span>
-      <span><b>[ ]</b> — FOV · <b>V</b> — autohop · <b>F</b> — fullscreen</span><span><b>R</b> — respawn · <b>N</b> — new map · <b>ESC</b> — menu</span>
+      <span><b>[ ]</b> — FOV · <b>V</b> — autohop · <b>F</b> — fullscreen</span><span><b>R</b> — ready up · <b>N</b> — new map · <b>ESC</b> — menu</span>
     </div>
     <div class="btnrow"><button id="btnstart">▶ ENTER THE CHAMBER</button></div>
     <div class="row">
@@ -144,8 +166,8 @@
 
 <div class="overlay hidden" id="winpanel">
   <div class="panel">
-    <h1>EXIT REACHED</h1>
-    <div class="sub">THE ENTAILMENT TRAVELS SAFELY THROUGH SPACETIME</div>
+    <h1 id="winTitle">ROUND OVER</h1>
+    <div class="sub" id="winSub">THE CHAMBER DECIDES</div>
     <div id="winstats"></div>
     <div class="btnrow"><button id="btnagain" class="warm">NEW UNIVERSE (N)</button><button id="btnsame">REPLAY THIS SEED</button></div>
   </div>

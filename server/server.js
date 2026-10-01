@@ -26,8 +26,9 @@ wss.on('connection', (ws) => {
         ws.close(1008, "Server full");
         return;
       }
-      playerId = Object.keys(gameState.players).length.toString();
-      const playerIndex = Object.keys(gameState.players).length;
+      playerId = String(nextPlayerId++);
+      const taken = new Set(Object.keys(gameState.players).map(id => gameState.players[id].playerIndex));
+      const playerIndex = taken.has(0) ? 1 : 0;
       const pName = data.name || 'Guest';
         gameState.players[playerId] = { playerIndex, name: pName,
         pos: new TH.Vector3(mapData.spawn.x, mapData.spawn.y, mapData.spawn.z),
@@ -38,11 +39,15 @@ wss.on('connection', (ws) => {
         inputBuffer: []
       };
       
+      // Warmup starts the moment a second player is connected (before the init snapshot)
+      if (Object.keys(gameState.players).length === 2 && match.phase !== 'warmup' && match.phase !== 'active') beginWarmup();
+
       ws.send(JSON.stringify({
         type: 'init',
         playerId,
         playerIndex,
-        seed: seedStr
+        seed: seedStr,
+        match: matchInfo()
       }));
 
       const evtMsg = JSON.stringify({ type: 'player_connected', name: pName });
@@ -65,6 +70,15 @@ wss.on('connection', (ws) => {
          p.grabbedCubeIdx = -1;
       }
 
+    } else if (data.type === 'ready') {
+      const p = gameState.players[playerId];
+      if (p && (match.phase === 'warmup' || match.phase === 'waiting')) {
+        match.ready[playerId] = !!data.ready;
+        if (match.phase === 'warmup') {
+          const pids = Object.keys(gameState.players);
+          if (pids.length === 2 && pids.every(id => match.ready[id])) beginRound();
+        }
+      }
     } else if (data.type === 'portal_place') {
       const P = gameState.portals[data.pi];
       P.placed = true;
@@ -97,6 +111,9 @@ wss.on('connection', (ws) => {
       const pl = gameState.players[playerId];
       if (pl && !pl.isDead) {
         pl.isDead = true;
+        if (match.phase === 'active' && data.killerId && data.killerId !== playerId && gameState.players[data.killerId]) {
+          match.scores[data.killerId] = (match.scores[data.killerId] || 0) + 1;
+        }
         data.playerId = playerId;
         const msg = JSON.stringify(data);
         wss.clients.forEach(c => {
@@ -114,6 +131,9 @@ wss.on('connection', (ws) => {
     } else if (data.type === 'new_map') {
       updateMap(data.seed);
       updatePair();
+      // New map (re)starts the duel cycle
+      if (Object.keys(gameState.players).length === 2) beginWarmup();
+      else matchToWaiting();
       wss.clients.forEach(c => {
         if (c.readyState === 1) {
           c.send(JSON.stringify({ type: 'map_change', seed: data.seed }));
@@ -126,6 +146,10 @@ wss.on('connection', (ws) => {
     if (playerId && gameState.players[playerId]) {
        const pName = gameState.players[playerId].name;
        delete gameState.players[playerId];
+       delete match.ready[playerId];
+       // A mid-round disconnect voids the round (scores reset, warmup restarts on next join).
+       if (match.phase === 'active' || match.phase === 'summary') matchToWaiting();
+       else if (match.phase === 'warmup') { match.phase = 'waiting'; match.deadlineTick = 0; }
        const evtMsg = JSON.stringify({ type: 'player_disconnected', name: pName });
        wss.clients.forEach(client => {
           if (client.readyState === 1) client.send(evtMsg);
@@ -157,15 +181,38 @@ function updatePair() {
     R_BA[idx] = new TH.Matrix4().copy(R_AB[idx]).transpose();
   }
 }
-const TICK_RATE = 128;
 const DT = 1 / TICK_RATE;
 
 // Provide a dummy R_AB / R_BA for teleport check (we'll implement real matrices later)
 const tpState = { nowT: 0, tpGracePortal: null, tpGraceT: -1, R_AB, R_BA };
 const events = {};
 
+function endRound() {
+  const pids = Object.keys(gameState.players);
+  let winner = null;
+  if (pids.length === 2) {
+    const a = pids[0], b = pids[1];
+    const sa = match.scores[a] || 0, sb = match.scores[b] || 0;
+    if (sa === sb) winner = 'tie';
+    else { winner = sa > sb ? a : b; match.roundWins[winner] = (match.roundWins[winner] || 0) + 1; }
+  } else if (pids.length === 1) {
+    winner = pids[0];
+    match.roundWins[winner] = (match.roundWins[winner] || 0) + 1;
+  }
+  match.winner = winner;
+  match.phase = 'summary';
+  match.deadlineTick = 0;
+  const msg = JSON.stringify({ type: 'round_over', match: matchInfo() });
+  wss.clients.forEach(c => {
+    if (c.readyState === 1) c.send(msg);
+  });
+}
+
 setInterval(() => {
   tpState.nowT = Date.now() / 1000;
+
+  if (match.phase === 'warmup' && gameState.tick >= match.deadlineTick) beginRound();
+  else if (match.phase === 'active' && gameState.tick >= match.deadlineTick) endRound();
 
   for (const pid in gameState.players) {
     const pl = gameState.players[pid];
@@ -229,6 +276,7 @@ setInterval(() => {
       placed: P.placed,
       c: P.c.toArray(), n: P.n.toArray(), r: P.r.toArray(), u: P.u.toArray()
     })),
+    match: matchInfo()
   };
   
   for (const pid in gameState.players) {

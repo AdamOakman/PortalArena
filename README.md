@@ -36,6 +36,17 @@ npx http-server -p 3000
 Open your browser and navigate to `http://localhost:3000/client/`. 
 To test multiplayer locally, simply open a second tab or window to the same address!
 
+### 4. Duel Rounds (Score System)
+
+The game is a two-player duel that runs in rounds:
+
+1. **Waiting** — a duel only exists when *both* players are connected; until then the top-center scoreboard shows `WAITING FOR OPPONENT`.
+2. **Warmup (up to 1 minute)** — both players can move and shoot freely (kills don't score). Press **R** to ready up; the moment *both* players are ready the round starts. If not, it starts automatically after 60 seconds.
+3. **Round (5 minutes)** — a countdown timer runs at the top center of the screen. Each kill (instagib beam) scores **+1** for the killer, shown next to each player's name on either side of the timer.
+4. **Summary** — when the 5 minutes elapse, a panel declares who won (most kills; equal kills = draw), showing each player's kill count and the cumulative rounds-won tally. **N** / *New Universe* or *Replay This Seed* starts the next round (new or same map) straight into warmup.
+
+If a player disconnects mid-round, the round is voided and the scores reset for the next one.
+
 ## Controls
 
 | Key | Action |
@@ -43,7 +54,7 @@ To test multiplayer locally, simply open a second tab or window to the same addr
 | Mouse | Look (click to capture pointer) |
 | WASD | Move (yaw-relative, air-strafe capable) |
 | Space | Jump - hold it and land to bunnyhop |
-| 1 / 2 | Switch weapon (Portal Gun / Rocket Launcher) |
+| 1 / 2 / 3 | Switch weapon (Portal Gun / Rocket Launcher / Instagib) |
 | LMB / RMB | Fire Portal 1 / Portal 2 (or Shoot Rocket) |
 | E | Grab / Drop physics cube |
 | Shift | Walk (precise positioning) |
@@ -51,7 +62,7 @@ To test multiplayer locally, simply open a second tab or window to the same addr
 | F | Fullscreen |
 | ESC | Pause Menu |
 | [ ] | FOV +5 (starts at 115) |
-| R | Respawn |
+| R | Ready up (warmup phase) |
 | N | New map |
 | M | Mute |
 
