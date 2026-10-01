@@ -1,14 +1,15 @@
 import { WebSocketServer } from 'ws';
 import * as TH from 'three';
-import { CFG, PORT } from '../shared/constants.js';
+import { CFG, PORT, TICK_RATE } from '../shared/constants.js';
 import { initPhysics } from '../shared/physics.js';
-import { generateMap } from '../shared/mapgen.js';
+
 
 const wss = new WebSocketServer({ port: 3001 });
 const physics = initPhysics(TH, CFG, PORT);
 
 const SERVER_PASSWORD = "secret";
-import { seedStr, mapData, gameState, obbs, updateMap } from './gamestate.js';
+import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, beginRound, matchToWaiting, matchInfo } from './gamestate.js';
+let nextPlayerId = 0;
 
 wss.on('connection', (ws) => {
   let playerId = null;
@@ -86,12 +87,30 @@ wss.on('connection', (ws) => {
          c.pos.fromArray(data.pos);
          c.vel.fromArray(data.vel);
       }
-    } else if (data.type === 'fire_beam' || data.type === 'fire_rocket' || data.type === 'fire_instagib' || data.type === 'player_died') {
+    } else if (data.type === 'fire_beam' || data.type === 'fire_rocket' || data.type === 'fire_instagib') {
       data.playerId = playerId;
       const msg = JSON.stringify(data);
       wss.clients.forEach(c => {
         if (c !== ws && c.readyState === 1) c.send(msg);
       });
+    } else if (data.type === 'player_died') {
+      const pl = gameState.players[playerId];
+      if (pl && !pl.isDead) {
+        pl.isDead = true;
+        data.playerId = playerId;
+        const msg = JSON.stringify(data);
+        wss.clients.forEach(c => {
+          if (c !== ws && c.readyState === 1) c.send(msg);
+        });
+        setTimeout(() => {
+          if (pl.isDead) {
+            pl.isDead = false;
+            pl.pos.set(mapData.spawn.x, mapData.spawn.y, mapData.spawn.z);
+            pl.vel.set(0, 0, 0);
+            ws.send(JSON.stringify({ type: 'respawn', pos: pl.pos.toArray() }));
+          }
+        }, 3000);
+      }
     } else if (data.type === 'new_map') {
       updateMap(data.seed);
       updatePair();
@@ -160,10 +179,10 @@ setInterval(() => {
       if (input.keys) lastKeys = input.keys;
       if (input.autohop !== undefined) autohop = input.autohop;
       if (input.jumpBuf !== undefined) pl.jumpBuf = input.jumpBuf;
-      if (input.pos) pl.pos.fromArray(input.pos);
-      if (input.vel) pl.vel.fromArray(input.vel);
+      if (!pl.isDead && input.pos) pl.pos.fromArray(input.pos);
+      if (!pl.isDead && input.vel) pl.vel.fromArray(input.vel);
       if (input.activeWeapon !== undefined) pl.activeWeapon = input.activeWeapon;
-      if (input.isDead !== undefined) pl.isDead = input.isDead;
+      if (input.crouchT !== undefined) pl.crouchT = input.crouchT;
     }
     
     physics.physStep(
@@ -219,7 +238,9 @@ setInterval(() => {
       vel: p.vel.toArray(),
       yaw: p.yaw,
       pitch: p.pitch,
-      activeWeapon: p.activeWeapon || 1
+      activeWeapon: p.activeWeapon || 1,
+      crouchT: p.crouchT || 0,
+      isDead: !!p.isDead
     };
   }
 
@@ -231,6 +252,11 @@ setInterval(() => {
 }, 1000 / TICK_RATE);
 
 console.log("PORTAL//FLUX Server running on ws://localhost:3001");
+
+
+
+
+
 
 
 
