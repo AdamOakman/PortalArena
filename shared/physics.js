@@ -1,6 +1,5 @@
 export function initPhysics(TH, CFG, PORT) {
   const V3 = TH.Vector3;
-  const M4 = TH.Matrix4;
 
   function wishDir(keys, yaw) {
     const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
@@ -32,14 +31,19 @@ export function initPhysics(TH, CFG, PORT) {
     pl.vel.x *= f; pl.vel.z *= f;
   }
 
-  function capsuleSamples(pos) {
-    return [pos.y + CFG.R, pos.y + CFG.H * 0.5, pos.y + CFG.H - CFG.R];
+  function playerHeight(crouchT) {
+    return CFG.H - (CFG.H - CFG.CROUCH_H) * (crouchT || 0);
+  }
+
+  function capsuleSamples(pos, crouchT) {
+    const h = playerHeight(crouchT);
+    return [pos.y + CFG.R, pos.y + h * 0.5, pos.y + h - CFG.R];
   }
 
   function collide(pl, obbs, portals, grabCubes, grabbedCube, events) {
     pl.grounded = false;
     const p = pl.pos;
-    const hs = capsuleSamples(p);
+    const hs = capsuleSamples(p, pl.crouchT);
     for (const obb of obbs) {
       if ((p.x - obb.c.x) ** 2 + (p.y - obb.c.y) ** 2 + (p.z - obb.c.z) ** 2 > obb.rad * obb.rad) continue;
       for (let si = 0; si < 3; si++) {
@@ -146,7 +150,7 @@ export function initPhysics(TH, CFG, PORT) {
   function teleportCheck(pl, prevCamPos, dt, p0, p1, R_AB, R_BA, tpState, events) {
     
     if (!(p0.placed && p1.placed)) return;
-    const camPosNow = new V3(pl.pos.x, pl.pos.y + CFG.H - 0.12, pl.pos.z);
+    const camPosNow = new V3(pl.pos.x, pl.pos.y + playerHeight(pl.crouchT) - 0.12, pl.pos.z);
     for (let pi = 0; pi < 2; pi++) {
       const P = pi === 0 ? p0 : p1, Q = pi === 0 ? p1 : p0;
       if (tpState.tpGracePortal === P && tpState.nowT - tpState.tpGraceT < 0.12) continue;
@@ -172,19 +176,11 @@ export function initPhysics(TH, CFG, PORT) {
 
   function doTeleport(pl, R, P, Q, t, dt, tpState, events) {
     pl.vel.applyMatrix4(R);
-    const remDt = (1 - t) * dt;
-    const gA_rot = new V3(0, -CFG.G, 0).transformDirection(R);
-    pl.vel.addScaledVector(gA_rot, -remDt);
-    pl.vel.y -= CFG.G * remDt;
 
-    const eyeOffset = new V3(0, CFG.H - 0.12, 0);
+    const eyeOffset = new V3(0, playerHeight(pl.crouchT) - 0.12, 0);
     const camPos = new V3().addVectors(pl.pos, eyeOffset);
     const relCam = new V3().subVectors(camPos, P.c).applyMatrix4(R);
     pl.pos.copy(Q.c).add(relCam).sub(eyeOffset);
-    
-    const posErr = gA_rot.clone().multiplyScalar(-(1 - t) * dt * dt);
-    posErr.y -= CFG.G * (1 - t) * (1 - t) * dt * dt;
-    pl.pos.add(posErr);
     
     const baseQ = new TH.Quaternion().setFromEuler(new TH.Euler(pl.pitch, pl.yaw, 0, 'YXZ'));
     if (pl.viewOffset) baseQ.multiply(pl.viewOffset);
@@ -216,7 +212,8 @@ export function initPhysics(TH, CFG, PORT) {
     const wish = wishDir(keys, pl.yaw);
     applyFriction(pl, dt);
     const wantWalk = keys.ShiftLeft || keys.ShiftRight;
-    if (pl.grounded) accelerate(pl.vel, wish, CFG.GACC, wantWalk ? CFG.WALK : CFG.GMAX, dt);
+    const crouchScale = 1 - (pl.crouchT || 0) * 0.5;
+    if (pl.grounded) accelerate(pl.vel, wish, CFG.GACC, (wantWalk ? CFG.WALK : CFG.GMAX) * crouchScale, dt);
     else if (wish) {
       accelerate(pl.vel, wish, CFG.AACC, CFG.AIRCAP, dt);
       if (!keys.KeyA && !keys.KeyD && (keys.KeyW || keys.KeyS)) {
@@ -245,7 +242,8 @@ export function initPhysics(TH, CFG, PORT) {
     pl.vel.y -= CFG.G * dt;
     if (pl.vel.y < -60) pl.vel.y = -60;
 
-    const prevCamPos = new V3(pl.pos.x, pl.pos.y + CFG.H - 0.12, pl.pos.z);
+    const curH = playerHeight(pl.crouchT);
+    const prevCamPos = new V3(pl.pos.x, pl.pos.y + curH - 0.12, pl.pos.z);
     pl.pos.addScaledVector(pl.vel, dt);
     collide(pl, obbs, portals, grabCubes, grabbedCube, events);
     
@@ -327,7 +325,7 @@ export function initPhysics(TH, CFG, PORT) {
           const oy = cDia - Math.abs(dy);
           const oz = cDia - Math.abs(dz);
           
-          let nx = 0, ny = 0, nz = 0, push = 0;
+          let nx = 0, ny = 0, nz = 0, push;
           if (ox < oy && ox < oz) { nx = Math.sign(dx)||1; push = ox; }
           else if (oz < oy) { nz = Math.sign(dz)||1; push = oz; }
           else { ny = Math.sign(dy)||1; push = oy; }
@@ -446,6 +444,15 @@ export function initPhysics(TH, CFG, PORT) {
     teleportCube
   };
 }
+
+
+
+
+
+
+
+
+
 
 
 

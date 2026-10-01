@@ -1,5 +1,6 @@
 import * as TH from 'three';
 import { generateMap } from '../shared/mapgen.js';
+import { TICK_RATE, WARMUP_TIME, ROUND_TIME } from '../shared/constants.js';
 
 export let seedStr = String(Math.floor(Math.random() * 1e9));
 export let mapData = generateMap(seedStr);
@@ -21,6 +22,60 @@ export const gameState = {
 };
 
 export let obbs = buildObbs(mapData);
+// ---------------------------------------------------------------- match / round state
+// Phases: waiting (0-1 players) -> warmup (both connected, <= WARMUP_TIME)
+//        -> active (ROUND_TIME duel) -> summary (winner shown) -> warmup (rematch)
+export const match = {
+  phase: 'waiting',
+  deadlineTick: 0,       // tick at which the current timed phase ends
+  ready: {},             // { [pid]: bool }
+  scores: {},            // { [pid]: kills in the current round }
+  roundWins: {},         // { [pid]: cumulative round wins across rematches }
+  winner: null           // pid of the round winner, or 'tie'
+};
+
+export function beginWarmup() {
+  match.phase = 'warmup';
+  match.deadlineTick = gameState.tick + WARMUP_TIME * TICK_RATE;
+  match.scores = {};
+  match.winner = null;
+  for (const pid of Object.keys(match.ready)) {
+    if (!(pid in gameState.players)) delete match.ready[pid];
+  }
+}
+
+export function beginRound() {
+  match.phase = 'active';
+  match.deadlineTick = gameState.tick + ROUND_TIME * TICK_RATE;
+}
+
+export function matchToWaiting() {
+  match.phase = 'waiting';
+  match.deadlineTick = 0;
+  match.scores = {};
+  match.winner = null;
+}
+
+export function matchInfo() {
+  const players = {};
+  for (const pid in gameState.players) {
+    players[pid] = {
+      index: gameState.players[pid].playerIndex,
+      name: gameState.players[pid].name,
+      ready: !!match.ready[pid],
+      score: match.scores[pid] || 0
+    };
+  }
+  const tickLeft = (match.phase === 'warmup' || match.phase === 'active') ? match.deadlineTick - gameState.tick : 0;
+  return {
+    phase: match.phase,
+    timeLeft: Math.max(0, tickLeft / TICK_RATE),
+    players,
+    winner: match.winner,
+    roundWins: Object.assign({}, match.roundWins)
+  };
+}
+
 
 function buildObbs(map) {
   return map.slabs.map(s => {

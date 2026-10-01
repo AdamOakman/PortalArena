@@ -150,7 +150,7 @@ function start(ns) {
      ======================================================================= */
 
 
-  const pl = { pos: new V3(), vel: new V3(), yaw: 0, pitch: 0, viewOffset: null, grounded: false, groundNormal: new V3(0, 1, 0), groundT: -1, jumpBuf: -1, cp: new V3(), maxSpeed: 0 };
+  const pl = { pos: new V3(), vel: new V3(), yaw: 0, pitch: 0, viewOffset: null, grounded: false, groundNormal: new V3(0, 1, 0), groundT: -1, jumpBuf: -1, cp: new V3(), maxSpeed: 0, crouchT: 0 };
 
   let activeWeapon = 1; // 1 = Portal Gun, 2 = Rocket Launcher, 3 = Instagib
   let isZooming = false;
@@ -248,7 +248,7 @@ function start(ns) {
     }
     if (e.target.tagName === 'INPUT') return;
     const c = e.code;
-    if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) e.preventDefault();
+    if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'ControlLeft', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) e.preventDefault();
     keys[c] = true;
     if (!started || isDead) return;
     if (c === 'Digit1') { activeWeapon = 1; gun.visible = true; rocketGun.visible = false; instagibGun.visible = false; }
@@ -408,7 +408,17 @@ function start(ns) {
         }
       } else if (data.type === 'player_died') {
         const pos = new V3(...data.pos);
-        spawnDeathAnimation(pos);
+        spawnDeathAnimation(pos, data.color);
+      } else if (data.type === 'respawn') {
+        isDead = false;
+        playerModel.visible = true;
+        if (activeWeapon === 1) gun.visible = true;
+        if (activeWeapon === 2) rocketGun.visible = true;
+        if (activeWeapon === 3) instagibGun.visible = true;
+        pl.pos.fromArray(data.pos);
+        pl.vel.set(0, 0, 0);
+        pl.yaw = -Math.PI / 2; pl.pitch = 0; pl.viewOffset = null;
+        AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
       }
     },
     onError: () => {},
@@ -428,10 +438,10 @@ function start(ns) {
   dom('btnstart').addEventListener('click', () => {
     const ipInput = document.getElementById('ipinput');
     const passInput = document.getElementById('passinput');
-    const ip = (ipInput && ipInput.value.trim()) ? ipInput.value.trim() : 'localhost:3001';
+    const ip = (ipInput && ipInput.value.trim()) ? ipInput.value.trim() : 'host:3001';
     const pass = (passInput && passInput.value.trim()) ? passInput.value.trim() : 'secret';
     const nameInput = document.getElementById('nameinput');
-    const actualIp = ip || 'localhost:3001';
+    const actualIp = ip || 'host:3001';
     
     lastIp = actualIp; lastPass = pass;
     lastName = (nameInput && nameInput.value.trim()) ? nameInput.value.trim() : 'Guest';
@@ -929,16 +939,27 @@ function start(ns) {
     Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()) });
   }
 
-  function spawnDeathAnimation(pos) {
+  function spawnDeathAnimation(pos, color) {
+    const gibColor = color || 0xaa0000;
     AudioSys.tone(200, 500, 0.5, 'square', 0.1);
     for (let i = 0; i < 20; i++) {
        const geo = new TH.BoxGeometry(0.2, 0.2, 0.2);
-       const mat = new TH.MeshStandardMaterial({ color: 0xaa0000 });
+       const mat = new TH.MeshStandardMaterial({ color: gibColor, transparent: true });
        const mesh = new TH.Mesh(geo, mat);
        mesh.position.copy(pos).add(new TH.Vector3((Math.random()-0.5)*0.6, Math.random()*1.5, (Math.random()-0.5)*0.6));
        scene.add(mesh);
        const vel = new TH.Vector3((Math.random()-0.5)*10, Math.random()*6+2, (Math.random()-0.5)*10);
        animObjects.push({ type: 'gib', obj: mesh, vel, life: 3.0 });
+    }
+    const sparkColor = new TH.Color(gibColor).lerp(new TH.Color(0xffffff), 0.5);
+    for (let i = 0; i < 30; i++) {
+       const geo = new TH.SphereGeometry(0.04 + Math.random() * 0.04, 4, 4);
+       const mat = new TH.MeshBasicMaterial({ color: sparkColor, transparent: true, opacity: 1.0 });
+       const mesh = new TH.Mesh(geo, mat);
+       mesh.position.copy(pos).add(new TH.Vector3((Math.random()-0.5)*0.4, Math.random()*1.2+0.3, (Math.random()-0.5)*0.4));
+       scene.add(mesh);
+       const vel = new TH.Vector3((Math.random()-0.5)*14, Math.random()*10+4, (Math.random()-0.5)*14);
+       animObjects.push({ type: 'spark', obj: mesh, vel, life: 1.5 + Math.random() });
     }
   }
 
@@ -948,8 +969,9 @@ function start(ns) {
   function die() {
      if (!started || won || isDead) return;
      isDead = true;
-     Network.send({ type: 'player_died', pos: pl.pos.toArray() });
-     spawnDeathAnimation(pl.pos);
+     const myColor = localPlayerIndex === 0 ? 0x33ff33 : 0xff3333;
+     Network.send({ type: 'player_died', pos: pl.pos.toArray(), color: myColor });
+     spawnDeathAnimation(pl.pos, myColor);
      
      gun.visible = false; rocketGun.visible = false; instagibGun.visible = false;
      playerModel.visible = false;
@@ -957,14 +979,7 @@ function start(ns) {
      deathCamPos.copy(pl.pos).add(offset);
      deathCamTarget.copy(pl.pos);
      
-     setTimeout(() => {
-        isDead = false;
-        playerModel.visible = true;
-        if (activeWeapon === 1) gun.visible = true;
-        if (activeWeapon === 2) rocketGun.visible = true;
-        if (activeWeapon === 3) instagibGun.visible = true;
-        respawn(false);
-     }, 3000);
+     // Server will send 'respawn' after 3 seconds
   }
 
   function explosion(pos, isLocal) {
@@ -1318,7 +1333,9 @@ function start(ns) {
       camera.lookAt(-20, 2, 0);
     } else if (!won) {
 
-      const activeKeys = pointerLocked ? keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false };
+      const activeKeys = pointerLocked ? keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
+      const isCrouching = activeKeys.KeyC || activeKeys.ControlLeft;
+      pl.crouchT = Math.max(0, Math.min(1, pl.crouchT + (isCrouching ? dt * 10 : -dt * 10)));
 
       if (pointerLocked) {
         if ((keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD) && !timerOn) timerOn = true;
@@ -1332,7 +1349,7 @@ function start(ns) {
           },
           yaw: pl.yaw,
           pitch: pl.pitch,
-          autohop: autohop,
+          autohop: autohop, crouch: isCrouching, crouchT: pl.crouchT,
           jumpBuf: pl.jumpBuf,
           pos: pl.pos.toArray(),
           vel: pl.vel.toArray(),
@@ -1358,7 +1375,11 @@ function start(ns) {
         m.visible = !rp.isDead;
         m.position.set(rp.pos[0], rp.pos[1], rp.pos[2]);
         m.rotation.y = rp.yaw;
+        const rpCT = rp.crouchT || 0;
+        const rpBody = m.children.find(c => c.name === 'bodyMesh');
+        if (rpBody) { rpBody.scale.y = 1 - rpCT * 0.4; rpBody.position.y = -rpCT * 0.25; }
         m.userData.headGroup.rotation.x = rp.pitch;
+        m.userData.headGroup.position.y = 1.5 - rpCT * 0.7;
         m.userData.mirrorGun.visible = (rp.activeWeapon === 1 || !rp.activeWeapon);
         m.userData.mirrorRocketGun.visible = (rp.activeWeapon === 2);
         if (m.userData.mirrorInstagibGun) m.userData.mirrorInstagibGun.visible = (rp.activeWeapon === 3);
@@ -1500,7 +1521,7 @@ function start(ns) {
         camera.quaternion.slerp(new TH.Quaternion().setFromRotationMatrix(m), Math.min(1, dt * 5));
       } else {
       camera.position.copy(pl.pos);
-      camera.position.y += CFG.H - 0.12; // pl.pos is the feet point — eyes near top of capsule
+      camera.position.y += (CFG.H - (CFG.H - CFG.CROUCH_H) * pl.crouchT) - 0.12; // pl.pos is the feet point — eyes near top of capsule
       let bob = 0;
       if (pl.grounded && sp > 1) bob = Math.sin(now * 0.012 * Math.min(2, sp / 7)) * 0.03 * Math.min(1, sp / CFG.GMAX);
       landingThump = Math.max(0, landingThump - dt * 4);
@@ -1511,8 +1532,12 @@ function start(ns) {
       
       playerModel.position.copy(pl.pos);
       playerModel.rotation.set(0, pl.yaw, 0, 'YXZ');
+      // Crouch animation: squish body, lower head
+      const cBody = playerModel.children.find(c => c.name === 'bodyMesh');
+      if (cBody) { cBody.scale.y = 1 - pl.crouchT * 0.4; cBody.position.y = -pl.crouchT * 0.25; }
       if (playerModel.userData.headGroup) {
         playerModel.userData.headGroup.rotation.x = pl.pitch;
+        playerModel.userData.headGroup.position.y = 1.5 - pl.crouchT * 0.7;
       }
       if (playerModel.userData.mirrorGun) {
         playerModel.userData.mirrorGun.visible = (activeWeapon === 1);
@@ -1728,10 +1753,28 @@ function start(ns) {
               a.vel.z *= 0.8;
            }
            
-           if (a.life < 1.0) {
-              a.obj.material.transparent = true;
-              a.obj.material.opacity = a.life;
+           if (a.life < 1.5) {
+              a.obj.material.opacity = a.life / 1.5;
+              a.obj.scale.setScalar(0.5 + (a.life / 3.0) * 0.5);
            }
+        }
+      } else if (a.type === 'spark') {
+        a.life -= dt;
+        if (a.life <= 0) {
+           scene.remove(a.obj);
+           a.obj.material.dispose(); a.obj.geometry.dispose();
+           animObjects.splice(i, 1);
+        } else {
+           a.vel.y -= 25.0 * dt;
+           a.obj.position.addScaledVector(a.vel, dt);
+           a.vel.multiplyScalar(1 - 1.5 * dt);
+           if (a.obj.position.y < 0.05 && a.vel.y < 0) {
+              a.vel.y *= -0.3;
+              a.vel.x *= 0.5;
+              a.vel.z *= 0.5;
+           }
+           a.obj.material.opacity = Math.min(1, a.life);
+           a.obj.scale.setScalar(0.5 + a.life * 0.5);
         }
       } else if (a.type === 'debris') {
         a.life -= dt;
@@ -1825,6 +1868,24 @@ function start(ns) {
   
   requestAnimationFrame(frame);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
