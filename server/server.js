@@ -10,6 +10,30 @@ const physics = initPhysics(TH, CFG, PORT);
 const SERVER_PASSWORD = "secret";
 import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, beginRound, matchToWaiting, matchInfo } from './gamestate.js';
 let nextPlayerId = 0;
+// Kill feed message pools ({v} = victim, {k} = killer)
+const KILL_MSGS = [
+  '{k} fragged {v}',
+  '{v} got fragged by {k}',
+  '{k} removed {v} from the equation'
+];
+const PORTAL_KILL_MSGS = [
+  '{k} FRAGGED {v} THROUGH THE PORTAL!',
+  '{k} yeeted {v} to the other side! (via portal)',
+  '{k} fragged {v} via portal! double points, no refunds!'
+];
+const PORTAL_SUICIDE_MSGS = [
+  '{v} fed the portal, and the portal kept the change',
+  '{v} fragged themselves via portal. bold choice',
+  '{v} found out the portal was a one-way ticket'
+];
+const VOID_MSGS = [
+  '{v} fell into the void. the void said no',
+  '{v} discovered the floor is a suggestion',
+  '{v} took the scenic route into the void'
+];
+function feedPick(pool, victim, killer) {
+  return pool[Math.floor(Math.random() * pool.length)].replace('{v}', victim).replace('{k}', killer || '');
+}
 
 wss.on('connection', (ws) => {
   let playerId = null;
@@ -125,8 +149,22 @@ wss.on('connection', (ws) => {
       const pl = gameState.players[playerId];
       if (pl && !pl.isDead) {
         pl.isDead = true;
-        if (match.phase === 'active' && data.killerId && data.killerId !== playerId && gameState.players[data.killerId]) {
-          match.scores[data.killerId] = (match.scores[data.killerId] || 0) + 1;
+        if (match.phase === 'active') {
+          const viaPortal = !!data.viaPortal;
+          const killerPid = (data.killerId && data.killerId !== playerId && gameState.players[data.killerId]) ? data.killerId : null;
+          let feedMsg = null, feedHot = false;
+          if (data.cause === 'void') {
+            match.scores[playerId] = (match.scores[playerId] || 0) - 1;
+            feedMsg = feedPick(VOID_MSGS, pl.name, null);
+          } else if (killerPid) {
+            match.scores[killerPid] = (match.scores[killerPid] || 0) + (viaPortal ? 2 : 1);
+            feedMsg = feedPick(viaPortal ? PORTAL_KILL_MSGS : KILL_MSGS, pl.name, gameState.players[killerPid].name);
+            feedHot = viaPortal;
+          } else if (viaPortal) {
+            match.scores[playerId] = (match.scores[playerId] || 0) - 2;
+            feedMsg = feedPick(PORTAL_SUICIDE_MSGS, pl.name, null);
+          }
+          if (feedMsg) { data.feedMsg = feedMsg; data.feedHot = feedHot; }
         }
         data.playerId = playerId;
         const msg = JSON.stringify(data);
