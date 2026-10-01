@@ -42,7 +42,7 @@ The game is a two-player duel that runs in rounds:
 
 1. **Waiting** — a duel only exists when *both* players are connected; until then the top-center scoreboard shows `WAITING FOR OPPONENT`.
 2. **Warmup (up to 1 minute)** — both players can move and shoot freely (kills don't score). Press **R** to ready up; the moment *both* players are ready the round starts. If not, it starts automatically after 60 seconds.
-3. **Round (5 minutes)** — a countdown timer runs at the top center of the screen. Each kill (instagib beam) scores **+1** for the killer, shown next to each player's name on either side of the timer.
+3. **Round (5 minutes)** — both players are reset to the map's starting position, then a countdown timer runs at the top center of the screen. Each kill (instagib beam) scores **+1** for the killer, shown next to each player's name on either side of the timer.
 4. **Summary** — when the 5 minutes elapse, a panel declares who won (most kills; equal kills = draw), showing each player's kill count and the cumulative rounds-won tally. **N** / *New Universe* or *Replay This Seed* starts the next round (new or same map) straight into warmup.
 
 If a player disconnects mid-round, the round is voided and the scores reset for the next one.
@@ -63,6 +63,7 @@ If a player disconnects mid-round, the round is voided and the scores reset for 
 | ESC | Pause Menu |
 | [ ] | FOV +5 (starts at 115) |
 | R | Ready up (warmup phase) |
+| Tab | Stats board — players, ping, accuracy, score (hold) |
 | N | New map |
 | M | Mute |
 

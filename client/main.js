@@ -158,7 +158,7 @@ function start(ns) {
   let lastIp = null, lastPass = null, lastName = null;
   let zoomAmt = 0;
   let autohop = true, started = false, won = false;
-  let nowT = 0, match = null, localReady = false;
+  let nowT = 0, match = null, localReady = false, statsOpen = false, nextPingT = 0, lastPingMs = 0;
   const keys = {};
   let pointerLocked = false;
   
@@ -250,6 +250,7 @@ function start(ns) {
     const c = e.code;
     if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'ControlLeft', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) e.preventDefault();
     keys[c] = true;
+    if (c === 'Tab') { e.preventDefault(); statsOpen = started; }
     if (!started || isDead) return;
     if (c === 'Digit1') { activeWeapon = 1; gun.visible = true; rocketGun.visible = false; instagibGun.visible = false; }
     if (c === 'Digit2') { activeWeapon = 2; gun.visible = false; rocketGun.visible = true; instagibGun.visible = false; }
@@ -290,7 +291,7 @@ function start(ns) {
     if (c === 'BracketLeft') setFov(baseFov - 5);
     if (c === 'BracketRight') setFov(baseFov + 5);
   });
-  document.addEventListener('keyup', e => { keys[e.code] = false; });
+  document.addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'Tab') statsOpen = false; });
 
   function toggleFullscreen() {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
@@ -439,6 +440,8 @@ function start(ns) {
         pl.vel.set(0, 0, 0);
         pl.yaw = -Math.PI / 2; pl.pitch = 0; pl.viewOffset = null;
         AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
+      } else if (data.type === 'pong') {
+        lastPingMs = Math.max(0, Math.round(performance.now() - data.t));
       } else if (data.type === 'round_over') {
         match = data.match;
         won = true;
@@ -1366,6 +1369,10 @@ function start(ns) {
     let dt = Math.min(0.05, (now - last) / 1000); last = now;
     AudioSys.listenerPos = pl.pos;
     nowT += dt;
+    if (started && isConnected && localPlayerId != null && nowT >= nextPingT) {
+      Network.send({ type: 'ping', t: performance.now(), ping: lastPingMs });
+      nextPingT = nowT + 5;
+    }
 
     if (!started) { // idle preview orbit while at menu
       const t = now * 0.00012;
@@ -1862,7 +1869,7 @@ function start(ns) {
     const aimDir = new TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
     const hit = raycast(camera.getWorldPosition(new TH.Vector3()), aimDir, 140);
 
-    updateHUD({ pl, CFG, currentSeed, exitPos, hit, msg: !isConnected ? "RECONNECTING..." : msg, match, localReady, localIndex: localPlayerIndex });
+    updateHUD({ pl, CFG, currentSeed, exitPos, hit, msg: !isConnected ? "RECONNECTING..." : msg, match, localReady, localIndex: localPlayerIndex, statsOpen, localPid: localPlayerId });
     renderer.setRenderTarget(null);
     renderer.render(scene, camera);
   }

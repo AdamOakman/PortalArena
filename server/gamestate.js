@@ -40,11 +40,22 @@ export function beginWarmup() {
   match.scores = {};
   match.winner = null;
   match.ready = {};
+  for (const id in gameState.players) { gameState.players[id].shots = 0; gameState.players[id].hits = 0; }
 }
 
 export function beginRound() {
   match.phase = 'active';
   match.deadlineTick = gameState.tick + ROUND_TIME * TICK_RATE;
+  // Round start: reset every player to the map's starting position
+  for (const id in gameState.players) {
+    const p = gameState.players[id];
+    p.pos.set(mapData.spawn.x, mapData.spawn.y, mapData.spawn.z);
+    p.vel.set(0, 0, 0);
+    p.isDead = false;
+    if (p.ws && p.ws.readyState === 1) {
+      p.ws.send(JSON.stringify({ type: 'respawn', pos: p.pos.toArray() }));
+    }
+  }
 }
 
 export function matchToWaiting() {
@@ -57,11 +68,16 @@ export function matchToWaiting() {
 export function matchInfo() {
   const players = {};
   for (const pid in gameState.players) {
+    const p = gameState.players[pid];
+    const shots = p.shots || 0, hits = p.hits || 0;
     players[pid] = {
-      index: gameState.players[pid].playerIndex,
-      name: gameState.players[pid].name,
+      index: p.playerIndex,
+      name: p.name,
       ready: !!match.ready[pid],
-      score: match.scores[pid] || 0
+      score: match.scores[pid] || 0,
+      ping: p.ping || 0,
+      shots, hits,
+      acc: shots > 0 ? Math.round((hits / shots) * 100) : 0
     };
   }
   const tickLeft = (match.phase === 'warmup' || match.phase === 'active') ? match.deadlineTick - gameState.tick : 0;

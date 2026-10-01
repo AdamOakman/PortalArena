@@ -30,13 +30,13 @@ wss.on('connection', (ws) => {
       const taken = new Set(Object.keys(gameState.players).map(id => gameState.players[id].playerIndex));
       const playerIndex = taken.has(0) ? 1 : 0;
       const pName = data.name || 'Guest';
-        gameState.players[playerId] = { playerIndex, name: pName,
+      gameState.players[playerId] = { playerIndex, name: pName, ws,
         pos: new TH.Vector3(mapData.spawn.x, mapData.spawn.y, mapData.spawn.z),
         vel: new TH.Vector3(),
         yaw: 0, pitch: 0,
         grounded: false, groundNormal: new TH.Vector3(0,1,0),
         groundT: -1, jumpBuf: -1, maxSpeed: 0,
-        inputBuffer: []
+        ping: 0, shots: 0, hits: 0, inputBuffer: []
       };
       
       // Warmup starts the moment a second player is connected (before the init snapshot)
@@ -79,6 +79,12 @@ wss.on('connection', (ws) => {
           if (pids.length === 2 && pids.every(id => match.ready[id])) beginRound();
         }
       }
+    } else if (data.type === 'ping') {
+      const p = gameState.players[playerId];
+      if (p) {
+        if (typeof data.ping === 'number') p.ping = data.ping;
+        ws.send(JSON.stringify({ type: 'pong', t: data.t }));
+      }
     } else if (data.type === 'portal_place') {
       const P = gameState.portals[data.pi];
       P.placed = true;
@@ -103,6 +109,14 @@ wss.on('connection', (ws) => {
       }
     } else if (data.type === 'fire_beam' || data.type === 'fire_rocket' || data.type === 'fire_instagib') {
       data.playerId = playerId;
+      // Accuracy: instagib is the one weapon whose hits the server can see
+      if (data.type === 'fire_instagib' && match.phase === 'active') {
+        const fp = gameState.players[playerId];
+        if (fp) {
+          fp.shots++;
+          if (data.hitPlayerId && gameState.players[data.hitPlayerId]) fp.hits++;
+        }
+      }
       const msg = JSON.stringify(data);
       wss.clients.forEach(c => {
         if (c !== ws && c.readyState === 1) c.send(msg);
