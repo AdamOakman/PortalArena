@@ -169,11 +169,11 @@ function start(ns) {
   const dom = id => document.getElementById(id);
   const startPanel = dom('startpanel'), menuPanel = dom('menupanel'), winPanel = dom('winpanel');
 
-  function addEventLog(msg) {
+  function addEventLog(msg, hot) {
     const logDiv = document.getElementById('eventlog');
     if (!logDiv) return;
     const el = document.createElement('div');
-    el.className = 'event';
+    el.className = hot ? 'event hot' : 'event';
     el.innerText = msg;
     logDiv.appendChild(el);
     while (logDiv.children.length > 5) {
@@ -425,11 +425,12 @@ function start(ns) {
         AudioSys.tone(800, 150, 0.5, 'sawtooth', 0.2);
         
         if (data.hitPlayerId === localPlayerId) {
-           die(data.playerId);
+           die(data.playerId, data.pts.length > 2);
         }
       } else if (data.type === 'player_died') {
         const pos = new V3(...data.pos);
         spawnDeathAnimation(pos, data.color);
+        if (data.feedMsg) addEventLog(data.feedMsg, data.feedHot);
       } else if (data.type === 'respawn') {
         isDead = false;
         playerModel.visible = true;
@@ -737,13 +738,6 @@ function start(ns) {
   let tpGracePortal = null, tpGraceT = -1;
   const _tpFlash = document.getElementById('flash');
 
-  // Safety fallback only (falling out of the world) — no longer bound to a key
-  function respawn() {
-    pl.pos.copy(spawnPt); pl.vel.set(0, 0, 0);
-    pl.yaw = -Math.PI / 2; pl.pitch = 0; pl.viewOffset = null;
-    AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
-  }
-
   function physStep(dt, activeKeys) {
     const k = isDead ? {} : activeKeys;
     const tpState = { nowT, tpGracePortal, tpGraceT, R_AB, R_BA };
@@ -756,7 +750,7 @@ function start(ns) {
     physics.physStep(pl, k, autohop, dt, obbs, portals, grabCubes, grabbedCube, tpState, events);
     tpGracePortal = tpState.tpGracePortal;
     tpGraceT = tpState.tpGraceT;
-    if (pl.pos.y < -40.5) respawn();
+    if (pl.pos.y < -40.5) die(null, false, 'void');
   }
 
   function collideCube(c, radius) {
@@ -945,7 +939,7 @@ function start(ns) {
             const trueHitPt = curPos.clone().addScaledVector(curDir, bestT);
             pts.push(curStart, trueHitPt);
             Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()), hitPlayerId });
-            if (hitPlayerId === localPlayerId) { die(localPlayerId); } else if (remotePlayers[hitPlayerId]) {
+            if (hitPlayerId === localPlayerId) { die(localPlayerId, true); } else if (remotePlayers[hitPlayerId]) {
                remotePlayers[hitPlayerId].isDead = true;
                remotePlayers[hitPlayerId].predictedDeadUntil = nowT + 3.0;
             }
@@ -1009,11 +1003,11 @@ function start(ns) {
   let isDead = false;
   let deathCamPos = new TH.Vector3();
   let deathCamTarget = new TH.Vector3();
-  function die(killerId) {
+  function die(killerId, viaPortal, cause) {
      if (!started || won || isDead) return;
      isDead = true;
      const myColor = localPlayerIndex === 0 ? 0x33ff33 : 0xff3333;
-     Network.send({ type: 'player_died', pos: pl.pos.toArray(), color: myColor, killerId: killerId || null });
+     Network.send({ type: 'player_died', pos: pl.pos.toArray(), color: myColor, killerId: killerId || null, viaPortal: !!viaPortal, cause: cause || null });
      spawnDeathAnimation(pl.pos, myColor);
      
      gun.visible = false; rocketGun.visible = false; instagibGun.visible = false;

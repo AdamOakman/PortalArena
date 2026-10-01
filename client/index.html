@@ -42,6 +42,7 @@
   #infoline b{ color:#cfe6ff; }
   #eventlog{ position:absolute; right:24px; top:24px; text-align:right; font-size:13px; color:#a8d4ee; text-shadow:0 0 10px rgba(0,0,0,0.8); pointer-events:none; }
   #eventlog .event{ margin-bottom: 6px; animation: slideIn 0.3s ease-out; }
+  #eventlog .event.hot{ font-weight:700; font-size:14px; color:#ffd27f; }
   @keyframes slideIn{ from{opacity:0; transform:translateX(20px);} to{opacity:1; transform:translateX(0);} }
   #matchbar{ position:absolute; top:12px; left:50%; transform:translateX(-50%);
     display:flex; align-items:center; gap:26px; }
@@ -55,14 +56,14 @@
   #matchbar .mtimer{ font-size:24px; font-weight:700; color:#eafcff; text-shadow:0 0 12px rgba(46,234,255,.6);
     min-width:132px; text-align:center; letter-spacing:.04em; }
   #matchbar .mtimer.dim{ font-size:14px; color:#9fc6e4; letter-spacing:.14em; text-shadow:none; }
-  #statsboard{ position:absolute; top:14px; left:16px; min-width:330px;
-    background:rgba(6,14,24,.55); border:1px solid rgba(46,234,255,.35); border-radius:8px; padding:10px 14px 12px; }
-  #statsboard .sbtitle{ font-size:10px; letter-spacing:.26em; color:#7fd8ef; margin-bottom:6px; }
-  #statstable{ width:100%; border-collapse:collapse; font-size:13px; color:#cfe6ff; }
-  #statstable th{ text-align:left; font-size:9px; letter-spacing:.16em; color:#5f86a5; font-weight:600; padding:0 12px 4px 0; }
-  #statstable td{ padding:3px 12px 3px 0; }
-  #statstable tr.me td{ color:#eaffff; font-weight:700; text-shadow:0 0 8px rgba(46,234,255,.5); }
-  #statsboard .sbnote{ font-size:10px; color:#5f86a5; margin-top:6px; letter-spacing:.04em; }
+  #statsboard{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    min-width:620px; background:transparent; border:none; padding:0; }
+  #statsboard .sbtitle{ text-align:center; font-size:15px; letter-spacing:.3em; color:#7fd8ef; margin-bottom:12px; text-shadow:0 0 12px rgba(0,0,0,.9); }
+  #statstable{ width:100%; border-collapse:collapse; font-size:26px; color:#eaffff; }
+  #statstable th{ text-align:center; font-size:13px; letter-spacing:.2em; color:#7fb2d8; font-weight:600; padding:0 30px 8px; text-shadow:0 0 10px rgba(0,0,0,.95); }
+  #statstable td{ text-align:center; padding:6px 30px; text-shadow:0 0 10px rgba(0,0,0,.95); }
+  #statstable tr.me td{ font-weight:700; text-shadow:0 0 14px rgba(46,234,255,.8); }
+  #statsboard .sbnote{ text-align:center; font-size:13px; color:#7fb2d8; margin-top:12px; text-shadow:0 0 10px rgba(0,0,0,.95); }
   #flash{ position:absolute; inset:0; background:radial-gradient(circle,#bfeaff 0%,transparent 60%); opacity:0; }
   .fadeflash{ animation:fl .45s ease-out forwards; }
   @keyframes fl{ from{opacity:.5} to{opacity:0} }
