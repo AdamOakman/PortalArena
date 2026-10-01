@@ -158,7 +158,7 @@ function start(ns) {
   let lastIp = null, lastPass = null, lastName = null;
   let zoomAmt = 0;
   let autohop = true, started = false, won = false;
-  let nowT = 0, runTime = 0, timerOn = false, portalsFired = 0;
+  let nowT = 0, match = null, localReady = false;
   const keys = {};
   let pointerLocked = false;
   
@@ -258,7 +258,12 @@ function start(ns) {
     
     if (c === 'KeyF') toggleFullscreen();
     if (c === String.fromCharCode(69,115,99,97,112,101)) { if (started && !won) menuPanel.classList.toggle(String.fromCharCode(104,105,100,100,101,110)); }
-    if (c === 'KeyR') respawn(false);
+    if (c === 'KeyR' && !e.repeat) {
+      if (match && (match.phase === 'warmup' || match.phase === 'waiting')) {
+        localReady = !localReady;
+        Network.send({ type: 'ready', ready: localReady });
+      }
+    }
     if (c === 'KeyN') newMap(String(Math.floor(Math.random() * 1e9)));
     if (c === 'KeyE') {
       if (grabbedCube) {
@@ -324,6 +329,13 @@ function start(ns) {
         started = true; startPanel.classList.add('hidden');
         if (currentSeed !== data.seed) loadMap(data.seed);
         isConnected = true;
+        if (data.match) {
+          match = data.match;
+          const me = match.players[localPlayerId];
+          localReady = me ? !!me.ready : false;
+          won = (match.phase === 'summary');
+          if (won) showSummary();
+        }
         if (!pointerLocked) requestLock();
       } else if (data.type === 'player_connected') {
         addEventLog(data.name + ' has just connected');
@@ -332,6 +344,14 @@ function start(ns) {
       } else if (data.type === 'map_change') {
         loadMap(data.seed);
       } else if (data.type === 'state') {
+        if (data.match) {
+          match = data.match;
+          const me = match.players[localPlayerId];
+          localReady = me ? !!me.ready : false;
+          won = (match.phase === 'summary');
+          if (won) { if (winPanel.classList.contains('hidden')) showSummary(); }
+          else if (!winPanel.classList.contains('hidden')) winPanel.classList.add('hidden');
+        }
         for (const pid in data.players) {
            if (pid === localPlayerId) {
              continue;
@@ -404,7 +424,7 @@ function start(ns) {
         AudioSys.tone(800, 150, 0.5, 'sawtooth', 0.2);
         
         if (data.hitPlayerId === localPlayerId) {
-           die();
+           die(data.playerId);
         }
       } else if (data.type === 'player_died') {
         const pos = new V3(...data.pos);
@@ -419,6 +439,10 @@ function start(ns) {
         pl.vel.set(0, 0, 0);
         pl.yaw = -Math.PI / 2; pl.pitch = 0; pl.viewOffset = null;
         AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
+      } else if (data.type === 'round_over') {
+        match = data.match;
+        won = true;
+        showSummary();
       }
     },
     onError: () => {},
@@ -458,6 +482,21 @@ function start(ns) {
     Network.send({ type: 'new_map', seed: currentSeed });
     winPanel.classList.add('hidden'); requestLock(); 
   });
+
+  function showSummary() {
+    if (!match) return;
+    let title, sub;
+    if (match.winner === 'tie') { title = 'DRAW'; sub = 'THE CHAMBER BALANCES — NO FAVOR GIVEN'; }
+    else {
+      const w = match.winner && match.players[match.winner];
+      title = (w ? w.name : 'PLAYER') + ' WINS';
+      sub = 'THE ROUND IS DECIDED';
+    }
+    const t = dom('winTitle'), s = dom('winSub');
+    if (t) t.textContent = title;
+    if (s) s.textContent = sub;
+    winPanel.classList.remove('hidden');
+  }
 
   /* =======================================================================
      PORTALS
@@ -683,7 +722,6 @@ function start(ns) {
     
     muzzleFlash(pi);
     if (!hit) { AudioSys.tone(180, 90, 0.1, 'square', 0.05); return; }
-    portalsFired++;
     tryPlace(pi, hit);
   }
 
@@ -695,6 +733,13 @@ function start(ns) {
   let landingThump = 0;
   let tpGracePortal = null, tpGraceT = -1;
   const _tpFlash = document.getElementById('flash');
+
+  // Safety fallback only (falling out of the world) — no longer bound to a key
+  function respawn() {
+    pl.pos.copy(spawnPt); pl.vel.set(0, 0, 0);
+    pl.yaw = -Math.PI / 2; pl.pitch = 0; pl.viewOffset = null;
+    AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
+  }
 
   function physStep(dt, activeKeys) {
     const k = isDead ? {} : activeKeys;
@@ -720,11 +765,6 @@ function start(ns) {
   }
 
 
-  function respawn() {
-    pl.pos.copy(spawnPt); pl.vel.set(0, 0, 0);
-    pl.yaw = -Math.PI / 2; pl.pitch = 0; pl.viewOffset = null;
-    AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
-  }
   /* =======================================================================
      MODELS (Gun & Player)
      ======================================================================= */
@@ -813,9 +853,9 @@ function start(ns) {
 
   let lastInstagibTime = -999;
   function fireInstagib() {
-    if (runTime - lastInstagibTime < 1.0) return;
+    if (nowT - lastInstagibTime < 1.0) return;
     muzzleT = 1;
-    lastInstagibTime = runTime;
+    lastInstagibTime = nowT;
     AudioSys.tone(150, 40, 0.8, 'square', 0.4);
         AudioSys.tone(800, 150, 0.5, 'sawtooth', 0.2);
     camera.updateMatrixWorld(true);
@@ -902,9 +942,9 @@ function start(ns) {
             const trueHitPt = curPos.clone().addScaledVector(curDir, bestT);
             pts.push(curStart, trueHitPt);
             Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()), hitPlayerId });
-            if (hitPlayerId === localPlayerId) { die(); } else if (remotePlayers[hitPlayerId]) {
+            if (hitPlayerId === localPlayerId) { die(localPlayerId); } else if (remotePlayers[hitPlayerId]) {
                remotePlayers[hitPlayerId].isDead = true;
-               remotePlayers[hitPlayerId].predictedDeadUntil = runTime + 3.0;
+               remotePlayers[hitPlayerId].predictedDeadUntil = nowT + 3.0;
             }
             AudioSys.tone(600, 600, 0.5, 'sine', 0.3);
             if (remotePlayerMeshes[hitPlayerId]) remotePlayerMeshes[hitPlayerId].visible = false;
@@ -966,11 +1006,11 @@ function start(ns) {
   let isDead = false;
   let deathCamPos = new TH.Vector3();
   let deathCamTarget = new TH.Vector3();
-  function die() {
+  function die(killerId) {
      if (!started || won || isDead) return;
      isDead = true;
      const myColor = localPlayerIndex === 0 ? 0x33ff33 : 0xff3333;
-     Network.send({ type: 'player_died', pos: pl.pos.toArray(), color: myColor });
+     Network.send({ type: 'player_died', pos: pl.pos.toArray(), color: myColor, killerId: killerId || null });
      spawnDeathAnimation(pl.pos, myColor);
      
      gun.visible = false; rocketGun.visible = false; instagibGun.visible = false;
@@ -1302,7 +1342,7 @@ function start(ns) {
     pl.pos.copy(spawnPt); pl.vel.set(0, 0, 0); pl.cp.copy(spawnPt);
     pl.yaw = -Math.PI / 2; // forward = +x down the course
     pl.pitch = 0; pl.viewOffset = null; pl.maxSpeed = 0; pl.grounded = false; pl.jumpBuf = -1;
-    won = false; runTime = 0; timerOn = false; portalsFired = 0; lastInstagibTime = -999; lastRocketTime = -999;
+    won = false; localReady = false; lastInstagibTime = -999; lastRocketTime = -999;
     winPanel.classList.add('hidden');
     dom('seedinfo').textContent = seedStr;
   }
@@ -1337,9 +1377,6 @@ function start(ns) {
       const isCrouching = activeKeys.KeyC || activeKeys.ControlLeft;
       pl.crouchT = Math.max(0, Math.min(1, pl.crouchT + (isCrouching ? dt * 10 : -dt * 10)));
 
-      if (pointerLocked) {
-        if ((keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD) && !timerOn) timerOn = true;
-      }
         
       if (localPlayerId != null) { Network.send({
           type: 'input',
@@ -1371,7 +1408,7 @@ function start(ns) {
         }
         const rp = remotePlayers[pid];
         const m = remotePlayerMeshes[pid];
-        if (rp.predictedDeadUntil && runTime < rp.predictedDeadUntil) rp.isDead = true;
+        if (rp.predictedDeadUntil && nowT < rp.predictedDeadUntil) rp.isDead = true;
         m.visible = !rp.isDead;
         m.position.set(rp.pos[0], rp.pos[1], rp.pos[2]);
         m.rotation.y = rp.yaw;
@@ -1807,25 +1844,25 @@ function start(ns) {
     }
     if (beacon) { const s = 1 + 0.06 * Math.sin(now * 0.004); beacon.ring.scale.set(s, s, s); }
 
-    if (timerOn && !won) runTime += dt;
-    let mm, ss, ms, msg = '';
-    if (runTime > 0) {
-      const msTot = Math.floor(runTime * 1000);
-      mm = String(Math.floor(msTot / 60000)).padStart(2, '0');
-      ss = String(Math.floor((msTot % 60000) / 1000)).padStart(2, '0');
-      ms = String(Math.floor((msTot % 1000) / 100));
+    let msg = '';
+    if (match && match.phase === 'warmup') {
+      msg = localReady ? 'READY — WAITING FOR OPPONENT' : 'PRESS R TO READY UP';
+    } else if (match && match.phase === 'waiting' && Object.keys(match.players).length < 2) {
+      msg = 'WAITING FOR OPPONENT — PRESS R WHEN READY';
     }
-    for (const h of hintZones) {
-       if (pl.pos.x >= h.min.x && pl.pos.x <= h.max.x && pl.pos.y >= h.min.y && pl.pos.y <= h.max.y && pl.pos.z >= h.min.z && pl.pos.z <= h.max.z) {
-          msg = h.msg;
-          break;
-       }
+    if (!msg) {
+      for (const h of hintZones) {
+         if (pl.pos.x >= h.min.x && pl.pos.x <= h.max.x && pl.pos.y >= h.min.y && pl.pos.y <= h.max.y && pl.pos.z >= h.min.z && pl.pos.z <= h.max.z) {
+            msg = h.msg;
+            break;
+         }
+      }
     }
     camera.updateMatrixWorld(true);
     const aimDir = new TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
     const hit = raycast(camera.getWorldPosition(new TH.Vector3()), aimDir, 140);
 
-    updateHUD({ pl, CFG, currentSeed, portalsFired, exitPos, hit, won, mm, ss, ms, msg: !isConnected ? "RECONNECTING..." : msg });
+    updateHUD({ pl, CFG, currentSeed, exitPos, hit, msg: !isConnected ? "RECONNECTING..." : msg, match, localReady, localIndex: localPlayerIndex });
     renderer.setRenderTarget(null);
     renderer.render(scene, camera);
   }

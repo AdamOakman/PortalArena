@@ -39,9 +39,7 @@ export function beginWarmup() {
   match.deadlineTick = gameState.tick + WARMUP_TIME * TICK_RATE;
   match.scores = {};
   match.winner = null;
-  for (const pid of Object.keys(match.ready)) {
-    if (!(pid in gameState.players)) delete match.ready[pid];
-  }
+  match.ready = {};
 }
 
 export function beginRound() {
