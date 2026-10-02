@@ -582,26 +582,45 @@ function start(ns) {
     });
   }
 
+  // Pre-allocated scratch objects for frameFor / updatePair (called 128×/sec from state handler)
+  const _fRef = new V3(), _fR = new V3(), _fU = new V3();
+  const _fR2 = new V3(), _fU2 = new V3();
+  const _mA = new M4(), _mAt = new M4(), _mB = new M4(), _mBnR = new V3(), _mBnN = new V3();
   function frameFor(n) {
-    const r = new V3();
-    const ref = Math.abs(n.y) > 0.98 ? new V3(0, 0, 1) : new V3(0, 1, 0);
-    r.crossVectors(ref, n).normalize();
-    if (r.lengthSq() < 1e-8) r.set(1, 0, 0);
-    const u = new V3().crossVectors(n, r);
-    return { r, u };
+    // Returns new V3 clones — only called on portal placement (infrequent), not the hot path
+    if (Math.abs(n.y) > 0.98) _fRef.set(0, 0, 1); else _fRef.set(0, 1, 0);
+    _fR.crossVectors(_fRef, n).normalize();
+    if (_fR.lengthSq() < 1e-8) _fR.set(1, 0, 0);
+    _fU.crossVectors(n, _fR);
+    return { r: _fR.clone(), u: _fU.clone() };
   }
 
-  /* pair transform matrices A->B and B->A (orthonormal rotations) */
+  /* pair transform matrices A->B and B->A (orthonormal rotations) — fully zero-allocation */
   let R_AB = [new M4(), new M4()], R_BA = [new M4(), new M4()];
   function updatePair() {
     for (let idx = 0; idx < 2; idx++) {
       const offset = idx * 2;
       if (!portals[offset] || !portals[offset+1]) continue;
-      const fA = frameFor(portals[offset].n), fB = frameFor(portals[offset+1].n);
-      const mA = new M4().makeBasis(fA.r, fA.u, portals[offset].n);
-      const mB = new M4().makeBasis(fB.r.clone().multiplyScalar(-1), fB.u, portals[offset+1].n.clone().multiplyScalar(-1));
-      R_AB[idx] = new M4().multiplyMatrices(mB, new M4().copy(mA).transpose());
-      R_BA[idx] = new M4().copy(R_AB[idx]).transpose();
+      // Inline frameFor(portals[offset].n) into _fR, _fU (scratch)
+      const nA = portals[offset].n;
+      if (Math.abs(nA.y) > 0.98) _fRef.set(0, 0, 1); else _fRef.set(0, 1, 0);
+      _fR.crossVectors(_fRef, nA).normalize();
+      if (_fR.lengthSq() < 1e-8) _fR.set(1, 0, 0);
+      _fU.crossVectors(nA, _fR);
+      // Inline frameFor(portals[offset+1].n) into _fR2, _fU2 (scratch)
+      const nB = portals[offset+1].n;
+      if (Math.abs(nB.y) > 0.98) _fRef.set(0, 0, 1); else _fRef.set(0, 1, 0);
+      _fR2.crossVectors(_fRef, nB).normalize();
+      if (_fR2.lengthSq() < 1e-8) _fR2.set(1, 0, 0);
+      _fU2.crossVectors(nB, _fR2);
+      // Build matrices in-place — no new M4(), no clone()
+      _mBnR.copy(_fR2).multiplyScalar(-1);
+      _mBnN.copy(nB).multiplyScalar(-1);
+      _mA.makeBasis(_fR, _fU, nA);
+      _mB.makeBasis(_mBnR, _fU2, _mBnN);
+      _mAt.copy(_mA).transpose();
+      R_AB[idx].multiplyMatrices(_mB, _mAt);
+      R_BA[idx].copy(R_AB[idx]).transpose();
     }
   }
 
@@ -679,6 +698,14 @@ function start(ns) {
     helixPts.push(Math.cos(ang) * r, Math.sin(ang) * r, t);
   }
   helixGeo.setAttribute('position', new TH.BufferAttribute(new Float32Array(helixPts), 3));
+
+  // --- Pre-allocated shared geometry (avoids per-event GPU buffer upload & shader compile stalls) ---
+  const _gibGeo = new TH.BoxGeometry(0.2, 0.2, 0.2);
+  // Unit-length instagib beam cylinders — scaled per beam rather than rebuilt each shot
+  const _instagibCoreGeo = (() => { const g = new TH.CylinderGeometry(0.015, 0.015, 1, 8); g.translate(0, 0.5, 0); g.rotateX(Math.PI / 2); return g; })();
+  const _instagibGlowGeo = (() => { const g = new TH.CylinderGeometry(0.08, 0.08, 1, 8); g.translate(0, 0.5, 0); g.rotateX(Math.PI / 2); return g; })();
+  // Tracks already-disposed shared materials so they aren't double-disposed
+  const _disposedMats = new WeakSet();
 
   function spawnBeam(colorHex, start, end) {
     const dist = start.distanceTo(end);
@@ -781,6 +808,24 @@ function start(ns) {
 
   const rockets = [];
   let lastRocketTime = -999;
+
+  // --- Pre-allocated smoke particle pool (avoids per-frame Mesh/Geometry/Material allocation) ---
+  const SMOKE_POOL_SIZE = 80;
+  const _smokePool = [];
+  for (let si = 0; si < SMOKE_POOL_SIZE; si++) {
+    const _smesh = new TH.Mesh(
+      new TH.BoxGeometry(0.3, 0.3, 0.3),
+      new TH.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.8 })
+    );
+    _smesh.visible = false;
+    scene.add(_smesh);
+    _smokePool.push({ mesh: _smesh, active: false });
+  }
+  function _acquireSmoke() {
+    for (const s of _smokePool) { if (!s.active) { s.active = true; s.mesh.visible = true; return s; } }
+    return null; // pool exhausted — silently skip this smoke puff
+  }
+  function _releaseSmoke(s) { s.active = false; s.mesh.visible = false; }
   function fireRocket() {
     const t = performance.now() / 1000;
     if (t - lastRocketTime < 0.5) return;
@@ -819,17 +864,16 @@ function start(ns) {
     const beamGroup = new TH.Group();
     beamGroup.position.copy(start);
     beamGroup.quaternion.setFromUnitVectors(new TH.Vector3(0, 0, 1), d.clone().normalize());
-    const coreGeo = new TH.CylinderGeometry(0.015, 0.015, len, 8);
-    coreGeo.translate(0, len / 2, 0); coreGeo.rotateX(Math.PI / 2);
+    // Reuse shared unit-length geometry, scaled to actual beam length (avoids new CylinderGeometry per shot)
     const coreMat = new TH.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 });
-    const core = new TH.Mesh(coreGeo, coreMat);
+    const core = new TH.Mesh(_instagibCoreGeo, coreMat);
+    core.scale.z = len;
     beamGroup.add(core);
-    const glowGeo = new TH.CylinderGeometry(0.08, 0.08, len, 8);
-    glowGeo.translate(0, len / 2, 0); glowGeo.rotateX(Math.PI / 2);
     const glowMat = new TH.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.6, blending: TH.AdditiveBlending, depthWrite: false });
-    const glow = new TH.Mesh(glowGeo, glowMat);
+    const glow = new TH.Mesh(_instagibGlowGeo, glowMat);
+    glow.scale.z = len;
     beamGroup.add(glow);
-    const pCount = Math.min(300, Math.floor(len * 6));
+    const pCount = Math.min(150, Math.floor(len * 3));
     const pGeo = new TH.BufferGeometry();
     const pos = new Float32Array(pCount * 3);
     const vel = [];
@@ -919,21 +963,6 @@ function start(ns) {
             }
         }
 
-        if (iter > 0 && !won && !isDead) {
-            const box = new TH.Box3();
-            box.min.copy(pl.pos).add(new TH.Vector3(-0.4, 0, -0.4));
-            box.max.copy(pl.pos).add(new TH.Vector3(0.4, CFG.H, 0.4));
-            const ray = new TH.Ray(curPos, curDir);
-            const playerHit = ray.intersectBox(box, new TH.Vector3());
-            if (playerHit) {
-               const dist = curPos.distanceTo(playerHit);
-               if (dist < hitPlayerT) {
-                   hitPlayerT = dist;
-                   hitPlayerId = localPlayerId;
-               }
-            }
-        }
-        
         if (hitPlayerId !== null) {
             bestT = hitPlayerT;
             const trueHitPt = curPos.clone().addScaledVector(curDir, bestT);
@@ -979,24 +1008,15 @@ function start(ns) {
   function spawnDeathAnimation(pos, color) {
     const gibColor = color || 0xaa0000;
     AudioSys.tone(200, 500, 0.5, 'square', 0.1);
+    // All 20 gibs share one geometry + one material — they all start at life:3.0
+    // so their opacity stays in sync each frame, making sharing safe
+    const gibMat = new TH.MeshStandardMaterial({ color: gibColor, transparent: true });
     for (let i = 0; i < 20; i++) {
-       const geo = new TH.BoxGeometry(0.2, 0.2, 0.2);
-       const mat = new TH.MeshStandardMaterial({ color: gibColor, transparent: true });
-       const mesh = new TH.Mesh(geo, mat);
+       const mesh = new TH.Mesh(_gibGeo, gibMat);
        mesh.position.copy(pos).add(new TH.Vector3((Math.random()-0.5)*0.6, Math.random()*1.5, (Math.random()-0.5)*0.6));
        scene.add(mesh);
        const vel = new TH.Vector3((Math.random()-0.5)*10, Math.random()*6+2, (Math.random()-0.5)*10);
        animObjects.push({ type: 'gib', obj: mesh, vel, life: 3.0 });
-    }
-    const sparkColor = new TH.Color(gibColor).lerp(new TH.Color(0xffffff), 0.5);
-    for (let i = 0; i < 30; i++) {
-       const geo = new TH.SphereGeometry(0.04 + Math.random() * 0.04, 4, 4);
-       const mat = new TH.MeshBasicMaterial({ color: sparkColor, transparent: true, opacity: 1.0 });
-       const mesh = new TH.Mesh(geo, mat);
-       mesh.position.copy(pos).add(new TH.Vector3((Math.random()-0.5)*0.4, Math.random()*1.2+0.3, (Math.random()-0.5)*0.4));
-       scene.add(mesh);
-       const vel = new TH.Vector3((Math.random()-0.5)*14, Math.random()*10+4, (Math.random()-0.5)*14);
-       animObjects.push({ type: 'spark', obj: mesh, vel, life: 1.5 + Math.random() });
     }
   }
 
@@ -1544,11 +1564,15 @@ function start(ns) {
       }
       r.mesh.position.copy(r.pos);
       
-      const smoke = new TH.Mesh(new TH.BoxGeometry(0.3, 0.3, 0.3), new TH.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.8 }));
-      smoke.position.copy(r.pos);
-      smoke.rotation.set(Math.random(), Math.random(), Math.random());
-      scene.add(smoke);
-      animObjects.push({ type: 'smoke', obj: smoke, life: 1.0 });
+      // Use pre-allocated smoke pool slot (avoids new Mesh+Geometry+Material every frame)
+      const _ss = _acquireSmoke();
+      if (_ss) {
+        _ss.mesh.position.copy(r.pos);
+        _ss.mesh.rotation.set(Math.random(), Math.random(), Math.random());
+        _ss.mesh.scale.setScalar(1.5);
+        _ss.mesh.material.opacity = 0.4;
+        animObjects.push({ type: 'smoke', obj: _ss.mesh, slot: _ss, life: 1.0 });
+      }
     }
 
     if (started) {
@@ -1741,8 +1765,7 @@ function start(ns) {
       } else if (a.type === 'smoke') {
         a.life -= dt * 2.5;
         if (a.life <= 0) {
-           scene.remove(a.obj);
-           a.obj.material.dispose(); a.obj.geometry.dispose();
+           _releaseSmoke(a.slot); // return to pool — no scene.remove/dispose needed
            animObjects.splice(i, 1);
         } else {
            a.obj.scale.setScalar(a.life * 1.5);
@@ -1755,8 +1778,8 @@ function start(ns) {
         a.life -= dt * 2.5;
         if (a.life <= 0) {
            scene.remove(a.obj);
-           a.core.material.dispose(); a.core.geometry.dispose();
-           a.glow.material.dispose(); a.glow.geometry.dispose();
+           a.core.material.dispose();  // geometry is shared — do NOT dispose
+           a.glow.material.dispose();  // geometry is shared — do NOT dispose
            a.points.material.dispose(); a.points.geometry.dispose();
            animObjects.splice(i, 1);
         } else {
@@ -1778,7 +1801,9 @@ function start(ns) {
         a.life -= dt;
         if (a.life <= 0) {
            scene.remove(a.obj);
-           a.obj.material.dispose(); a.obj.geometry.dispose();
+           // Material is shared across all gibs from one death — only dispose it once
+           if (!_disposedMats.has(a.obj.material)) { _disposedMats.add(a.obj.material); a.obj.material.dispose(); }
+           // _gibGeo is shared — do NOT dispose
            animObjects.splice(i, 1);
         } else {
            a.vel.y -= 25.0 * dt; // gravity CFG.G is usually ~25
@@ -1795,24 +1820,6 @@ function start(ns) {
               a.obj.material.opacity = a.life / 1.5;
               a.obj.scale.setScalar(0.5 + (a.life / 3.0) * 0.5);
            }
-        }
-      } else if (a.type === 'spark') {
-        a.life -= dt;
-        if (a.life <= 0) {
-           scene.remove(a.obj);
-           a.obj.material.dispose(); a.obj.geometry.dispose();
-           animObjects.splice(i, 1);
-        } else {
-           a.vel.y -= 25.0 * dt;
-           a.obj.position.addScaledVector(a.vel, dt);
-           a.vel.multiplyScalar(1 - 1.5 * dt);
-           if (a.obj.position.y < 0.05 && a.vel.y < 0) {
-              a.vel.y *= -0.3;
-              a.vel.x *= 0.5;
-              a.vel.z *= 0.5;
-           }
-           a.obj.material.opacity = Math.min(1, a.life);
-           a.obj.scale.setScalar(0.5 + a.life * 0.5);
         }
       } else if (a.type === 'debris') {
         a.life -= dt;
@@ -1903,7 +1910,16 @@ function start(ns) {
   placePortalVisuals();
   quads.forEach(q => q.visible = false);
   renderer.clear();
-  
+
+  // Pre-warm particle shaders — prevents GPU stall on first kill of the session
+  const _wGib = new TH.Mesh(_gibGeo, new TH.MeshStandardMaterial({ transparent: true }));
+  _wGib.position.set(0, -9999, 0); // off-screen
+  _wGib.frustumCulled = false; // must bypass CPU frustum culling, else the draw call (and shader compile) never happens
+  scene.add(_wGib);
+  renderer.render(scene, camera);
+  scene.remove(_wGib);
+  _wGib.material.dispose();
+
   requestAnimationFrame(frame);
 }
 
