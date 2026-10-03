@@ -165,19 +165,22 @@ wss.on('connection', (ws) => {
         pl.isDead = true;
         // Kill/void/lava feed and scoring apply in both warmup and active.
         // The score resets when the active round begins, so warmup is live practice.
-        if (match.phase === 'active' || match.phase === 'warmup') {
+        // In the waiting phase (no opponent yet) the feed is still shown for
+        // environmental self-kill (lava/void/portal), but nothing is scored.
+        const scoring = match.phase === 'active' || match.phase === 'warmup';
+        if (scoring || match.phase === 'waiting') {
           const viaPortal = !!data.viaPortal;
           const killerPid = (data.killerId && data.killerId !== playerId && gameState.players[data.killerId]) ? data.killerId : null;
           let feedMsg = null, feedHot = false;
           if (data.cause === 'void' || data.cause === 'lava') {
-            match.scores[playerId] = (match.scores[playerId] || 0) - 1;
+            if (scoring) match.scores[playerId] = (match.scores[playerId] || 0) - 1;
             feedMsg = feedPick(data.cause === 'lava' ? LAVA_MSGS : VOID_MSGS, pl.name, null);
           } else if (killerPid) {
             match.scores[killerPid] = (match.scores[killerPid] || 0) + (viaPortal ? 2 : 1);
             feedMsg = feedPick(viaPortal ? PORTAL_KILL_MSGS : KILL_MSGS, pl.name, gameState.players[killerPid].name);
             feedHot = viaPortal;
           } else if (viaPortal) {
-            match.scores[playerId] = (match.scores[playerId] || 0) - 2;
+            if (scoring) match.scores[playerId] = (match.scores[playerId] || 0) - 2;
             feedMsg = feedPick(PORTAL_SUICIDE_MSGS, pl.name, null);
           }
           if (feedMsg) { data.feedMsg = feedMsg; data.feedHot = feedHot; }
@@ -185,7 +188,8 @@ wss.on('connection', (ws) => {
         data.playerId = playerId;
         const msg = JSON.stringify(data);
         wss.clients.forEach(c => {
-          if (c !== ws && c.readyState === 1) c.send(msg);
+          // In the waiting phase the dying player is alone, so the feed is delivered to them too.
+          if (c.readyState === 1 && (c !== ws || match.phase === 'waiting')) c.send(msg);
         });
         setTimeout(() => {
           if (pl.isDead) {
@@ -371,7 +375,7 @@ setInterval(() => {
 
 }, 1000 / TICK_RATE);
 
-console.log("PORTAL//FLUX Server running on ws://localhost:3001");
+console.log("Portal Arena Server running on ws://localhost:3001");
 
 
 

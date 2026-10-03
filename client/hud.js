@@ -125,7 +125,7 @@ export function initHUD(document) {
       hud.winstats.innerHTML =
         `<span style="display:block;font-size:15px">${A ? A.name : '—'} <b style="font-size:20px">${A ? A.score : 0}</b> kills</span>` +
         `<span style="display:block;font-size:15px">${B ? B.name : '—'} <b style="font-size:20px">${B ? B.score : 0}</b> kills</span>` +
-        `<span style="display:block;font-size:13px;color:#8fb6d6;margin-top:8px">rounds won ${rwA} – ${rwB} · seed <b>${currentSeed}</b></span>`;
+        `<span style="display:block;font-size:13px;color:#8a7a66;margin-top:8px">rounds won ${rwA} – ${rwB} · seed <b>${currentSeed}</b></span>`;
     }
     renderStats(match, statsOpen, localPid);
   }

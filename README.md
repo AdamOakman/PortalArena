@@ -1,4 +1,4 @@
-# PORTAL//FLUX
+# Portal Arena
 
 A browser portal game with Portal-style momentum physics and Warsow/Quake movement, now with **2-player multiplayer support!** 
 
@@ -58,7 +58,6 @@ If a player disconnects mid-round, the round is voided and the scores reset for 
 | LMB / RMB | Fire Portal 1 / Portal 2 (or Shoot Rocket) |
 | E | Grab / Drop physics cube |
 | Shift | Walk (precise positioning) |
-| V | Toggle autohop (on by default) |
 | F | Fullscreen |
 | ESC | Pause Menu |
 | [ ] | FOV +5 (starts at 115) |
