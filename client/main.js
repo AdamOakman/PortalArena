@@ -1,5 +1,5 @@
 /* ============================================================================
-   PORTAL//FLUX — portal physics + Quake/Warsow movement in the browser.
+   Portal Arena — portal physics + Quake/Warsow movement in the browser.
    Files: index.html (UI shell) + game.js (this). Three.js loaded from CDN.
 
    Mechanics:
@@ -10,7 +10,7 @@
      so falling into a floor portal and exiting a wall portal flings you
      sideways at your impact speed; magnitude through the pair is preserved.
    - Movement: Quake ground friction + acceleration, air-strafe with a high
-     cap (speed can grow far past run speed), bunnyhop (hold jump / autohop V),
+     cap (speed can grow far past run speed), bunnyhop (hold jump),
      coyote time and jump buffering. Circle-jump to build big speed.
    ============================================================================ */
 
