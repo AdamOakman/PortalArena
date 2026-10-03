@@ -95,7 +95,9 @@ export function initPhysics(TH, CFG, PORT) {
         if (vn < 0) {
           const oldSpd = pl.vel.length();
           pl.vel.addScaledVector(n, -vn);
-          if (n.y > 0.1 && n.y < 0.99 && oldSpd > 5) {
+          // Slopes (8°..84° from horizontal) always preserve the player's
+          // momentum so ramps can be walked up at any speed — no running start.
+          if (n.y > 0.1 && n.y < 0.99) {
             const newSpd = pl.vel.length();
             if (newSpd > 0.001) pl.vel.multiplyScalar(oldSpd / newSpd);
           }

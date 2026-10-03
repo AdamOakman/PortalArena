@@ -11,8 +11,6 @@ export function initHUD(document) {
     speed: dom('speedval'), 
     fill: dom('barfill'), 
     hint: dom('hint'), 
-    dist: dom('exitdist'), 
-    compass: dom('compass'), 
     matchtimer: dom('matchtimer'),
     nameA: dom('nameA'),
     nameB: dom('nameB'),
@@ -67,7 +65,7 @@ export function initHUD(document) {
   }
 
   function updateHUD(state) {
-    const { pl, CFG, currentSeed, exitPos, hit, msg, match, localReady, localIndex, statsOpen, localPid } = state;
+    const { pl, CFG, currentSeed, hit, msg, match, localReady, localIndex, statsOpen, localPid } = state;
     
     // Speed
     const sp = pl.vel.length();
@@ -75,16 +73,6 @@ export function initHUD(document) {
     hud.fill.style.width = Math.min(100, (sp / 34) * 100) + '%';
     hud.fill.classList.toggle('hot', sp > CFG.GMAX + 2);
     
-    // Exit Dist & Compass
-    let d = 0, rel = 0;
-    if (exitPos) {
-      d = pl.pos.distanceTo(exitPos);
-      const dx = exitPos.x - pl.pos.x, dz = exitPos.z - pl.pos.z;
-      const ang = Math.atan2(dx, dz);
-      rel = pl.yaw - ang;
-    }
-    if (hud.dist) hud.dist.textContent = Math.round(d);
-    if (hud.compass) hud.compass.style.transform = 'rotate(' + (-rel) + 'rad)';
     
     // Match bar: names, scores, countdown, ready state
     if (match && hud.matchtimer) {
