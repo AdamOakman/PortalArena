@@ -9,7 +9,7 @@ export function initEngine(TH, canvas) {
   renderer.localClippingEnabled = true;
 
   const scene = new TH.Scene();
-  scene.fog = new TH.Fog(0x1c2a44, 100, 300);
+  scene.fog = new TH.Fog(0x211c3d, 30, 140);
 
   const camera = new TH.PerspectiveCamera(115, innerWidth / innerHeight, 0.02, 300);
   camera.layers.enable(2);
@@ -17,15 +17,15 @@ export function initEngine(TH, canvas) {
   const skyGroup = new TH.Group(); 
   scene.add(skyGroup);
 
-  /* lights */
-  scene.add(new TH.HemisphereLight(0x8fb4e8, 0x3a4a66, 1.1));
-  const sun = new TH.DirectionalLight(0xfff2dc, 1.9); 
-  sun.position.set(36, 64, 22); 
-  scene.add(sun);
-  const rimL = new TH.DirectionalLight(0x7fa8ff, 0.8); 
-  rimL.position.set(-48, 18, -34); 
+  /* lights — moonlit night over a gothic arena */
+  scene.add(new TH.HemisphereLight(0x4a4a72, 0x1c1826, 1.5));
+  const moon = new TH.DirectionalLight(0x99a2d4, 1.5);
+  moon.position.set(60, 90, -40);
+  scene.add(moon);
+  const rimL = new TH.DirectionalLight(0x4a3566, 0.7);
+  rimL.position.set(-48, 18, -34);
   scene.add(rimL);
-  scene.add(new TH.AmbientLight(0x9fb8ff, 0.35));
+  scene.add(new TH.AmbientLight(0x3a3650, 1.2));
 
   /* environment reflections (procedural) */
   try {
@@ -36,15 +36,15 @@ export function initEngine(TH, canvas) {
       const m = new TH.Mesh(g, new TH.MeshBasicMaterial({ color: col }));
       m.position.set(...pos); m.scale.set(...sc); envScene.add(m);
     };
-    addEnv(0x0a1428, [0, 0, 0], [400, 400, 400]);
-    addEnv(0x2eeaff, [-60, 90, -40], [120, 0.5, 120]);
-    addEnv(0xff9a3d, [70, 40, 60], [80, 0.5, 80]);
-    addEnv(0x8f6bff, [0, -80, 0], [200, 0.5, 200]);
+    addEnv(0x07070d, [0, 0, 0], [400, 400, 400]);
+    addEnv(0xff5a1a, [0, -40, 0], [200, 0.5, 200]);   // lava glow from below
+    addEnv(0x2a1a3a, [-80, 60, -60], [100, 0.5, 100]);  // faint moon
+    addEnv(0x111018, [80, 40, 60], [80, 0.5, 80]);
     scene.environment = pmrem.fromScene(envScene, 0.04).texture;
     pmrem.dispose();
   } catch { /* older three: skip env map */ }
 
-  scene.background = new TH.Color(0x1c2a44);
+  scene.background = new TH.Color(0x191631);
 
   return { renderer, scene, camera, skyGroup };
 }

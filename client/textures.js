@@ -15,39 +15,32 @@ export function initTextures(TH) {
     return t;
   }
 
-  function makeSlabMat(kind) {
-    const defs = {
-      plat:   { base: '#1a2f4d', line: '#3f86c4', glow: '#4df0ff', emissive: 0x2fb4dd, edge: 0x2eeaff },
-      ramp:   { base: '#2b2547', line: '#7a63b8', glow: '#c98cff', emissive: 0x9a5df0, edge: 0xb45cff },
-      wall:   { base: '#22314e', line: '#4d6ea0', glow: '#7ab4ff', emissive: 0x4a86e8, edge: 0x4a9aff },
-      gantry: { base: '#3a2b22', line: '#a0763f', glow: '#ffb45c', emissive: 0xf08c32, edge: 0xff9a3d },
-      tower:  { base: '#16304e', line: '#3f7fa8', glow: '#4df0ff', emissive: 0x28a0d8, edge: 0x6adfff },
-    };
-    const d = defs[kind] || defs.plat;
-    const tex = gridTexture(d.base, d.line, d.glow, 0.22);
-    tex.repeat.set(2.5, 2.5);
-    return { mat: new TH.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: d.emissive, emissiveIntensity: 0.85, metalness: 0.45, roughness: 0.3, envMapIntensity: 1.3 }), edge: d.edge };
-  }
-  
+  // Dark medieval gothic stone palette (brightened for legibility)
+  const defs = {
+     plat:   { base: '#4a241d', line: '#6b3328', glow: '#6a4526', emissive: 0x20100a, edge: 0x7a4438 },
+    ramp:   { base: '#443c52', line: '#615872', glow: '#715730', emissive: 0x281c0c, edge: 0x706582 },
+    wall:   { base: '#4b221c', line: '#6b3328', glow: '#5c3222', emissive: 0x1a0d06, edge: 0x7a4438 },
+  };
+
   const matCache = {};
   function getSlabMat(kind) {
     if (matCache[kind]) return matCache[kind];
-    const defs = {
-      plat:   { base: '#1a2f4d', line: '#3f86c4', glow: '#4df0ff', emissive: 0x2fb4dd, edge: 0x2eeaff },
-      ramp:   { base: '#2b2547', line: '#7a63b8', glow: '#c98cff', emissive: 0x9a5df0, edge: 0xb45cff },
-      wall:   { base: '#22314e', line: '#4d6ea0', glow: '#7ab4ff', emissive: 0x4a86e8, edge: 0x4a9aff },
-      gantry: { base: '#3a2b22', line: '#a0763f', glow: '#ffb45c', emissive: 0xf08c32, edge: 0xff9a3d },
-      tower:  { base: '#16304e', line: '#3f7fa8', glow: '#4df0ff', emissive: 0x28a0d8, edge: 0x6adfff },
-      jumppad:{ base: '#1a4d1a', line: '#3fc43f', glow: '#4dff4d', emissive: 0x2fdd2f, edge: 0x2eff2e },
-    };
+    if (kind === 'lava') {
+      const mat = new TH.MeshStandardMaterial({
+        color: 0x1a0502, emissive: 0xff3300, emissiveIntensity: 1.7,
+        metalness: 0.1, roughness: 0.4
+      });
+      matCache[kind] = { mat, edgeMat: new TH.LineBasicMaterial({ color: 0xff6a2a, transparent: true, opacity: 0.6 }) };
+      return matCache[kind];
+    }
     const d = defs[kind] || defs.plat;
-    const tex = gridTexture(d.base, d.line, d.glow, 0.22);
+    const tex = gridTexture(d.base, d.line, d.glow, 0.14);
     tex.repeat.set(2.5, 2.5);
-    const mat = new TH.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: d.emissive, emissiveIntensity: 0.85, metalness: 0.45, roughness: 0.3, envMapIntensity: 1.3 });
+    const mat = new TH.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: d.emissive, emissiveIntensity: 0.8, metalness: 0.25, roughness: 0.75 });
     const edgeMat = new TH.LineBasicMaterial({ color: d.edge, transparent: true, opacity: 0.42 });
     matCache[kind] = { mat, edgeMat };
     return matCache[kind];
   }
 
-  return { makeSlabMat, getSlabMat, gridTexture };
+  return { getSlabMat, gridTexture };
 }

@@ -8,7 +8,7 @@ const wss = new WebSocketServer({ port: 3001 });
 const physics = initPhysics(TH, CFG, PORT);
 
 const SERVER_PASSWORD = "secret";
-import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, beginRound, matchToWaiting, matchInfo } from './gamestate.js';
+ import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, beginRound, matchToWaiting, matchInfo, pickSpawn, placeAtSpawn } from './gamestate.js';
 let nextPlayerId = 0;
 // Kill feed message pools ({v} = victim, {k} = killer)
 const KILL_MSGS = [
@@ -26,11 +26,16 @@ const PORTAL_SUICIDE_MSGS = [
   '{v} fragged themselves via portal. bold choice',
   '{v} found out the portal was a one-way ticket'
 ];
-const VOID_MSGS = [
-  '{v} fell into the void. the void said no',
-  '{v} discovered the floor is a suggestion',
-  '{v} took the scenic route into the void'
-];
+ const VOID_MSGS = [
+   '{v} fell into the void. the void said no',
+   '{v} discovered the floor is a suggestion',
+   '{v} took the scenic route into the void'
+ ];
+ const LAVA_MSGS = [
+   '{v} waded into the lava. the lava did not care',
+   '{v} made friends with the lava',
+   '{v} was cremated on the spot'
+ ];
 function feedPick(pool, victim, killer) {
   return pool[Math.floor(Math.random() * pool.length)].replace('{v}', victim).replace('{k}', killer || '');
 }
@@ -50,17 +55,25 @@ wss.on('connection', (ws) => {
         ws.close(1008, "Server full");
         return;
       }
+      // First player into an empty chamber always regenerates the map; the second just joins.
+      if (Object.keys(gameState.players).length === 0) {
+        updateMap(String(Math.floor(Math.random() * 1e9)));
+      }
       playerId = String(nextPlayerId++);
       const taken = new Set(Object.keys(gameState.players).map(id => gameState.players[id].playerIndex));
       const playerIndex = taken.has(0) ? 1 : 0;
       const pName = data.name || 'Guest';
+      // Spawn: random point, never the one the opponent is standing on
+      const usedIdxs = Object.values(gameState.players).map(p => p.spawnIdx).filter(i => i != null);
+      const spawnIdx = pickSpawn(usedIdxs);
+      const spawn = mapData.spawns[spawnIdx];
       gameState.players[playerId] = { playerIndex, name: pName, ws,
-        pos: new TH.Vector3(mapData.spawn.x, mapData.spawn.y, mapData.spawn.z),
+        pos: new TH.Vector3(spawn.x, spawn.y, spawn.z),
         vel: new TH.Vector3(),
         yaw: 0, pitch: 0,
         grounded: false, groundNormal: new TH.Vector3(0,1,0),
         groundT: -1, jumpBuf: -1, maxSpeed: 0,
-        ping: 0, shots: 0, hits: 0, inputBuffer: []
+        ping: 0, shots: 0, hits: 0, inputBuffer: [], spawnIdx
       };
       
       // Warmup starts the moment a second player is connected (before the init snapshot)
@@ -71,6 +84,7 @@ wss.on('connection', (ws) => {
         playerId,
         playerIndex,
         seed: seedStr,
+        spawn: [spawn.x, spawn.y, spawn.z],
         match: matchInfo()
       }));
 
@@ -149,13 +163,15 @@ wss.on('connection', (ws) => {
       const pl = gameState.players[playerId];
       if (pl && !pl.isDead) {
         pl.isDead = true;
-        if (match.phase === 'active') {
+        // Kill/void/lava feed and scoring apply in both warmup and active.
+        // The score resets when the active round begins, so warmup is live practice.
+        if (match.phase === 'active' || match.phase === 'warmup') {
           const viaPortal = !!data.viaPortal;
           const killerPid = (data.killerId && data.killerId !== playerId && gameState.players[data.killerId]) ? data.killerId : null;
           let feedMsg = null, feedHot = false;
-          if (data.cause === 'void') {
+          if (data.cause === 'void' || data.cause === 'lava') {
             match.scores[playerId] = (match.scores[playerId] || 0) - 1;
-            feedMsg = feedPick(VOID_MSGS, pl.name, null);
+            feedMsg = feedPick(data.cause === 'lava' ? LAVA_MSGS : VOID_MSGS, pl.name, null);
           } else if (killerPid) {
             match.scores[killerPid] = (match.scores[killerPid] || 0) + (viaPortal ? 2 : 1);
             feedMsg = feedPick(viaPortal ? PORTAL_KILL_MSGS : KILL_MSGS, pl.name, gameState.players[killerPid].name);
@@ -174,8 +190,12 @@ wss.on('connection', (ws) => {
         setTimeout(() => {
           if (pl.isDead) {
             pl.isDead = false;
-            pl.pos.set(mapData.spawn.x, mapData.spawn.y, mapData.spawn.z);
-            pl.vel.set(0, 0, 0);
+            // Respawn: random one of the 2 spawn points farthest from the opponent
+            const pids = Object.keys(gameState.players);
+            const other = pids.find(id => id !== playerId && gameState.players[id] && !gameState.players[id].isDead);
+            const avoid = pids.filter(id => id !== playerId).map(id => gameState.players[id] && gameState.players[id].spawnIdx).filter(i => i != null);
+            const opp = other ? gameState.players[other] : null;
+            placeAtSpawn(pl, pickSpawn(avoid, opp ? opp.pos : null, 2));
             ws.send(JSON.stringify({ type: 'respawn', pos: pl.pos.toArray() }));
           }
         }, 3000);
@@ -201,7 +221,7 @@ wss.on('connection', (ws) => {
        delete match.ready[playerId];
        // A mid-round disconnect voids the round (scores reset, warmup restarts on next join).
        if (match.phase === 'active' || match.phase === 'summary') matchToWaiting();
-       else if (match.phase === 'warmup') { match.phase = 'waiting'; match.deadlineTick = 0; }
+      else if (match.phase === 'warmup') { match.phase = 'waiting'; match.deadlineMs = 0; }
        const evtMsg = JSON.stringify({ type: 'player_disconnected', name: pName });
        wss.clients.forEach(client => {
           if (client.readyState === 1) client.send(evtMsg);
@@ -253,7 +273,7 @@ function endRound() {
   }
   match.winner = winner;
   match.phase = 'summary';
-  match.deadlineTick = 0;
+  match.deadlineMs = 0;
   const msg = JSON.stringify({ type: 'round_over', match: matchInfo() });
   wss.clients.forEach(c => {
     if (c.readyState === 1) c.send(msg);
@@ -263,8 +283,8 @@ function endRound() {
 setInterval(() => {
   tpState.nowT = Date.now() / 1000;
 
-  if (match.phase === 'warmup' && gameState.tick >= match.deadlineTick) beginRound();
-  else if (match.phase === 'active' && gameState.tick >= match.deadlineTick) endRound();
+  if (match.phase === 'warmup' && Date.now() >= match.deadlineMs) beginRound();
+  else if (match.phase === 'active' && Date.now() >= match.deadlineMs) endRound();
 
   for (const pid in gameState.players) {
     const pl = gameState.players[pid];

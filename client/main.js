@@ -70,14 +70,15 @@ function start(ns) {
 
   /* --------------------------------------------------------------- audio */
   /* ------------------------------------------------------------- textures */
-  const { getSlabMat, gridTexture } = initTextures(TH);
+  const { getSlabMat } = initTextures(TH);
 
   /* =======================================================================
      WORLD BUILD from map data (Batched for Performance)
      ======================================================================= */
   let obbs = [];        // colliders {c:V3, he:[hx,hy,hz], ax:[X,Y,Z], rad}
-  const exitPos = new V3(), spawnPt = new V3();
-  let hintZones = [], animObjects = [], beacon = null;
+  let spawnPts = [];    // V3[] — the 6 map spawn points
+  let lavaPools = [];   // { x, z, r, y } — instant-death lava
+  let hintZones = [], animObjects = [];
 
   function clearWorld() {
     if (!worldGroup) return;
@@ -131,18 +132,78 @@ function start(ns) {
   }
 
 
-  function buildExitFx(ex) {
-    const col = 0xffc24d;
-    const ringM = new TH.Mesh(new TH.TorusGeometry(1.35, 0.09, 10, 48),
-      new TH.MeshStandardMaterial({ color: 0x222222, emissive: col, emissiveIntensity: 2.6, metalness: 0.4, roughness: 0.3 }));
-    ringM.rotation.x = Math.PI / 2; ringM.position.set(ex.x, ex.y + 0.12, ex.z);
-    worldGroup.add(ringM);
-    const ringM2 = ringM.clone(); ringM2.scale.set(0.55, 0.55, 0.55); worldGroup.add(ringM2);
-    const beamMat = new TH.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.16, blending: TH.AdditiveBlending, depthWrite: false });
-    const beam = new TH.Mesh(new TH.CylinderGeometry(0.14, 0.32, 70, 10, 1, true), beamMat);
-    beam.position.set(ex.x, ex.y + 35, ex.z); worldGroup.add(beam);
-    const pl = new TH.PointLight(col, 2.6, 14); pl.position.set(ex.x, ex.y + 1.2, ex.z); worldGroup.add(pl);
-    beacon = { ring: ringM, ring2: ringM2, beam };
+  // Gothic decorations: torches, banners, arches, obelisks, braziers, crosses, skulls.
+  // Geometry is merged per material to keep draw calls low.
+  function renderGothicDecor(map, group) {
+    const iron = new TH.MeshStandardMaterial({ color: 0x17161d, metalness: 0.75, roughness: 0.35 });
+    const stone = new TH.MeshStandardMaterial({ color: 0x2a2633, metalness: 0.05, roughness: 0.85 });
+    const flame = new TH.MeshBasicMaterial({ color: 0xff7a22 });
+    const bannerR = new TH.MeshStandardMaterial({ color: 0x4a0e18, roughness: 0.9, side: TH.DoubleSide });
+    const bannerP = new TH.MeshStandardMaterial({ color: 0x241040, roughness: 0.9, side: TH.DoubleSide });
+    const bone = new TH.MeshStandardMaterial({ color: 0xb8b0a0, roughness: 0.6 });
+    const eye = new TH.MeshStandardMaterial({ color: 0x0a0a0c, emissive: 0x220800, emissiveIntensity: 0.8 });
+
+    const ironG = [], stoneG = [], flameG = [], bannerRG = [], bannerPG = [], boneG = [], eyeG = [];
+    const put = (arr, geo, x, y, z, ry = 0) => {
+      const g = geo.clone();
+      g.applyMatrix4(new TH.Matrix4().compose(
+        new V3(x, y, z),
+        new TH.Quaternion().setFromEuler(new TH.Euler(0, ry, 0, 'YZX')),
+        new V3(1, 1, 1)));
+      arr.push(g);
+    };
+
+    let torchLights = 0;
+    for (const d of map.decor) {
+      const [x, y, z] = d.c, s = d.s || 1;
+      if (d.t === 'torch') {
+        put(ironG, new TH.BoxGeometry(0.18 * s, 1.7 * s, 0.18 * s), x, y + 0.85 * s, z);
+        const f = new TH.ConeGeometry(0.24 * s, 0.7 * s, 6); f.translate(0, 0.35 * s, 0);
+        put(flameG, f, x, y + 1.7 * s, z);
+        if (torchLights < 24 && Math.random() < 0.5) {
+          const L = new TH.PointLight(0xff6a2a, 14, 22, 2);
+          L.position.set(x, y + 2.2 * s, z); group.add(L);
+          animObjects.push({ obj: L, type: 'torchlight', phase: Math.random() * 10 });
+          torchLights++;
+        }
+      } else if (d.t === 'brazier') {
+        const bowl = new TH.CylinderGeometry(1.4 * s, 0.9 * s, 1.0 * s, 8); bowl.translate(0, 0.5 * s, 0);
+        put(stoneG, bowl, x, y, z);
+        const f = new TH.ConeGeometry(0.85 * s, 2.4 * s, 7); f.translate(0, 1.3 * s, 0);
+        const fm = new TH.Mesh(f, flame);
+        fm.position.set(x, y, z); group.add(fm);
+        animObjects.push({ obj: fm, type: 'flame', phase: Math.random() * 10 });
+        const L = new TH.PointLight(0xff6a2a, 26, 32, 2);
+        L.position.set(x, y + 2 * s, z); group.add(L);
+      } else if (d.t === 'arch') {
+        const w = 5.5;
+        put(stoneG, new TH.BoxGeometry(0.6, 4.6, 0.6), x - w / 2, y + 2.3, z, d.ry || 0);
+        put(stoneG, new TH.BoxGeometry(0.6, 4.6, 0.6), x + w / 2, y + 2.3, z, d.ry || 0);
+        put(stoneG, new TH.BoxGeometry(w + 1.2, 0.55, 0.6), x, y + 4.9, z, d.ry || 0);
+        const fin = new TH.ConeGeometry(1.0, 1.8, 4); fin.rotateY(Math.PI / 4); fin.translate(0, 0.9, 0);
+        put(stoneG, fin, x, y + 5.15, z, d.ry || 0);
+      } else if (d.t === 'banner') {
+        const arr = ((Math.round(x * 7 + z * 13) % 2) + 2) % 2 ? bannerPG : bannerRG;
+        put(arr, new TH.PlaneGeometry(1.1, 3.0), x, y, z, d.ry || 0);
+      } else if (d.t === 'obelisk') {
+        put(stoneG, new TH.BoxGeometry(1.6 * s, 9 * s, 1.6 * s), x, y + 4.5 * s, z, d.ry || 0);
+        const tip = new TH.ConeGeometry(1.15 * s, 2.2 * s, 4); tip.rotateY(Math.PI / 4); tip.translate(0, 1.1 * s, 0);
+        put(stoneG, tip, x, y + 9 * s, z, d.ry || 0);
+      } else if (d.t === 'cross') {
+        put(stoneG, new TH.BoxGeometry(0.7 * s, 5 * s, 0.7 * s), x, y + 2.5 * s, z, d.ry || 0);
+        put(stoneG, new TH.BoxGeometry(2.6 * s, 0.7 * s, 0.7 * s), x, y + 3.4 * s, z, d.ry || 0);
+      } else if (d.t === 'skull') {
+        const cr = new TH.SphereGeometry(0.55 * s, 8, 6); cr.scale(1, 0.9, 0.9); cr.translate(0, 0.5 * s, 0);
+        put(boneG, cr, x, y, z, d.ry || 0);
+        put(boneG, new TH.BoxGeometry(0.7 * s, 0.35 * s, 0.5 * s), x, y + 0.18 * s, z, d.ry || 0);
+        put(eyeG, new TH.BoxGeometry(0.22 * s, 0.18 * s, 0.12 * s), x + 0.2 * s, y + 0.55 * s, z + 0.4 * s, d.ry || 0);
+        put(eyeG, new TH.BoxGeometry(0.22 * s, 0.18 * s, 0.12 * s), x - 0.2 * s, y + 0.55 * s, z + 0.4 * s, d.ry || 0);
+      }
+    }
+    const mergeAdd = (geos, mat) => { if (geos.length) group.add(new TH.Mesh(mergeBufferGeometries(geos, true), mat)); };
+    mergeAdd(ironG, iron); mergeAdd(stoneG, stone); mergeAdd(flameG, flame);
+    mergeAdd(bannerRG, bannerR); mergeAdd(bannerPG, bannerP);
+    mergeAdd(boneG, bone); mergeAdd(eyeG, eye);
   }
 
   /* =======================================================================
@@ -329,6 +390,7 @@ function start(ns) {
         
         started = true; startPanel.classList.add('hidden');
         if (currentSeed !== data.seed) loadMap(data.seed);
+        if (data.spawn) { pl.pos.fromArray(data.spawn); pl.vel.set(0, 0, 0); pl.cp.copy(pl.pos); }
         isConnected = true;
         if (data.match) {
           match = data.match;
@@ -778,6 +840,12 @@ function start(ns) {
     tpGracePortal = tpState.tpGracePortal;
     tpGraceT = tpState.tpGraceT;
     if (pl.pos.y < -40.5) die(null, false, 'void');
+    else {
+      for (const L of lavaPools) {
+        const dx = pl.pos.x - L.x, dz = pl.pos.z - L.z;
+        if (dx * dx + dz * dz < L.r * L.r && pl.pos.y < L.y + 0.6) { die(null, false, 'lava'); break; }
+      }
+    }
   }
 
   function collideCube(c, radius) {
@@ -1256,108 +1324,56 @@ function start(ns) {
       worldGroup.add(new TH.LineSegments(mergedEdges, mats.edgeMat));
     }
     
-    const pillarGeos = [];
-    for (const p of map.pillars) {
-      const baseGeo = new TH.BoxGeometry(...p.s);
-      baseGeo.translate(...p.c);
-      pillarGeos.push(baseGeo);
-    }
-    if (pillarGeos.length > 0) {
-      const pillarTex = gridTexture('#14203a', '#2c4d78', '#4df0ff', 0.16); pillarTex.repeat.set(2, 4);
-      const matP = new TH.MeshStandardMaterial({ color: 0x1a2b48, metalness: 0.5, roughness: 0.45, map: pillarTex });
-      worldGroup.add(new TH.Mesh(mergeBufferGeometries(pillarGeos, true), matP));
-    }
-
-    const lampGeo = new TH.SphereGeometry(0.16, 10, 8);
-    let litCount = 0;
-    for (const l of map.lamps) {
-      const lm = new TH.Mesh(lampGeo, new TH.MeshStandardMaterial({ color: 0x000000, emissive: l.color, emissiveIntensity: 3.4 }));
-      lm.position.set(...l.c); worldGroup.add(lm);
-      if (litCount < 12) {
-        const pl = new TH.PointLight(l.color, 2.4, 20, 1.6);
-        pl.position.set(...l.c); worldGroup.add(pl); litCount++;
-      }
-    }
-    for (const ln of map.lanterns) {
-      const g = new TH.Group();
-      g.position.set(...ln.c);
-      const shell = new TH.Mesh(new TH.CylinderGeometry(0.5, 0.2, 1.5, 6), new TH.MeshStandardMaterial({ color: 0x111122, metalness: 0.8, roughness: 0.2 }));
-      const core = new TH.Mesh(new TH.CylinderGeometry(0.3, 0.1, 1.4, 6), new TH.MeshStandardMaterial({ color: 0x000000, emissive: ln.color, emissiveIntensity: 2.5 }));
-      g.add(shell, core);
-      const wire = new TH.Mesh(new TH.CylinderGeometry(0.05, 0.05, 20), new TH.MeshStandardMaterial({ color: 0x050505 }));
-      wire.position.y = 10.7;
-      g.add(wire);
-      worldGroup.add(g);
-      animObjects.push({ obj: g, type: 'lantern', phase: Math.random() * 10 });
-    }
-    
-    for (const h of map.holograms) {
-      const m = new TH.Mesh(
-        new TH.OctahedronGeometry(1.8, 0),
-        new TH.MeshBasicMaterial({ color: h.color, wireframe: true, transparent: true, opacity: 0.8, blending: TH.AdditiveBlending })
-      );
-      m.position.set(...h.c);
-      worldGroup.add(m);
-      animObjects.push({ obj: m, type: 'holo' });
-    }
-    
-    for (const pc of map.powerCores) {
-      const g = new TH.Group();
-      g.position.set(...pc.c);
-      const base = new TH.Mesh(new TH.BoxGeometry(2, 1, 2), new TH.MeshStandardMaterial({ color: 0x222233, metalness: 0.6, roughness: 0.5 }));
-      base.position.y = 0.5;
-      const ring1 = new TH.Mesh(new TH.TorusGeometry(0.8, 0.1, 4, 16), new TH.MeshStandardMaterial({ color: 0x000000, emissive: 0xff3300, emissiveIntensity: 2 }));
-      ring1.rotation.x = Math.PI / 2; ring1.position.y = 1.5;
-      const ring2 = new TH.Mesh(new TH.TorusGeometry(0.6, 0.08, 4, 16), new TH.MeshStandardMaterial({ color: 0x000000, emissive: 0x00aaff, emissiveIntensity: 2 }));
-      ring2.rotation.x = Math.PI / 2; ring2.position.y = 1.5;
-      g.add(base, ring1, ring2);
-      worldGroup.add(g);
-      animObjects.push({ type: 'core', ring: ring1, ring2: ring2 });
-    }
+    // --- Gothic decor (merged per material) ---
+    renderGothicDecor(map, worldGroup);
     // --- End Batched World Build ---
     
-    grabCubes.length = 0;
-    grabbedCube = null;
-    const cubeGeo = new TH.BoxGeometry(1.5, 1.5, 1.5, 4, 4, 4);
-    const cubePos = cubeGeo.attributes.position;
-    for (let i = 0; i < cubePos.count; i++) {
-        let x = cubePos.getX(i), y = cubePos.getY(i), z = cubePos.getZ(i);
-        const hw = 0.75 - 0.25; 
-        let cx = Math.max(-hw, Math.min(hw, x));
-        let cy = Math.max(-hw, Math.min(hw, y));
-        let cz = Math.max(-hw, Math.min(hw, z));
-        const dx = x - cx, dy = y - cy, dz = z - cz;
-        const len = Math.hypot(dx, dy, dz);
-        if (len > 0.001) {
-           x = cx + (dx / len) * 0.25;
-           y = cy + (dy / len) * 0.25;
-           z = cz + (dz / len) * 0.25;
-           cubePos.setXYZ(i, x, y, z);
-        }
+    if (map.grabCubes.length > 0) {
+      grabCubes.length = 0;
+      grabbedCube = null;
+      const cubeGeo = new TH.BoxGeometry(1.5, 1.5, 1.5, 4, 4, 4);
+      const cubePos = cubeGeo.attributes.position;
+      for (let i = 0; i < cubePos.count; i++) {
+          let x = cubePos.getX(i), y = cubePos.getY(i), z = cubePos.getZ(i);
+          const hw = 0.75 - 0.25; 
+          let cx = Math.max(-hw, Math.min(hw, x));
+          let cy = Math.max(-hw, Math.min(hw, y));
+          let cz = Math.max(-hw, Math.min(hw, z));
+          const dx = x - cx, dy = y - cy, dz = z - cz;
+          const len = Math.hypot(dx, dy, dz);
+          if (len > 0.001) {
+             x = cx + (dx / len) * 0.25;
+             y = cy + (dy / len) * 0.25;
+             z = cz + (dz / len) * 0.25;
+             cubePos.setXYZ(i, x, y, z);
+          }
+      }
+      cubeGeo.computeVertexNormals();
+      const cubeEdgeGeo = new TH.EdgesGeometry(cubeGeo, 15);
+      const cMat = new TH.MeshStandardMaterial({ color: 0x334455, emissive: 0x0088ff, emissiveIntensity: 0.6, metalness: 0.2, roughness: 0.4 });
+      const eMat = new TH.LineBasicMaterial({ color: 0x00ffff });
+      
+      instCubeMesh = new TH.InstancedMesh(cubeGeo, cMat, map.grabCubes.length);
+      // LineSegments can't directly be InstancedMesh in some versions without InstancedBufferGeometry, but standard InstancedMesh supports it in r117+!
+      instCubeEdges = new TH.InstancedMesh(cubeEdgeGeo, eMat, map.grabCubes.length);
+      instCubeMesh.instanceMatrix.setUsage(TH.DynamicDrawUsage);
+      instCubeEdges.instanceMatrix.setUsage(TH.DynamicDrawUsage);
+      worldGroup.add(instCubeMesh, instCubeEdges);
+      
+      for (let i = 0; i < map.grabCubes.length; i++) {
+        const hc = map.grabCubes[i];
+        const pos = new TH.Vector3(...hc.c);
+        grabCubes.push({ pos: pos.clone(), vel: new TH.Vector3(0, 0, 0), rotVel: new TH.Vector3(0, 0, 0), rad: 0.75, id: i, quat: new TH.Quaternion() });
+      }
+    } else {
+      grabCubes.length = 0;
+      grabbedCube = null;
     }
-    cubeGeo.computeVertexNormals();
-    const cubeEdgeGeo = new TH.EdgesGeometry(cubeGeo, 15);
-    const cMat = new TH.MeshStandardMaterial({ color: 0x334455, emissive: 0x0088ff, emissiveIntensity: 0.6, metalness: 0.2, roughness: 0.4 });
-    const eMat = new TH.LineBasicMaterial({ color: 0x00ffff });
-    
-    instCubeMesh = new TH.InstancedMesh(cubeGeo, cMat, map.grabCubes.length);
-    // LineSegments can't directly be InstancedMesh in some versions without InstancedBufferGeometry, but standard InstancedMesh supports it in r117+!
-    instCubeEdges = new TH.InstancedMesh(cubeEdgeGeo, eMat, map.grabCubes.length);
-    instCubeMesh.instanceMatrix.setUsage(TH.DynamicDrawUsage);
-    instCubeEdges.instanceMatrix.setUsage(TH.DynamicDrawUsage);
-    worldGroup.add(instCubeMesh, instCubeEdges);
-    
-    for (let i = 0; i < map.grabCubes.length; i++) {
-      const hc = map.grabCubes[i];
-      const pos = new TH.Vector3(...hc.c);
-      grabCubes.push({ pos: pos.clone(), vel: new TH.Vector3(0, 0, 0), rotVel: new TH.Vector3(0, 0, 0), rad: 0.75, id: i, quat: new TH.Quaternion() });
-    }
-    buildExitFx(map.exit);
-    exitPos.set(map.exit.x, map.exit.y, map.exit.z);
-    spawnPt.set(map.spawn.x, map.spawn.y, map.spawn.z);
+    spawnPts = map.spawns.map(s => new V3(s.x, s.y, s.z));
+    lavaPools = map.lava;
     hintZones = map.hints.map(h => ({ min: new V3(...h.min), max: new V3(...h.max), msg: h.msg }));
-    pl.pos.copy(spawnPt); pl.vel.set(0, 0, 0); pl.cp.copy(spawnPt);
-    pl.yaw = -Math.PI / 2; // forward = +x down the course
+    pl.pos.copy(spawnPts[0]); pl.vel.set(0, 0, 0); pl.cp.copy(spawnPts[0]);
+    pl.yaw = Math.atan2(-spawnPts[0].x, -spawnPts[0].z); // face arena center
     pl.pitch = 0; pl.viewOffset = null; pl.maxSpeed = 0; pl.grounded = false; pl.jumpBuf = -1;
     won = false; localReady = false; lastInstagibTime = -999; lastRocketTime = -999;
     winPanel.classList.add('hidden');
@@ -1390,8 +1406,8 @@ function start(ns) {
 
     if (!started) { // idle preview orbit while at menu
       const t = now * 0.00012;
-      camera.position.set(-20 + Math.cos(t) * 14, 8, Math.sin(t) * 14);
-      camera.lookAt(-20, 2, 0);
+      camera.position.set(Math.cos(t) * 120, 110, Math.sin(t) * 120);
+      camera.lookAt(0, 10, 0);
     } else if (!won) {
 
       const activeKeys = pointerLocked ? keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
@@ -1687,18 +1703,20 @@ function start(ns) {
        }
     }
     
-    resolveCubeCollisions();
-    // Update mesh positions again after resolution
-    const dummy = new TH.Object3D();
-    for (const c of grabCubes) {
-       dummy.position.copy(c.pos);
-       dummy.quaternion.copy(c.quat);
-       dummy.updateMatrix();
-       instCubeMesh.setMatrixAt(c.id, dummy.matrix);
-       instCubeEdges.setMatrixAt(c.id, dummy.matrix);
+    if (instCubeMesh) {
+      resolveCubeCollisions();
+      // Update mesh positions again after resolution
+      const dummy = new TH.Object3D();
+      for (const c of grabCubes) {
+         dummy.position.copy(c.pos);
+         dummy.quaternion.copy(c.quat);
+         dummy.updateMatrix();
+         instCubeMesh.setMatrixAt(c.id, dummy.matrix);
+         instCubeEdges.setMatrixAt(c.id, dummy.matrix);
+      }
+      instCubeMesh.instanceMatrix.needsUpdate = true;
+      instCubeEdges.instanceMatrix.needsUpdate = true;
     }
-    instCubeMesh.instanceMatrix.needsUpdate = true;
-    instCubeEdges.instanceMatrix.needsUpdate = true;
     
     for (let i = 0; i < 4; i++) {
        const P = portals[i];
@@ -1848,9 +1866,13 @@ function start(ns) {
              a.obj.scale.setScalar(a.life);
            }
         }
+      } else if (a.type === 'flame') {
+        const f = 1 + 0.15 * Math.sin(now * 0.02 + a.phase) + 0.07 * Math.sin(now * 0.053 + a.phase * 2);
+        a.obj.scale.set(f, 0.85 + 0.2 * f, f);
+      } else if (a.type === 'torchlight') {
+        a.obj.intensity = 12 + 3.5 * Math.sin(now * 0.017 + a.phase) + 2 * Math.sin(now * 0.041 + a.phase * 3);
       }
     }
-    if (beacon) { const s = 1 + 0.06 * Math.sin(now * 0.004); beacon.ring.scale.set(s, s, s); }
 
     let msg = '';
     if (match && match.phase === 'warmup') {
@@ -1870,7 +1892,7 @@ function start(ns) {
     const aimDir = new TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
     const hit = raycast(camera.getWorldPosition(new TH.Vector3()), aimDir, 140);
 
-    updateHUD({ pl, CFG, currentSeed, exitPos, hit, msg: !isConnected ? "RECONNECTING..." : msg, match, localReady, localIndex: localPlayerIndex, statsOpen, localPid: localPlayerId });
+    updateHUD({ pl, CFG, currentSeed, hit, msg: !isConnected ? "RECONNECTING..." : msg, match, localReady, localIndex: localPlayerIndex, statsOpen, localPid: localPlayerId });
     renderer.setRenderTarget(null);
     renderer.render(scene, camera);
   }
