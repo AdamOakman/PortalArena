@@ -4,6 +4,7 @@ export function initPortalRendering(ctx) {
   const M4 = TH.Matrix4;
 
   const MAX_DEPTH = 4;
+  const MIN_PORTAL_PX = 32; // nested portal views smaller than this on screen are skipped
   const portalRTs = [];
   function makeRTs() {
     const w = Math.max(256, Math.floor(innerWidth * 0.7)), h = Math.max(256, Math.floor(innerHeight * 0.7));
@@ -60,6 +61,14 @@ export function initPortalRendering(ctx) {
     _parentPos.setFromMatrixPosition(parentCamMatrix); // depth-specific — safe after recursion
     const dot = (_parentPos.x - P.c.x) * P.n.x + (_parentPos.y - P.c.y) * P.n.y + (_parentPos.z - P.c.z) * P.n.z;
     if (dot <= 0.01) return null;
+    // Area-based cutoff: the mirror corridor recedes each level, so a nested
+    // view of a portal that is already a small sliver on screen is not worth a
+    // render pass. Depth 0 (the quad the player looks through) always renders.
+    if (depth > 0) {
+      const dCam = _parentPos.distanceTo(P.c);
+      const pxH = (PORT.hh / (dCam * Math.tan(TH.MathUtils.degToRad(camera.fov * 0.5)))) * innerHeight;
+      if (pxH < MIN_PORTAL_PX) return null;
+    }
 
     _projScreen.multiplyMatrices(vcam.projectionMatrix, vcam.matrixWorldInverse);
     _frustum.setFromProjectionMatrix(_projScreen);
