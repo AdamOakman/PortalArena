@@ -90,6 +90,7 @@ function start(ns) {
     worldGroup = null; obbs = []; animObjects = [];
     _gibPool.releaseAll(); for (const g of _gibPool.items) g.mesh.visible = false;
     _ibPool.releaseAll(); for (const b of _ibPool.items) b.group.visible = false;
+    _scorchPool.releaseAll(); for (const s of _scorchPool.items) s.mesh.visible = false;
   }
 
   
@@ -493,8 +494,13 @@ function start(ns) {
            }
         }
         for (let i = 0; i < pts.length; i += 2) spawnInstagibBeam(pts[i], pts[i+1]);
-        AudioSys.tone(150, 40, 0.8, 'square', 0.4);
-        AudioSys.tone(800, 150, 0.5, 'sawtooth', 0.2);
+        const shooter = remotePlayers[data.playerId];
+        AudioSys.instagibShot(shooter && shooter.pos ? new V3(...shooter.pos) : pts[0]);
+        if (data.scorch) {
+           const sp = new V3(...data.scorch.pos), sn = new V3(...data.scorch.n);
+           spawnScorch(sp, sn);
+           AudioSys.zap(sp, AudioSys.listenerPos ? sp.distanceTo(AudioSys.listenerPos) / 343 : 0);
+        }
         
         if (data.hitPlayerId === localPlayerId) {
            die(data.playerId, data.pts.length > 2);
@@ -748,7 +754,10 @@ function start(ns) {
         c: P.c.toArray(), n: P.n.toArray(), r: P.r.toArray(), u: P.u.toArray()
       });
     updatePair();
+    // Immediate gun-trigger click from the player's perspective (non-positional)
     AudioSys.tone(700, 1400, 0.09, 'sine', 0.08); AudioSys.tone(1400, 2400, 0.12, 'triangle', 0.05, 0.03);
+    // Positional 3-part opening sound at the portal on the wall
+    AudioSys.portalOpen(c);
     return true;
   }
 
@@ -763,7 +772,7 @@ function start(ns) {
     P.closeTime = performance.now() / 1000;
     if (broadcast) Network.send({ type: 'portal_remove', pi });
     updatePair();
-    AudioSys.tone(1400, 700, 0.22, 'sine', 0.08);
+    AudioSys.portalClose(P.c);
   }
 
   /* ray vs all OBBs -> nearest {point, normal, obb} */
@@ -829,6 +838,58 @@ function start(ns) {
     scene.add(group);
     return { busy: false, group, core, glow, points, pPos, vel };
   });
+
+  // --- Instagib scorch marks: dark burnt decals where a beam struck a wall.
+  // Pooled textured planes that stick to the hit surface for SCORCH_LIFE seconds,
+  // then fade out fluently over SCORCH_FADE. They live in the scene, so they are
+  // visible to every player — including through the portals.
+  const SCORCH_LIFE = 30, SCORCH_FADE = 0.5;
+  const _scorchTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const g = c.getContext('2d');
+    const rad = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+    rad.addColorStop(0, 'rgba(8, 5, 3, 0.98)');
+    rad.addColorStop(0.4, 'rgba(14, 9, 5, 0.8)');
+    rad.addColorStop(0.7, 'rgba(22, 13, 7, 0.4)');
+    rad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    g.fillStyle = rad; g.fillRect(0, 0, 128, 128);
+    // Rough up the edge with random notches so the mark looks burnt, not stamped
+    g.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 26; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const r = 40 + Math.random() * 22;
+      g.globalAlpha = 0.3 + Math.random() * 0.5;
+      g.beginPath();
+      g.arc(64 + Math.cos(ang) * r, 64 + Math.sin(ang) * r, 3 + Math.random() * 9, 0, Math.PI * 2);
+      g.fill();
+    }
+    const t = new TH.CanvasTexture(c);
+    if ('colorSpace' in t) t.colorSpace = TH.SRGBColorSpace;
+    return t;
+  })();
+  const _scorchGeo = new TH.PlaneGeometry(1, 1);
+  const _scorchPool = makePool(64, () => {
+    const mesh = new TH.Mesh(_scorchGeo, new TH.MeshBasicMaterial({
+      map: _scorchTex, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
+    }));
+    mesh.visible = false;
+    scene.add(mesh);
+    return { busy: false, mesh, life: 0 };
+  });
+  function spawnScorch(pos, n) {
+    const slot = _scorchPool.acquire();
+    if (!slot) return; // pool exhausted — silently drop this mark
+    const m = slot.mesh;
+    m.position.copy(pos).addScaledVector(n, 0.02);
+    m.quaternion.setFromUnitVectors(new V3(0, 0, 1), n);
+    m.rotateZ(Math.random() * Math.PI * 2);
+    m.scale.setScalar(0.6 + Math.random() * 0.5);
+    m.material.opacity = 1;
+    m.visible = true;
+    slot.life = SCORCH_LIFE;
+    animObjects.push({ type: 'scorch', obj: m, slot, life: SCORCH_LIFE });
+  }
 
   // Gib pool: death meshes share one geometry + one material; only reset on spawn.
   const _gibMat = new TH.MeshStandardMaterial({ color: 0xaa0000, transparent: true });
@@ -1029,8 +1090,7 @@ function start(ns) {
     if (nowT - lastInstagibTime < 1.0) return;
     muzzleT = 1;
     lastInstagibTime = nowT;
-    AudioSys.tone(150, 40, 0.8, 'square', 0.4);
-        AudioSys.tone(800, 150, 0.5, 'sawtooth', 0.2);
+    AudioSys.instagibShot(camera.position);
     camera.updateMatrixWorld(true);
     instagibGun.updateMatrixWorld(true);
     
@@ -1038,6 +1098,7 @@ function start(ns) {
     let curDir = new TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
     let remaining = 300;
     const pts = [];
+    let scorchMsg = null; // set when the beam ends on a wall
     let curStart = new TH.Vector3(0, 0, -0.4).applyMatrix4(instagibGun.matrixWorld);
 
     for (let iter = 0; iter < 4; iter++) {
@@ -1129,12 +1190,21 @@ function start(ns) {
               continue;
            }
         }
+        if (hit) {
+           // Beam ended on a wall: zap at the impact point + burnt scorch mark.
+           // The crack is delayed by the sound travel time so it lands after
+           // the trigger instead of overlapping it.
+           AudioSys.zap(hitPt, camera.position.distanceTo(hitPt) / 343);
+           const sn = hit.normal.clone().normalize();
+           spawnScorch(hitPt, sn);
+           scorchMsg = { pos: hitPt.toArray(), n: sn.toArray() };
+        }
         break;
     }
     
     for (let i = 0; i < pts.length; i += 2) spawnInstagibBeam(pts[i], pts[i+1]);
     
-    Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()) });
+    Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()), scorch: scorchMsg });
   }
 
   function spawnDeathAnimation(pos, color) {
@@ -1913,6 +1983,15 @@ function start(ns) {
              a.vel[j].multiplyScalar(0.9);
            }
            posAttr.needsUpdate = true;
+        }
+      } else if (a.type === 'scorch') {
+        a.life -= dt;
+        if (a.life <= 0) {
+           a.obj.visible = false;
+           _scorchPool.release(a.slot);
+           animObjects.splice(i, 1);
+        } else {
+           a.obj.material.opacity = a.life < SCORCH_FADE ? a.life / SCORCH_FADE : 1;
         }
       } else if (a.type === 'gib') {
         a.life -= dt;
