@@ -178,12 +178,17 @@ function start(ns) {
         const L = new TH.PointLight(0xff6a2a, 26, 32, 2);
         L.position.set(x, y + 2 * s, z); group.add(L);
       } else if (d.t === 'arch') {
+        const ry = d.ry || 0;
         const w = 5.5 * s;
-        put(stoneG, new TH.BoxGeometry(0.6 * s, 4.6 * s, 0.6 * s), x - w / 2, y + 2.3 * s, z, d.ry || 0);
-        put(stoneG, new TH.BoxGeometry(0.6 * s, 4.6 * s, 0.6 * s), x + w / 2, y + 2.3 * s, z, d.ry || 0);
-        put(stoneG, new TH.BoxGeometry(w + 1.2 * s, 0.55 * s, 0.6 * s), x, y + 4.9 * s, z, d.ry || 0);
+        // Doorpost offsets must be rotated with the arch, otherwise
+        // east/west gates (ry = PI/2) place the posts inside/outside
+        // the wall instead of flanking the passage.
+        const ox = (w / 2) * Math.cos(ry), oz = (w / 2) * Math.sin(ry);
+        put(stoneG, new TH.BoxGeometry(0.6 * s, 4.6 * s, 0.6 * s), x + ox, y + 2.3 * s, z + oz, ry);
+        put(stoneG, new TH.BoxGeometry(0.6 * s, 4.6 * s, 0.6 * s), x - ox, y + 2.3 * s, z - oz, ry);
+        put(stoneG, new TH.BoxGeometry(w + 1.2 * s, 0.55 * s, 0.6 * s), x, y + 4.9 * s, z, ry);
         const fin = new TH.ConeGeometry(1.0 * s, 1.8 * s, 4); fin.rotateY(Math.PI / 4); fin.translate(0, 0.9 * s, 0);
-        put(stoneG, fin, x, y + 5.15 * s, z, d.ry || 0);
+        put(stoneG, fin, x, y + 5.15 * s, z, ry);
       } else if (d.t === 'banner') {
         const arr = ((Math.round(x * 7 + z * 13) % 2) + 2) % 2 ? bannerPG : bannerRG;
         put(arr, new TH.PlaneGeometry(1.1 * s, 3.0 * s), x, y, z, d.ry || 0);
@@ -439,6 +444,7 @@ function start(ns) {
         for (let i = 0; i < 4; i++) {
           const sp = data.portals[i];
           const P = portals[i];
+          if (P.closing) continue; // close animation in progress; server already reflects the removal
           P.placed = sp.placed;
           if (P.placed) {
              P.c.fromArray(sp.c); P.n.fromArray(sp.n); P.r.fromArray(sp.r); P.u.fromArray(sp.u);
@@ -452,6 +458,8 @@ function start(ns) {
             grabCubes[i].vel.fromArray(data.cubes[i].vel);
           }
         }
+      } else if (data.type === 'portal_remove') {
+        cancelPortal(data.pi, false);
       } else if (data.type === 'fire_beam') {
         if (data.playerId !== localPlayerId && remotePlayerMeshes[data.playerId]) remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
         spawnBeam(portals[data.pi].color, new V3(...data.start), new V3(...data.end));
@@ -571,7 +579,7 @@ function start(ns) {
      ======================================================================= */
 
   const portals = [mkPortal(0x33ff33), mkPortal(0x00aa00), mkPortal(0xff5555), mkPortal(0xaa0000)];
-  function mkPortal(color) { return { placed: false, c: new V3(), n: new V3(), r: new V3(), u: new V3(), color }; }
+  function mkPortal(color) { return { placed: false, closing: false, openTime: 0, closeTime: 0, c: new V3(), n: new V3(), r: new V3(), u: new V3(), color }; }
 
   const portalGroup = new TH.Group(); scene.add(portalGroup);
   const quadMats = [], quads = [], frames = [], glowLights = [], sparkles = [];
@@ -734,7 +742,7 @@ function start(ns) {
         }
       }
     }
-    P.placed = true; P.c.copy(c); P.n.copy(n); P.r.copy(f.r); P.u.copy(f.u); P.openTime = performance.now() / 1000;
+    P.placed = true; P.closing = false; P.c.copy(c); P.n.copy(n); P.r.copy(f.r); P.u.copy(f.u); P.openTime = performance.now() / 1000;
     Network.send({
         type: 'portal_place', pi,
         c: P.c.toArray(), n: P.n.toArray(), r: P.r.toArray(), u: P.u.toArray()
@@ -742,6 +750,20 @@ function start(ns) {
     updatePair();
     AudioSys.tone(700, 1400, 0.09, 'sine', 0.08); AudioSys.tone(1400, 2400, 0.12, 'triangle', 0.05, 0.03);
     return true;
+  }
+
+  /* Remove a placed portal (e.g. its wall was blown away by a rocket).
+     Plays the closing animation — the inverse of the opening bounce —
+     before the visuals are torn down. */
+  function cancelPortal(pi, broadcast = true) {
+    const P = portals[pi];
+    if (!P.placed) return;
+    P.placed = false;
+    P.closing = true;
+    P.closeTime = performance.now() / 1000;
+    if (broadcast) Network.send({ type: 'portal_remove', pi });
+    updatePair();
+    AudioSys.tone(1400, 700, 0.22, 'sine', 0.08);
   }
 
   /* ray vs all OBBs -> nearest {point, normal, obb} */
@@ -1252,7 +1274,7 @@ function start(ns) {
     for (let i = 0; i < 4; i++) {
        const P = portals[i];
        if (P.placed && P.c.distanceTo(obb.c) < obb.rad + 1) {
-          if (Math.abs(P.n.dot(obb.ax[tIdx])) > 0.99) P.placed = false;
+          if (Math.abs(P.n.dot(obb.ax[tIdx])) > 0.99) cancelPortal(i);
        }
     }
 
@@ -1341,7 +1363,7 @@ function start(ns) {
   function loadMap(seedStr) {
     currentSeed = seedStr;
     clearWorld();
-    for (const P of portals) P.placed = false;
+    for (const P of portals) { P.placed = false; P.closing = false; }
     placePortalVisuals();
     const map = generateMap(seedStr);
     worldGroup = new TH.Group(); scene.add(worldGroup);
@@ -1790,14 +1812,27 @@ function start(ns) {
        const sp = sparkles[i];
        if (!sp.mesh.visible) continue;
        
-       const age = (performance.now() / 1000) - (P.openTime || 0);
        let scl;
-       // overshoot elastic bounce
-       if (age < 0.5) {
-           const t = age / 0.5;
-           scl = 1.0 + Math.sin(t * Math.PI * 3.0) * (1.0 - t) * 0.3;
+       if (P.closing) {
+           // Closing: inverse of the opening bounce — same 0.5 s duration
+           // and wobble, collapsing to zero.
+           const cAge = (performance.now() / 1000) - P.closeTime;
+           if (cAge >= 0.5) {
+               P.closing = false;
+               scl = 0;
+           } else {
+               const t = cAge / 0.5;
+               scl = 1.0 - t + Math.sin(t * Math.PI * 3.0) * (1.0 - t) * 0.3;
+           }
        } else {
-           scl = 1.0 + Math.sin(age * 3.0) * 0.02; // breathing
+           const age = (performance.now() / 1000) - (P.openTime || 0);
+           // overshoot elastic bounce
+           if (age < 0.5) {
+               const t = age / 0.5;
+               scl = 1.0 + Math.sin(t * Math.PI * 3.0) * (1.0 - t) * 0.3;
+           } else {
+               scl = 1.0 + Math.sin(age * 3.0) * 0.02; // breathing
+           }
        }
        
        quads[i].scale.setScalar(scl);
@@ -1990,7 +2025,7 @@ function start(ns) {
   quads.forEach(q => q.visible = true);
   renderPortalViews();
   renderer.render(scene, camera);
-  portals.forEach(p => p.placed = false);
+  portals.forEach(p => { p.placed = false; p.closing = false; });
   placePortalVisuals();
   quads.forEach(q => q.visible = false);
   renderer.clear();
