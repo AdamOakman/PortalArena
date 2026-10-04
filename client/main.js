@@ -1192,85 +1192,106 @@ function start(ns) {
     }
   }
 
-  function addRuntimeSlab(cx, cy, cz, sx, sy, sz, kind) {
-    const sMat = getSlabMat(kind);
-    const mesh = new TH.Mesh(new TH.BoxGeometry(sx, sy, sz), sMat.mat);
-    mesh.position.set(cx, cy, cz);
-    if (worldGroup) worldGroup.add(mesh);
-    else scene.add(mesh);
-    
-    const obb = { 
-      c: new V3(cx, cy, cz), 
-      ax: [new V3(1,0,0), new V3(0,1,0), new V3(0,0,1)], 
-      he: [sx/2, sy/2, sz/2], 
-      rad: Math.hypot(sx/2, sy/2, sz/2), 
-      kind, 
-      mesh 
-    };
-    obbs.push(obb);
+  function addWallFragment(obb, uIdx, u, y, w, h) {
+    // Fragment of a destroyed wall in the parent's frame: u = center along the
+    // wall's long axis, w = width along it, y = center height, h = height.
+    // Inherits the parent's orientation (also covers rotated cover walls).
+    const A = obb.ax, C = obb.c;
+    const tIdx = uIdx === 0 ? 2 : 0;
+    const c = new V3(
+      C.x + A[uIdx].x * u + A[1].x * y,
+      C.y + A[uIdx].y * u + A[1].y * y,
+      C.z + A[uIdx].z * u + A[1].z * y
+    );
+    const sx = uIdx === 0 ? w : obb.he[tIdx] * 2;
+    const sz = uIdx === 2 ? w : obb.he[tIdx] * 2;
+    const baseGeo = new TH.BoxGeometry(sx, h, sz);
+    const edgeGeo = new TH.EdgesGeometry(baseGeo);
+    const m = new TH.Matrix4().makeBasis(A[0], A[1], A[2]);
+    m.setPosition(c);
+    baseGeo.applyMatrix4(m);
+    edgeGeo.applyMatrix4(m);
+    const mMat = getSlabMat('wall');
+    const meshObj = new TH.Group();
+    meshObj.add(new TH.Mesh(baseGeo, mMat.mat));
+    meshObj.add(new TH.LineSegments(edgeGeo, mMat.edgeMat));
+    if (worldGroup) worldGroup.add(meshObj);
+    else scene.add(meshObj);
+
+    obbs.push({
+      c,
+      ax: [A[0].clone(), A[1].clone(), A[2].clone()],
+      he: [sx / 2, h / 2, sz / 2],
+      rad: Math.hypot(sx, h, sz) / 2 + 3,
+      kind: 'wall',
+      mesh: meshObj
+    });
   }
 
   function destroyWall(obb, point, normal) {
     if (obb.kind !== 'wall') return;
-    if (Math.abs(obb.ax[1].y) < 0.99) return;
-    if (obb.he[0] > 2.5) return; // Only destroy thin vertical walls
-    
+    if (Math.abs(obb.ax[1].y) < 0.99) return; // Only vertical walls
+    // Long axis = the wider horizontal extent; the other is the wall's thickness.
+    const uIdx = obb.he[0] >= obb.he[2] ? 0 : 2;
+    const tIdx = uIdx === 0 ? 2 : 0;
+    if (obb.he[tIdx] > 2.5) return; // Only destroy thin vertical walls (not corner towers)
+
     if (obb.mesh) {
       if (worldGroup) worldGroup.remove(obb.mesh);
       else scene.remove(obb.mesh);
-      
+
       obb.mesh.traverse(o => {
         if (o.geometry) o.geometry.dispose();
       });
     }
-    
+
     // Remove from physics
     const idx = obbs.indexOf(obb);
-    if (idx > -1) obbs.splice(idx, 1); 
-    
+    if (idx > -1) obbs.splice(idx, 1);
+
     for (let i = 0; i < 4; i++) {
        const P = portals[i];
        if (P.placed && P.c.distanceTo(obb.c) < obb.rad + 1) {
-          if (Math.abs(P.n.dot(obb.ax[0])) > 0.99) P.placed = false;
+          if (Math.abs(P.n.dot(obb.ax[tIdx])) > 0.99) P.placed = false;
        }
     }
-    
+
+    // Hit in the wall's local frame: u runs along the wall, y is up.
+    const rel = new V3(point.x - obb.c.x, point.y - obb.c.y, point.z - obb.c.z);
+    const uC = rel.dot(obb.ax[uIdx]);
+    const yC = rel.dot(obb.ax[1]);
+
     const R = 4.8;
-    const stripW = 1.2;
-    const minY = obb.c.y - obb.he[1], maxY = obb.c.y + obb.he[1];
-    const minZ = obb.c.z - obb.he[2], maxZ = obb.c.z + obb.he[2];
-    
-    const startZ = point.z - R;
-    const endZ = point.z + R;
-    
+    const MIN_PIECE = 0.3; // drop crumbs so repeat hits carve clean holes, not micro-slivers
+    const uMin = -obb.he[uIdx], uMax = obb.he[uIdx];
+    const yMin = -obb.he[1], yMax = obb.he[1];
+
     const pieces = [];
-    
-    if (startZ > minZ + 0.1) pieces.push({ cy: obb.c.y, sy: obb.he[1]*2, cz: (minZ + startZ)/2, sz: startZ - minZ });
-    if (endZ < maxZ - 0.1) pieces.push({ cy: obb.c.y, sy: obb.he[1]*2, cz: (endZ + maxZ)/2, sz: maxZ - endZ });
-    
-    const stripMinZ = Math.max(minZ, startZ);
-    const stripMaxZ = Math.min(maxZ, endZ);
-    
-    for (let z = stripMinZ; z < stripMaxZ; z += stripW) {
-       const s_sz = Math.min(stripW, stripMaxZ - z);
-       const stripZ = z + s_sz / 2;
-       
-       const distZ = Math.abs(stripZ - point.z);
-       let holeH = 0;
-       if (distZ < R) holeH = Math.sqrt(R*R - distZ*distZ);
-       
-       const holeBottom = point.y - holeH;
-       if (holeBottom > minY + 0.1) {
-           pieces.push({ cy: (minY + holeBottom)/2, sy: holeBottom - minY, cz: stripZ, sz: s_sz });
-       }
-       const holeTop = point.y + holeH;
-       if (holeTop < maxY - 0.1) {
-           pieces.push({ cy: (holeTop + maxY)/2, sy: maxY - holeTop, cz: stripZ, sz: s_sz });
-       }
+
+    const startU = uC - R;
+    const endU = uC + R;
+
+    if (startU > uMin + MIN_PIECE) pieces.push({ u: (uMin + startU)/2, w: startU - uMin, y: 0, h: yMax - yMin });
+    if (endU < uMax - MIN_PIECE) pieces.push({ u: (endU + uMax)/2, w: uMax - endU, y: 0, h: yMax - yMin });
+
+    const bandMinU = Math.max(uMin, startU);
+    const bandMaxU = Math.min(uMax, endU);
+    const bandW = bandMaxU - bandMinU;
+    const bandMinY = Math.max(yMin, yC - R);
+    const bandMaxY = Math.min(yMax, yC + R);
+
+    // The blast removes one rectangular chunk (the blast radius' bounding box,
+    // clipped to the wall) — no strip grid. At most 4 large pieces remain:
+    // the side slabs plus one piece above and below the void.
+    if (bandW >= MIN_PIECE && bandMaxY - bandMinY >= MIN_PIECE) {
+      if (bandMinY - yMin > MIN_PIECE)
+        pieces.push({ u: (bandMinU + bandMaxU) / 2, w: bandW, y: (yMin + bandMinY) / 2, h: bandMinY - yMin });
+      if (yMax - bandMaxY > MIN_PIECE)
+        pieces.push({ u: (bandMinU + bandMaxU) / 2, w: bandW, y: (bandMaxY + yMax) / 2, h: yMax - bandMaxY });
     }
-    
+
     for (const p of pieces) {
-      addRuntimeSlab(obb.c.x, p.cy, p.cz, obb.he[0]*2, p.sy, p.sz, 'wall');
+      addWallFragment(obb, uIdx, p.u, p.y, p.w, p.h);
     }
 
     // Spawn physical debris chunks
