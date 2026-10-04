@@ -17,4 +17,4 @@ export const TICK_RATE = 128;
 export const WARMUP_TIME = 60;  // seconds, max warmup before round starts
 export const ROUND_TIME = 300;  // seconds, active duel length
 
-export const PORT = { hw: 2.3, hh: 3.2, recursion: 2 }; // mouth half-extents -> 4.6 x 6.4 m
+export const PORT = { hw: 2.3, hh: 3.2, recursion: 3 }; // mouth half-extents -> 4.6 x 6.4 m
