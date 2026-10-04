@@ -1101,7 +1101,9 @@ function start(ns) {
     let scorchMsg = null; // set when the beam ends on a wall
     let curStart = new TH.Vector3(0, 0, -0.4).applyMatrix4(instagibGun.matrixWorld);
 
-    for (let iter = 0; iter < 4; iter++) {
+    // The beam may pass through portals up to 5 times (6 trace segments:
+    // 5 portal passages + 1 final). A wall or player hit stops it sooner.
+    for (let iter = 0; iter < 6; iter++) {
         let hit = raycast(curPos, curDir, remaining);
         let bestPortal = null, bestT = hit ? hit.distance : remaining;
         
@@ -1114,7 +1116,7 @@ function start(ns) {
               if (pt > 0.01 && pt < bestT) {
                  const hitPt = curPos.clone().addScaledVector(curDir, pt);
                  const d = hitPt.clone().sub(P.c);
-                 if (Math.abs(d.dot(P.r)) < 2.3 && Math.abs(d.dot(P.u)) < 3.2) {
+                 if (Math.abs(d.dot(P.r)) < PORT.hw && Math.abs(d.dot(P.u)) < PORT.hh) {
                     bestT = pt;
                     bestPortal = i;
                  }
