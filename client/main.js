@@ -64,7 +64,7 @@ function start(ns) {
 
   /* ------------------------------------------------ renderer / scene core */
   const canvas = document.getElementById('gl');
-  const { renderer, scene, camera, skyGroup } = initEngine(TH, canvas);
+  const { renderer, scene, camera, skyGroup, updateSky } = initEngine(TH, canvas);
   let baseFov = 115;
   let worldGroup = null; // rebuilt on new map
 
@@ -1470,10 +1470,11 @@ function start(ns) {
       nextPingT = nowT + 5;
     }
 
-    if (!started) { // idle preview orbit while at menu
+    if (!started) { // idle preview orbit while at menu — close, centered on the arena
+      // radius 40 < 50 keeps the camera inside the boundary walls for the whole orbit
       const t = now * 0.00012;
-      camera.position.set(Math.cos(t) * 120, 110, Math.sin(t) * 120);
-      camera.lookAt(0, 10, 0);
+      camera.position.set(Math.cos(t) * 40, 34, Math.sin(t) * 40);
+      camera.lookAt(0, 5, 0);
     } else if (!won) {
 
       const activeKeys = pointerLocked ? keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
@@ -1952,6 +1953,8 @@ function start(ns) {
     const hit = raycast(camera.getWorldPosition(new TH.Vector3()), aimDir, 140);
 
     updateHUD({ pl, CFG, currentSeed, hit, msg: !isConnected ? "RECONNECTING..." : msg, match, localReady, localIndex: localPlayerIndex, statsOpen, localPid: localPlayerId });
+    skyGroup.position.copy(camera.position);
+    updateSky(nowT);
     renderer.setRenderTarget(null);
     renderer.render(scene, camera);
   }

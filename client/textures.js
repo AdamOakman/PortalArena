@@ -16,10 +16,11 @@ export function initTextures(TH) {
   }
 
   // Dark medieval gothic stone palette (brightened for legibility)
+  const wallDef = { base: '#4b221c', line: '#6b3328', glow: '#5c3222', emissive: 0x1a0d06, edge: 0x7a4438 };
   const defs = {
      plat:   { base: '#4a241d', line: '#6b3328', glow: '#6a4526', emissive: 0x20100a, edge: 0x7a4438 },
-    ramp:   { base: '#443c52', line: '#615872', glow: '#715730', emissive: 0x281c0c, edge: 0x706582 },
-    wall:   { base: '#4b221c', line: '#6b3328', glow: '#5c3222', emissive: 0x1a0d06, edge: 0x7a4438 },
+    ramp:   wallDef, // ramps match the walls
+    wall:   wallDef,
   };
 
   const matCache = {};
