@@ -88,6 +88,8 @@ function start(ns) {
       if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { for (const k of ['map', 'emissiveMap']) if (m[k]) m[k].dispose(); m.dispose(); });
     });
     worldGroup = null; obbs = []; animObjects = [];
+    _gibPool.releaseAll(); for (const g of _gibPool.items) g.mesh.visible = false;
+    _ibPool.releaseAll(); for (const b of _ibPool.items) b.group.visible = false;
   }
 
   
@@ -766,8 +768,53 @@ function start(ns) {
   // Unit-length instagib beam cylinders — scaled per beam rather than rebuilt each shot
   const _instagibCoreGeo = (() => { const g = new TH.CylinderGeometry(0.015, 0.015, 1, 8); g.translate(0, 0.5, 0); g.rotateX(Math.PI / 2); return g; })();
   const _instagibGlowGeo = (() => { const g = new TH.CylinderGeometry(0.08, 0.08, 1, 8); g.translate(0, 0.5, 0); g.rotateX(Math.PI / 2); return g; })();
-  // Tracks already-disposed shared materials so they aren't double-disposed
-  const _disposedMats = new WeakSet();
+
+  // --- Kill-FX object pools ---
+  // Spawning gibs/beams used to build new Mesh + BufferGeometry + BufferAttribute
+  // + Material at kill time, which allocates fresh GPU VBOs/VAOs and hitches the
+  // frame on EVERY kill. Pools pre-allocate all of it once and only reset it.
+  function makePool(n, factory) {
+    const items = [];
+    for (let i = 0; i < n; i++) items.push(factory(i));
+    return {
+      items,
+      acquire() { for (const it of items) if (!it.busy) { it.busy = true; return it; } return null; },
+      release(it) { it.busy = false; },
+      releaseAll() { for (const it of items) it.busy = false; }
+    };
+  }
+
+  // Instagib beam pool: group + core/glow (shared geo) + point geometry (fixed 150
+  // pts, drawn via setDrawRange) + fixed velocity array, all pre-allocated.
+  const IB_MAX_PTS = 150;
+  const _ibPool = makePool(16, () => {
+    const group = new TH.Group();
+    const core = new TH.Mesh(_instagibCoreGeo, new TH.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 }));
+    group.add(core);
+    const glow = new TH.Mesh(_instagibGlowGeo, new TH.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.6, blending: TH.AdditiveBlending, depthWrite: false }));
+    group.add(glow);
+    const pGeo = new TH.BufferGeometry();
+    const pPos = new Float32Array(IB_MAX_PTS * 3);
+    pGeo.setAttribute('position', new TH.BufferAttribute(pPos, 3));
+    pGeo.setDrawRange(0, 0);
+    const points = new TH.Points(pGeo, new TH.PointsMaterial({ color: 0xff6666, size: 0.08, transparent: true, opacity: 1.0, blending: TH.AdditiveBlending, depthWrite: false }));
+    group.add(points);
+    const vel = [];
+    for (let i = 0; i < IB_MAX_PTS; i++) vel.push(new V3());
+    group.visible = false;
+    scene.add(group);
+    return { busy: false, group, core, glow, points, pPos, vel };
+  });
+
+  // Gib pool: death meshes share one geometry + one material; only reset on spawn.
+  const _gibMat = new TH.MeshStandardMaterial({ color: 0xaa0000, transparent: true });
+  const _gibScratch = new V3();
+  const _gibPool = makePool(80, () => {
+    const mesh = new TH.Mesh(_gibGeo, _gibMat);
+    mesh.visible = false;
+    scene.add(mesh);
+    return { busy: false, mesh, vel: new V3() };
+  });
 
   function spawnBeam(colorHex, start, end) {
     const dist = start.distanceTo(end);
@@ -929,35 +976,28 @@ function start(ns) {
     const d = end.clone().sub(start);
     const len = d.length();
     if (len < 0.001) return;
-    const beamGroup = new TH.Group();
-    beamGroup.position.copy(start);
-    beamGroup.quaternion.setFromUnitVectors(new TH.Vector3(0, 0, 1), d.clone().normalize());
-    // Reuse shared unit-length geometry, scaled to actual beam length (avoids new CylinderGeometry per shot)
-    const coreMat = new TH.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 });
-    const core = new TH.Mesh(_instagibCoreGeo, coreMat);
+    const slot = _ibPool.acquire();
+    if (!slot) return; // pool exhausted — drop this beam's particles
+    const { group, core, glow, points, pPos, vel } = slot;
+    group.position.copy(start);
+    group.quaternion.setFromUnitVectors(new TH.Vector3(0, 0, 1), d.normalize());
     core.scale.z = len;
-    beamGroup.add(core);
-    const glowMat = new TH.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.6, blending: TH.AdditiveBlending, depthWrite: false });
-    const glow = new TH.Mesh(_instagibGlowGeo, glowMat);
     glow.scale.z = len;
-    beamGroup.add(glow);
-    const pCount = Math.min(150, Math.floor(len * 3));
-    const pGeo = new TH.BufferGeometry();
-    const pos = new Float32Array(pCount * 3);
-    const vel = [];
+    const pCount = Math.min(IB_MAX_PTS, Math.floor(len * 3));
     for (let i = 0; i < pCount; i++) {
        const t = Math.random() * len;
-       pos[i*3] = 0; pos[i*3+1] = 0; pos[i*3+2] = t;
+       pPos[i*3] = 0; pPos[i*3+1] = 0; pPos[i*3+2] = t;
        const ang = Math.random() * Math.PI * 2;
        const speed = Math.random() * 8 + 4;
-       vel.push(new V3(Math.cos(ang) * speed, Math.sin(ang) * speed, (Math.random()-0.5) * 8));
+       vel[i].set(Math.cos(ang) * speed, Math.sin(ang) * speed, (Math.random()-0.5) * 8);
     }
-    pGeo.setAttribute('position', new TH.BufferAttribute(pos, 3));
-    const pMat = new TH.PointsMaterial({ color: 0xff6666, size: 0.08, transparent: true, opacity: 1.0, blending: TH.AdditiveBlending, depthWrite: false });
-    const points = new TH.Points(pGeo, pMat);
-    beamGroup.add(points);
-    scene.add(beamGroup);
-    animObjects.push({ type: 'instagib_beam2', obj: beamGroup, core: core, glow: glow, points: points, vel: vel, life: 1.0 });
+    points.geometry.setDrawRange(0, pCount);
+    points.geometry.attributes.position.needsUpdate = true;
+    core.material.opacity = 1.0;
+    glow.material.opacity = 0.6;
+    points.material.opacity = 1.0;
+    group.visible = true;
+    animObjects.push({ type: 'instagib_beam2', obj: group, core, glow, points, vel, pCount, slot, life: 1.0 });
   }
 
   let lastInstagibTime = -999;
@@ -1076,15 +1116,18 @@ function start(ns) {
   function spawnDeathAnimation(pos, color) {
     const gibColor = color || 0xaa0000;
     AudioSys.tone(200, 500, 0.5, 'square', 0.1);
-    // All 20 gibs share one geometry + one material — they all start at life:3.0
-    // so their opacity stays in sync each frame, making sharing safe
-    const gibMat = new TH.MeshStandardMaterial({ color: gibColor, transparent: true });
-    for (let i = 0; i < 20; i++) {
-       const mesh = new TH.Mesh(_gibGeo, gibMat);
-       mesh.position.copy(pos).add(new TH.Vector3((Math.random()-0.5)*0.6, Math.random()*1.5, (Math.random()-0.5)*0.6));
-       scene.add(mesh);
-       const vel = new TH.Vector3((Math.random()-0.5)*10, Math.random()*6+2, (Math.random()-0.5)*10);
-       animObjects.push({ type: 'gib', obj: mesh, vel, life: 3.0 });
+    // All gibs share one pooled material — set its color/opacity for this death
+    _gibMat.color.setHex(gibColor);
+    _gibMat.opacity = 1.0;
+    let spawned = 0;
+    while (spawned < 20) {
+       const slot = _gibPool.acquire();
+       if (!slot) break; // pool exhausted — stop here
+       slot.mesh.visible = true;
+       slot.mesh.position.copy(pos).add(_gibScratch.set((Math.random()-0.5)*0.6, Math.random()*1.5, (Math.random()-0.5)*0.6));
+       slot.vel.set((Math.random()-0.5)*10, Math.random()*6+2, (Math.random()-0.5)*10);
+       animObjects.push({ type: 'gib', obj: slot.mesh, vel: slot.vel, slot, life: 3.0 });
+       spawned++;
     }
   }
 
@@ -1795,19 +1838,16 @@ function start(ns) {
       } else if (a.type === 'instagib_beam2') {
         a.life -= dt * 2.5;
         if (a.life <= 0) {
-           scene.remove(a.obj);
-           a.core.material.dispose();  // geometry is shared — do NOT dispose
-           a.glow.material.dispose();  // geometry is shared — do NOT dispose
-           a.points.material.dispose(); a.points.geometry.dispose();
+           a.obj.visible = false;
+           a.points.geometry.setDrawRange(0, 0);
+           _ibPool.release(a.slot);
            animObjects.splice(i, 1);
         } else {
            a.core.material.opacity = a.life;
            a.glow.material.opacity = a.life * 0.6;
            a.points.material.opacity = a.life;
-           // a.core.scale.set(a.life, 1, a.life);
-           // a.glow.scale.set(a.life, 1, a.life);
            const posAttr = a.points.geometry.attributes.position;
-           for (let j = 0; j < a.vel.length; j++) {
+           for (let j = 0; j < a.pCount; j++) {
              posAttr.array[j*3] += a.vel[j].x * dt;
              posAttr.array[j*3+1] += a.vel[j].y * dt;
              posAttr.array[j*3+2] += a.vel[j].z * dt;
@@ -1818,22 +1858,18 @@ function start(ns) {
       } else if (a.type === 'gib') {
         a.life -= dt;
         if (a.life <= 0) {
-           scene.remove(a.obj);
-           // Material is shared across all gibs from one death — only dispose it once
-           if (!_disposedMats.has(a.obj.material)) { _disposedMats.add(a.obj.material); a.obj.material.dispose(); }
-           // _gibGeo is shared — do NOT dispose
+           a.obj.visible = false;
+           _gibPool.release(a.slot);
            animObjects.splice(i, 1);
         } else {
            a.vel.y -= 25.0 * dt; // gravity CFG.G is usually ~25
            a.obj.position.addScaledVector(a.vel, dt);
-           
            if (a.obj.position.y < 0.15 && a.vel.y < 0) {
               a.obj.position.y = 0.15;
               a.vel.y *= -0.6;
               a.vel.x *= 0.8;
               a.vel.z *= 0.8;
            }
-           
            if (a.life < 1.5) {
               a.obj.material.opacity = a.life / 1.5;
               a.obj.scale.setScalar(0.5 + (a.life / 3.0) * 0.5);
@@ -1933,14 +1969,18 @@ function start(ns) {
   quads.forEach(q => q.visible = false);
   renderer.clear();
 
-  // Pre-warm particle shaders — prevents GPU stall on first kill of the session
-  const _wGib = new TH.Mesh(_gibGeo, new TH.MeshStandardMaterial({ transparent: true }));
-  _wGib.position.set(0, -9999, 0); // off-screen
-  _wGib.frustumCulled = false; // must bypass CPU frustum culling, else the draw call (and shader compile) never happens
-  scene.add(_wGib);
+  // Pre-warm particle shaders + pooled FX geometry — prevents GPU stall on first
+  // kill (shader compile + VBO/VAO allocation happen on first render of each).
+  for (const g of _gibPool.items) { g.mesh.visible = true; g.mesh.position.set(0, -9999, 0); g.mesh.frustumCulled = false; }
+  const _wb = _ibPool.items[0];
+  _wb.group.visible = true; _wb.group.position.set(0, -9999, 0);
+  _wb.core.frustumCulled = false; _wb.glow.frustumCulled = false; _wb.points.frustumCulled = false;
+  _wb.points.geometry.setDrawRange(0, IB_MAX_PTS);
   renderer.render(scene, camera);
-  scene.remove(_wGib);
-  _wGib.material.dispose();
+  for (const g of _gibPool.items) { g.mesh.visible = false; g.mesh.frustumCulled = true; }
+  _wb.group.visible = false;
+  _wb.core.frustumCulled = true; _wb.glow.frustumCulled = true; _wb.points.frustumCulled = true;
+  _wb.points.geometry.setDrawRange(0, 0);
 
   requestAnimationFrame(frame);
 }
