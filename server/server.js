@@ -131,6 +131,14 @@ wss.on('connection', (ws) => {
       P.r.fromArray(data.r);
       P.u.fromArray(data.u);
       updatePair();
+    } else if (data.type === 'portal_remove') {
+      const P = gameState.portals[data.pi];
+      P.placed = false;
+      updatePair();
+      const msg = JSON.stringify(data);
+      wss.clients.forEach(c => {
+        if (c !== ws && c.readyState === 1) c.send(msg);
+      });
     } else if (data.type === 'blast_cubes') {
       data.cubes.forEach(c => {
          const cube = gameState.grabCubes[c.idx];

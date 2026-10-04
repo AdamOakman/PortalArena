@@ -44,6 +44,9 @@ export function initPortalRendering(ctx) {
 
   function parkClip() { clipPlane.normal.set(0, 1, 0); clipPlane.constant = 1e6; }
 
+  // A portal is visually "live" while placed, or while its close
+  // animation is still running.
+  const isLive = P => P.placed || P.closing;
   function renderPortalRecursive(i, parentCamMatrix, depth) {
     const pairIdx = Math.floor(i / 2);
     const qIdx = i % 2 === 0 ? i + 1 : i - 1;
@@ -92,7 +95,7 @@ export function initPortalRendering(ctx) {
     const texs = [null, null, null, null];
     if (depth < PORT.recursion) {
       for (let j = 0; j < 4; j++) {
-        if (portals[j].placed && portals[j % 2 === 0 ? j + 1 : j - 1].placed) {
+        if (isLive(portals[j]) && isLive(portals[j % 2 === 0 ? j + 1 : j - 1])) {
           texs[j] = renderPortalRecursive(j, _camMatrix, depth + 1);
         }
       }
@@ -148,7 +151,7 @@ export function initPortalRendering(ctx) {
     const texs = [null, null, null, null];
     for (let i = 0; i < 4; i++) {
       const qIdx = i % 2 === 0 ? i + 1 : i - 1;
-      if (portals[i].placed && portals[qIdx].placed) {
+      if (isLive(portals[i]) && isLive(portals[qIdx])) {
         texs[i] = renderPortalRecursive(i, camera.matrixWorld, 0);
       }
     }
@@ -159,7 +162,7 @@ export function initPortalRendering(ctx) {
         // canvas pass follows: default framebuffer has no hardware conversion,
         // so the quad must do the final linear→sRGB encode itself
         quadMats[i].uniforms.uEncode.value = 1;
-        quads[i].visible = portals[i].placed;
+        quads[i].visible = isLive(portals[i]);
       }
     }
   }
@@ -167,7 +170,7 @@ export function initPortalRendering(ctx) {
   function placePortalVisuals() {
     for (let i = 0; i < 4; i++) {
       const P = portals[i];
-      if (!P.placed) {
+      if (!P.placed && !P.closing) {
         quads[i].visible = false; frames[i].visible = false;
         glowLights[i].intensity = 0; sparkles[i].mesh.visible = false;
         continue;
