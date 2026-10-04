@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <title>Portal Arena — momentum is a promise</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400..900&family=IM+Fell+English:ital@0;1&display=swap" rel="stylesheet">
 <style>
   :root{
     /* Gothic palette drawn from the arena: torch flame, embers, bone,
@@ -11,11 +14,14 @@
     --fire:#ff7a22; --ember:#ffb34d;
     --bone:#e8e0d0; --bone-dim:#b3a892; --ash:#8a7a66;
     --bg:#0a0708;
-    --serif:Georgia, "Palatino Linotype", "Times New Roman", serif;
+    /* Gothic type: Cinzel for inscriptional headers and numerals,
+       IM Fell English for body text */
+    --display:"Cinzel", Georgia, "Times New Roman", serif;
+    --serif:"IM Fell English", Georgia, "Palatino Linotype", "Times New Roman", serif;
   }
   *{ margin:0; padding:0; box-sizing:border-box; }
   html,body{ width:100%; height:100%; overflow:hidden; background:var(--bg);
-    font-family:"Segoe UI", Consolas, monospace; color:#d8d0c0; user-select:none; }
+    font-family:var(--serif); color:#d8d0c0; user-select:none; }
   #gl{ position:fixed; inset:0; display:block; }
 
   /* ---------- HUD ---------- */
@@ -27,7 +33,7 @@
     border: 2px solid #e8e0d0; border-radius: 4px;
     background: rgba(10,7,8,0.45); box-shadow: 0 0 10px rgba(255,122,34,.45);
     display: flex; justify-content: center; align-items: center;
-    font-weight: bold; font-family: var(--serif); font-size: 16px; color: #ffe9c8;
+    font-weight: bold; font-family: var(--display); font-size: 16px; color: #ffe9c8;
   }
   #crosshair.grab::after { content: 'E'; }
   #aimring{ position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px;
@@ -36,7 +42,7 @@
   #aimring.invalid{ border-color:rgba(200,52,40,.6); }
   #speedbox{ position:absolute; left:24px; bottom:26px; width:230px; }
   #speedlabel{ font-size:11px; letter-spacing:.28em; color:var(--ash); margin-bottom:4px; }
-  #speedval{ font-size:30px; font-weight:700; color:var(--bone); text-shadow:0 0 14px rgba(255,122,34,.75); }
+  #speedval{ font-family:var(--display); font-size:30px; font-weight:700; color:var(--bone); text-shadow:0 0 14px rgba(255,122,34,.75); }
   #speedval span{ font-size:13px; color:var(--ash); font-weight:400; margin-left:4px; }
   #bar{ height:6px; margin-top:6px; background:rgba(255,255,255,.07); border:1px solid rgba(255,122,34,.18); border-radius:2px; overflow:hidden; }
   #barfill{ height:100%; width:0%; border-radius:1px;
@@ -54,19 +60,19 @@
   #matchbar{ position:absolute; top:12px; left:50%; transform:translateX(-50%);
     display:flex; align-items:center; gap:26px; }
   #matchbar .mseat{ display:flex; flex-direction:column; align-items:center; width:150px; }
-  #matchbar .mname{ font-family:var(--serif); font-size:14px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:#d8d0c0; }
+  #matchbar .mname{ font-family:var(--display); font-size:14px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:#d8d0c0; }
   #matchbar .mname.a{ color:#a8d48a; text-shadow:0 0 10px rgba(120,210,90,.4); }
   #matchbar .mname.b{ color:#e06a55; text-shadow:0 0 10px rgba(215,70,50,.4); }
-  #matchbar .mscore{ font-size:26px; font-weight:700; color:var(--bone); text-shadow:0 0 12px rgba(255,122,34,.5); line-height:1.15; }
+  #matchbar .mscore{ font-family:var(--display); font-size:26px; font-weight:700; color:var(--bone); text-shadow:0 0 12px rgba(255,122,34,.5); line-height:1.15; }
   #matchbar .mready{ font-size:10px; letter-spacing:.22em; color:var(--ash); min-height:14px; margin-top:2px; }
   #matchbar .mready.on{ color:var(--ember); text-shadow:0 0 8px rgba(255,179,77,.6); }
-  #matchbar .mtimer{ font-size:24px; font-weight:700; color:var(--bone); text-shadow:0 0 12px rgba(255,122,34,.55);
+  #matchbar .mtimer{ font-family:var(--display); font-size:24px; font-weight:700; color:var(--bone); text-shadow:0 0 12px rgba(255,122,34,.55);
     min-width:132px; text-align:center; letter-spacing:.04em; }
   #matchbar .mtimer.dim{ font-size:14px; color:#9a8a74; letter-spacing:.14em; text-shadow:none; }
   #statsboard{ position:absolute; top:22%; left:50%; transform:translate(-50%,-50%);
     min-width:620px; background:transparent; border:none; padding:0; }
-  #statsboard .sbtitle{ text-align:center; font-family:var(--serif); font-size:15px; letter-spacing:.3em; color:var(--ember); margin-bottom:12px; text-shadow:0 0 12px rgba(0,0,0,.9); }
-  #statstable{ width:100%; border-collapse:collapse; font-size:26px; color:var(--bone); }
+  #statsboard .sbtitle{ text-align:center; font-family:var(--display); font-size:15px; letter-spacing:.3em; color:var(--ember); margin-bottom:12px; text-shadow:0 0 12px rgba(0,0,0,.9); }
+  #statstable{ width:100%; border-collapse:collapse; font-family:var(--display); font-size:26px; color:var(--bone); }
   #statstable th{ text-align:center; font-size:13px; letter-spacing:.2em; color:var(--ash); font-weight:600; padding:0 30px 8px; text-shadow:0 0 10px rgba(0,0,0,.95); }
   #statstable td{ text-align:center; padding:6px 30px; text-shadow:0 0 10px rgba(0,0,0,.95); }
   #statstable tr.me td{ font-weight:700; text-shadow:0 0 14px rgba(255,122,34,.8); }
@@ -78,17 +84,30 @@
   /* ---------- overlays ---------- */
   .overlay{ position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
     background:radial-gradient(ellipse at 50% 38%, rgba(34,14,10,.85), rgba(8,5,6,.96)); }
-  .panel{ width:min(680px, 92vw); padding:38px 44px; border-radius:4px; text-align:center;
+  .panel{ position:relative; width:min(680px, 92vw); padding:38px 44px; border-radius:4px; text-align:center;
     background:linear-gradient(165deg, rgba(42,20,14,.93), rgba(16,9,9,.96));
-    border:1px solid rgba(255,122,34,.35); box-shadow:0 0 60px rgba(130,42,12,.28), 0 0 24px rgba(255,122,34,.10) inset; }
-  .panel h1{ font-family:var(--serif); font-size:40px; letter-spacing:.18em; color:var(--bone); text-shadow:0 0 24px rgba(255,122,34,.85); margin-bottom:2px; }
+    border:1px solid rgba(255,122,34,.35); outline:1px solid rgba(255,122,34,.16); outline-offset:5px;
+    box-shadow:0 0 60px rgba(130,42,12,.28), 0 0 24px rgba(255,122,34,.10) inset; }
+  /* wrought-iron corner brackets */
+  .panel::before, .panel::after{ content:''; position:absolute; width:26px; height:26px;
+    border-style:solid; border-color:rgba(255,122,34,.85); filter:drop-shadow(0 0 6px rgba(255,122,34,.5)); }
+  .panel::before{ top:9px; left:9px; border-width:2px 0 0 2px; }
+  .panel::after{ bottom:9px; right:9px; border-width:0 2px 2px 0; }
+  /* gothic ornament divider */
+  .divider{ display:flex; align-items:center; gap:14px; margin:20px 8px; color:var(--ember); }
+  .divider::before{ content:''; flex:1; height:1px;
+    background:linear-gradient(90deg, transparent, rgba(255,122,34,.55)); }
+  .divider::after{ content:''; flex:1; height:1px;
+    background:linear-gradient(90deg, rgba(255,122,34,.55), transparent); }
+  .divider span{ font-size:13px; text-shadow:0 0 10px rgba(255,122,34,.8); }
+  .panel h1{ font-family:var(--display); font-size:40px; letter-spacing:.18em; color:var(--bone); text-shadow:0 0 24px rgba(255,122,34,.85); margin-bottom:2px; }
   .panel h1 em{ font-style:normal; color:var(--ember); text-shadow:0 0 24px rgba(255,154,61,.8); }
-  .panel .sub{ color:var(--ash); font-size:13px; letter-spacing:.3em; margin-bottom:26px; }
+  .panel .sub{ color:var(--ash); font-family:var(--display); font-size:14px; letter-spacing:.28em; margin-bottom:26px; }
   .keys{ display:grid; grid-template-columns:auto auto; gap:5px 26px; justify-content:center; text-align:left;
     font-size:13.5px; color:var(--bone-dim); margin-bottom:24px; }
-  .keys b{ color:var(--bone); font-weight:600; }
+  .keys b{ font-family:var(--display); color:var(--bone); font-weight:600; }
   .btnrow{ display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-top:8px; }
-  button{ pointer-events:auto; cursor:pointer; font-family:inherit; font-size:14px; letter-spacing:.12em;
+  button{ pointer-events:auto; cursor:pointer; font-family:var(--display); font-size:14px; letter-spacing:.12em;
     color:#ffe9d4; background:rgba(255,122,34,.08); border:1px solid rgba(255,122,34,.5);
     padding:11px 22px; border-radius:2px; transition:.15s; }
   button:hover{ background:rgba(255,122,34,.22); box-shadow:0 0 18px rgba(255,122,34,.45); }
@@ -103,7 +122,7 @@
   input[type=range]{ accent-color:var(--fire); pointer-events:auto; }
   #winpanel h1{ color:#ffe9c8; text-shadow:0 0 26px rgba(255,180,80,.9); }
   #winstats{ font-size:15px; color:#d8d0c0; line-height:2; margin-bottom:10px; }
-  #winstats b{ color:#ffd9a8; }
+  #winstats b{ font-family:var(--display); color:#ffd9a8; }
   .hidden{ display:none !important; }
   #err{ position:fixed; inset:auto 0 0 0; padding:14px; text-align:center; color:#ffb0b0; font-size:13px; z-index:20; background:rgba(60,0,0,.7); }
 </style>
@@ -150,6 +169,7 @@
 <div class="overlay" id="startpanel">
   <div class="panel">
     <h1>PORTAL <em>ARENA</em></h1>
+    <div class="divider"><span>⚔</span></div>
     <div class="sub">MOMENTUM IS A PROMISE — COLLECT IT ON THE OTHER SIDE</div>
     <div class="keys">
       <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold to bunnyhop</span>
@@ -176,6 +196,7 @@
   <div class="panel">
     <h1>PAUSED</h1>
     <div class="sub">THE CHAMBER WAITS</div>
+    <div class="divider"><span>✠</span></div>
     <div class="btnrow">
       <button id="btnresume">RESUME</button><button id="btnnewmap" class="warm">NEW UNIVERSE (N)</button>
       <button id="btnfs">FULLSCREEN (F)</button>
@@ -192,6 +213,7 @@
   <div class="panel">
     <h1 id="winTitle">ROUND OVER</h1>
     <div class="sub" id="winSub">THE CHAMBER DECIDES</div>
+    <div class="divider"><span>✠</span></div>
     <div id="winstats"></div>
     <div class="btnrow"><button id="btnagain" class="warm">NEW UNIVERSE (N)</button><button id="btnsame">REPLAY THIS SEED</button></div>
   </div>
