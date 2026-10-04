@@ -178,15 +178,15 @@ function start(ns) {
         const L = new TH.PointLight(0xff6a2a, 26, 32, 2);
         L.position.set(x, y + 2 * s, z); group.add(L);
       } else if (d.t === 'arch') {
-        const w = 5.5;
-        put(stoneG, new TH.BoxGeometry(0.6, 4.6, 0.6), x - w / 2, y + 2.3, z, d.ry || 0);
-        put(stoneG, new TH.BoxGeometry(0.6, 4.6, 0.6), x + w / 2, y + 2.3, z, d.ry || 0);
-        put(stoneG, new TH.BoxGeometry(w + 1.2, 0.55, 0.6), x, y + 4.9, z, d.ry || 0);
-        const fin = new TH.ConeGeometry(1.0, 1.8, 4); fin.rotateY(Math.PI / 4); fin.translate(0, 0.9, 0);
-        put(stoneG, fin, x, y + 5.15, z, d.ry || 0);
+        const w = 5.5 * s;
+        put(stoneG, new TH.BoxGeometry(0.6 * s, 4.6 * s, 0.6 * s), x - w / 2, y + 2.3 * s, z, d.ry || 0);
+        put(stoneG, new TH.BoxGeometry(0.6 * s, 4.6 * s, 0.6 * s), x + w / 2, y + 2.3 * s, z, d.ry || 0);
+        put(stoneG, new TH.BoxGeometry(w + 1.2 * s, 0.55 * s, 0.6 * s), x, y + 4.9 * s, z, d.ry || 0);
+        const fin = new TH.ConeGeometry(1.0 * s, 1.8 * s, 4); fin.rotateY(Math.PI / 4); fin.translate(0, 0.9 * s, 0);
+        put(stoneG, fin, x, y + 5.15 * s, z, d.ry || 0);
       } else if (d.t === 'banner') {
         const arr = ((Math.round(x * 7 + z * 13) % 2) + 2) % 2 ? bannerPG : bannerRG;
-        put(arr, new TH.PlaneGeometry(1.1, 3.0), x, y, z, d.ry || 0);
+        put(arr, new TH.PlaneGeometry(1.1 * s, 3.0 * s), x, y, z, d.ry || 0);
       } else if (d.t === 'obelisk') {
         put(stoneG, new TH.BoxGeometry(1.6 * s, 9 * s, 1.6 * s), x, y + 4.5 * s, z, d.ry || 0);
         const tip = new TH.ConeGeometry(1.15 * s, 2.2 * s, 4); tip.rotateY(Math.PI / 4); tip.translate(0, 1.1 * s, 0);
@@ -1471,10 +1471,10 @@ function start(ns) {
     }
 
     if (!started) { // idle preview orbit while at menu — close, centered on the arena
-      // radius 40 < 50 keeps the camera inside the boundary walls for the whole orbit
+      // radius 20 < 25 keeps the camera inside the boundary walls for the whole orbit
       const t = now * 0.00012;
-      camera.position.set(Math.cos(t) * 40, 34, Math.sin(t) * 40);
-      camera.lookAt(0, 5, 0);
+      camera.position.set(Math.cos(t) * 20, 17, Math.sin(t) * 20);
+      camera.lookAt(0, 2.5, 0);
     } else if (!won) {
 
       const activeKeys = pointerLocked ? keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
