@@ -17,17 +17,21 @@ function mulberry32(a) {
 }
 
 /*
- * Dark medieval gothic duel arena, 100m x 100m.
+ * Dark medieval gothic duel arena, 50m x 50m.
  * No exit: the round is decided by kills only.
- * Everything is reachable on foot (steps <= 1.2m, ramp slopes <= 0.25),
+ * Everything is reachable on foot (steps <= 0.6m, ramp slopes <= 0.25),
  * no rocket jumps or portals required.
  *
- * Layout:
- *   - 100 x 100 floor, boundary walls (72m), corner towers (160m)
+ * Authored in a 100 x 100 design space below, then uniformly scaled by
+ * MAP_SCALE (0.5) at the end so every proportion, height and reachability
+ * is preserved — the map simply reads as a 50 x 50 arena.
+ *
+ * Layout (final, scaled):
+ *   - 50 x 50 floor, boundary walls (36m), corner towers (80m)
  *   - two concentric wall rings with gate gaps (passages) + gothic arches
- *   - central keep: 3 levels + a long ramp out to a spire platform (12m)
+ *   - central keep: 3 levels + a long ramp out to a spire platform (~6m)
  *   - 4 boundary vantages: long wall-hugging ramps up to mid + high
- *     platforms attached to the boundary walls (tops at ~18m)
+ *     platforms attached to the boundary walls (tops at ~9m)
  *   - 4 corner outposts (2 levels)
  *   - 12 rimmed lava pools (instant death, like the void)
  *   - cover: crates, low walls
@@ -244,8 +248,8 @@ export function generateMap(seedStr) {
   for (const [x, z] of [[42, 14], [-42, -14], [14, -42], [-14, 42]]) lavaPool(x + rr(-2, 2), z + rr(-2, 2), 3);
 
   // ------------------------------------------------------------- scattered cover
-   const spawnAnchors = [[-36, -36], [36, 36], [36, -36], [-36, 36], [30, -45], [-30, 45]];
-   for (const [ax, az] of spawnAnchors) reserveCircle(ax, az, 8); // keep spawn zones clear
+  const groundAnchors = [[-36, -36], [36, 36], [36, -36], [-36, 36]];
+  for (const [ax, az] of groundAnchors) reserveCircle(ax, az, 8); // keep spawn zones clear
   let placed = 0, tries = 0;
   while (placed < 30 && tries < 500) {
     tries++;
@@ -269,9 +273,11 @@ export function generateMap(seedStr) {
   }
 
   // ------------------------------------------------------------- spawns (6)
-  // 4 corners + 2 edge, all on open ground, facing the center.
-  // Edge anchors sit in the gaps left by the boundary vantage ramps.
-  for (const [ax, az] of spawnAnchors) {
+  // 4 ground corners + 2 high vantage platforms (east & west — a 180-deg
+  // symmetric pair for a fair duel). Ground spawns sit in the gaps left by
+  // the boundary vantage ramps; high spawns are fixed on the vantage tops.
+  // Every spawn faces the arena center.
+  for (const [ax, az] of groundAnchors) {
     let x = ax, z = az, ok = false;
     for (let i = 0; i < 24 && !ok; i++) {
       x = ax + (i ? rr(-4, 4) : 0); z = az + (i ? rr(-4, 4) : 0);
@@ -280,6 +286,9 @@ export function generateMap(seedStr) {
     const yaw = Math.atan2(-x, -z);
     spawns.push({ x, y: 0.05, z, yaw });
   }
+  // High-platform spawns: fixed exactly on the east/west vantage platforms.
+  for (const [hx, hz] of [[44, -33], [-44, 33]])
+    spawns.push({ x: hx, y: 17.75, z: hz, yaw: Math.atan2(-hx, -hz) });
 
   // ------------------------------------------------------------- gothic decor
   // torches: boundary walls + ring corners
@@ -324,5 +333,16 @@ export function generateMap(seedStr) {
     }
   }
 
+  // ------------------------------------------------------------------ scale
+  // Authored in a 100 x 100 design space (HALF = 50) above; ship at half
+  // size. Uniformly scale every position, dimension, radius and height by
+  // MAP_SCALE so all proportions and reachability are preserved. Angles
+  // (ry, rz, yaw) are untouched.
+  const MAP_SCALE = 0.5;
+  const sc3 = v => [v[0] * MAP_SCALE, v[1] * MAP_SCALE, v[2] * MAP_SCALE];
+  for (const sl of slabs) { sl.c = sc3(sl.c); sl.s = sc3(sl.s); }
+  for (const d of decor) { d.c = sc3(d.c); d.s = (d.s || 1) * MAP_SCALE; }
+  for (const l of lava) { l.x *= MAP_SCALE; l.z *= MAP_SCALE; l.r *= MAP_SCALE; l.y *= MAP_SCALE; }
+  for (const sp of spawns) { sp.x *= MAP_SCALE; sp.z *= MAP_SCALE; sp.y *= MAP_SCALE; }
   return { seed: seedStr, slabs, spawns, lava, decor, grabCubes: [], hints: [] };
 }
