@@ -13,7 +13,7 @@ export function initPortalRendering(ctx) {
       if (!portalRTs[d]) portalRTs[d] = [null, null, null, null];
       for (let i = 0; i < 4; i++) {
         if (portalRTs[d][i]) portalRTs[d][i].dispose();
-        portalRTs[d][i] = new TH.WebGLRenderTarget(dw, dh, { minFilter: TH.LinearFilter, magFilter: TH.LinearFilter });
+        portalRTs[d][i] = new TH.WebGLRenderTarget(dw, dh, { minFilter: TH.LinearFilter, magFilter: TH.LinearFilter, colorSpace: TH.SRGBColorSpace });
       }
     }
   }
@@ -120,6 +120,11 @@ export function initPortalRendering(ctx) {
     renderer.setRenderTarget(rt);
     renderer.clear();
 
+    // RT target is sRGB (hardware encodes on store) — quads must output linear here
+    for (let j = 0; j < 4; j++) {
+      if (quadMats[j]) quadMats[j].uniforms.uEncode.value = 0;
+    }
+
     skyGroup.position.setFromMatrixPosition(_camMatrix);
     renderer.render(scene, vcam);
 
@@ -142,6 +147,9 @@ export function initPortalRendering(ctx) {
     for (let i = 0; i < 4; i++) {
       if (quadMats[i]) {
         quadMats[i].uniforms.uTex.value = texs[i];
+        // canvas pass follows: default framebuffer has no hardware conversion,
+        // so the quad must do the final linear→sRGB encode itself
+        quadMats[i].uniforms.uEncode.value = 1;
         quads[i].visible = portals[i].placed;
       }
     }

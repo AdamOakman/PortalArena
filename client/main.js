@@ -615,8 +615,7 @@ function start(ns) {
 
   function portalShaderMat(color) {
     return new TH.ShaderMaterial({
-      transparent: true, side: TH.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4,
-      uniforms: { uTex: { value: null }, uColor: { value: new TH.Color(color) }, uTime: { value: 0 } },
+      uniforms: { uTex: { value: null }, uColor: { value: new TH.Color(color) }, uTime: { value: 0 }, uEncode: { value: 1 } },
       vertexShader: `varying vec2 vUv; varying vec4 vScreenPos; 
         void main(){ 
           vUv=uv; 
@@ -625,23 +624,26 @@ function start(ns) {
           gl_Position = pos; 
         }`,
         fragmentShader: `
-        uniform sampler2D uTex; uniform vec3 uColor; uniform float uTime; 
+        uniform sampler2D uTex; uniform vec3 uColor; uniform float uTime; uniform float uEncode;
         varying vec2 vUv; varying vec4 vScreenPos;
-        vec4 sRGBTransfer( vec4 value ) {
-            vec3 safeRgb = max( value.rgb, vec3( 0.0 ) );
-            vec3 low = safeRgb * 12.92;
-            vec3 high = pow( safeRgb, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 );
-            return vec4( mix( high, low, step( safeRgb, vec3( 0.0031308 ) ) ), value.a );
+        vec4 sRGBEncode( vec3 value ) {
+            vec3 safe = max( value, vec3( 0.0 ) );
+            vec3 low = safe * 12.92;
+            vec3 high = pow( safe, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 );
+            return vec4( mix( high, low, step( safe, vec3( 0.0031308 ) ) ), 1.0 );
         }
         void main(){
           vec2 p = vUv*2.0-1.0;
           float e = length(p);
           if(e>1.0) discard;
-          
+
           vec2 screenUv = (vScreenPos.xy / vScreenPos.w) * 0.5 + 0.5;
           vec4 tex = texture2D(uTex, screenUv);
-          
-          gl_FragColor = sRGBTransfer(vec4(tex.rgb, 1.0));
+          // RTs are sRGB (SRGB8_ALPHA8): sampling returns LINEAR and storing
+          // re-encodes in hardware. So RT passes pass through (uEncode=0); the
+          // final canvas pass has no hardware conversion and encodes here
+          // (uEncode=1). One encode per view, exactly like the direct view.
+          gl_FragColor = (uEncode > 0.5) ? sRGBEncode(tex.rgb) : vec4(tex.rgb, 1.0);
         }`
     });
   }
