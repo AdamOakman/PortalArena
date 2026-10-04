@@ -10,6 +10,7 @@ A browser portal game with Portal-style momentum physics and Warsow/Quake moveme
 - **Strafe-jump / circle-jump acceleration**: Quake movement model. Ground friction, ground accel capped at run speed, but *air* acceleration with a very high cap. Timing jumps and strafing builds speed far past run speed. The HUD bar goes hot/orange past run speed; FOV widens with speed.
 - **Grab and throw**: Interact with physics cubes scattered around the map. Pick them up and throw them through portals.
 - **Rockets**: Switch to the rocket launcher to bounce around!
+- **Portal & instagib audio FX**: three-part positional portal open/close sounds, an instagib shot sound emitted from the shooter, a zap where the beam strikes a wall, plus dark burnt scorch marks that stick to the hit surface for 30 s and fade out over 0.5 s — networked, so every player sees them, including through the portals.
 
 ## How to Play (Multiplayer)
 
