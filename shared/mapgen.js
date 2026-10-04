@@ -23,7 +23,7 @@ function mulberry32(a) {
  * no rocket jumps or portals required.
  *
  * Layout:
- *   - 100 x 100 floor, colossal boundary walls (144m), corner towers (160m)
+ *   - 100 x 100 floor, boundary walls (72m), corner towers (160m)
  *   - two concentric wall rings with gate gaps (passages) + gothic arches
  *   - central keep: 3 levels + a long ramp out to a spire platform (12m)
  *   - 4 boundary vantages: long wall-hugging ramps up to mid + high
@@ -65,7 +65,7 @@ export function generateMap(seedStr) {
   };
 
   // ------------------------------------------------------------- boundary
-  const BW = 144; // colossal walls
+  const BW = 72; // boundary walls
   add(0, BW / 2, -(HALF + 0.75), HALF * 2 + 3, BW, 1.5, WALL);
   add(0, BW / 2, HALF + 0.75, HALF * 2 + 3, BW, 1.5, WALL);
   add(-(HALF + 0.75), BW / 2, 0, 1.5, BW, HALF * 2, WALL);
