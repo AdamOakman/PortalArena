@@ -3,7 +3,7 @@ export function initPortalRendering(ctx) {
   const V3 = TH.Vector3;
   const M4 = TH.Matrix4;
 
-  const MAX_DEPTH = 3;
+  const MAX_DEPTH = 4;
   const portalRTs = [];
   function makeRTs() {
     const w = Math.max(256, Math.floor(innerWidth * 0.7)), h = Math.max(256, Math.floor(innerHeight * 0.7));
@@ -34,7 +34,7 @@ export function initPortalRendering(ctx) {
   const _T1 = new M4(), _T2 = new M4();       // used to build camMatrix — read before recursion
 
   // --- Per-depth scratch objects: these are read AFTER recursive calls return,
-  //     so each recursion level needs its own slot (MAX_DEPTH + 1 slots = 0..3)
+  //     so each recursion level needs its own slot (MAX_DEPTH + 1 slots = 0..4)
   const _camPool  = Array.from({ length: MAX_DEPTH + 1 }, () => new M4()); // virtual cam matrix
   const _posPool  = Array.from({ length: MAX_DEPTH + 1 }, () => new V3()); // parent cam position
 
@@ -108,11 +108,9 @@ export function initPortalRendering(ctx) {
     const oldFrameVis = frames[exitIdx].visible;
     const oldSparkVis = sparkles[exitIdx].mesh.visible;
     const oldQuadVis = quads[exitIdx].visible;
-    const oldSourceVis = quads[i].visible;
     frames[exitIdx].visible = false;
     sparkles[exitIdx].mesh.visible = false;
     quads[exitIdx].visible = false;
-    quads[i].visible = false;
 
     for (let j = 0; j < 4; j++) {
       if (quadMats[j]) quadMats[j].uniforms.uTex.value = texs[j];
@@ -128,7 +126,6 @@ export function initPortalRendering(ctx) {
     frames[exitIdx].visible = oldFrameVis;
     sparkles[exitIdx].mesh.visible = oldSparkVis;
     quads[exitIdx].visible = oldQuadVis;
-    quads[i].visible = oldSourceVis;
 
     return rt.texture;
   }
