@@ -103,7 +103,7 @@ export function generateMap(seedStr) {
           else if (side === 2) add((cur + b) / 2, h / 2, size, b - cur, h, 1.2, WALL);
           else add(-size, h / 2, (cur + b) / 2, 1.2, h, b - cur, WALL);
         }
-        decor.push({ t: 'arch', c: [side === 1 ? size : side === 3 ? -size : gc, 0, side === 0 ? -size : side === 2 ? size : gc], ry: side % 2 === 0 ? 0 : Math.PI / 2 });
+        decor.push({ t: 'arch', c: [side === 1 ? size : side === 3 ? -size : gc, 0, side === 0 ? -size : side === 2 ? size : gc], ry: side % 2 === 0 ? 0 : Math.PI / 2, s: h / 6.95 });
         if (lit) decor.push({ t: 'torch', c: [side === 1 ? size : side === 3 ? -size : gc, 5.2, side === 0 ? -size : side === 2 ? size : gc] });
         cur = gc + gapW / 2;
       }
@@ -117,7 +117,7 @@ export function generateMap(seedStr) {
         side % 2 === 0 ? size * 2 : 1.2, side % 2 === 0 ? 1.2 : size * 2);
     }
   }
-  ring(32, 7, 3, rr(4, 6), true);
+  ring(32, 8.2, 3, rr(4, 6), true);
   ring(16, 5, 2, rr(4, 5));
   for (const [bx, bz] of [[32, 0], [-32, 0], [0, 32], [0, -32]])
     decor.push({ t: 'brazier', c: [bx, 0, bz] });                        // ring-1 midpoints

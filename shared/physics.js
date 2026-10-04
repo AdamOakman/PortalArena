@@ -24,9 +24,11 @@ export function initPhysics(TH, CFG, PORT) {
     if (!pl.grounded) return;
     const speed = Math.hypot(pl.vel.x, pl.vel.z);
     if (speed < 0.02) { pl.vel.x = 0; pl.vel.z = 0; return; }
-    if (pl.groundNormal.y < 0.99 && speed > CFG.GMAX + 1) return;
-    
-    const drop = Math.max(speed, CFG.WALK) * CFG.FR * dt;
+    // Slopes use gentler friction so a downhill slide settles at a real
+    // terminal speed (G*sin(theta)/SLOPE_FR) instead of running away; flat
+    // ground keeps the strong FR for snappy stops.
+    const fr = pl.groundNormal.y < 0.99 ? CFG.SLOPE_FR : CFG.FR;
+    const drop = Math.max(speed, CFG.WALK) * fr * dt;
     const f = Math.max(0, speed - drop) / speed;
     pl.vel.x *= f; pl.vel.z *= f;
   }
