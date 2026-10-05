@@ -7,10 +7,16 @@ A browser portal game with Portal-style momentum physics and Warsow/Quake moveme
 - **Multiplayer**: Jump in with a friend! Player 1 controls Green and Dark Green portals, while Player 2 controls Light Red and Dark Red portals. You can seamlessly travel through each other's portals!
 - **Momentum through portals**: Velocity is rotated by the portal-pair transform. Fall into a floor portal, exit a wall portal - your falling speed becomes sideways speed. Speed magnitude is preserved (energy-conserving, like Portal).
 - **Portals stick to any flat face**: Floors, ceilings, vertical walls, and ramps of any angle - as long as the whole mouth fits on that one face. Shots that would clip a face edge are refused (buzz sound).
+- **Nested portal views**: Portals render recursively — look through one portal and you see through another portal nested in that view (up to 3 levels deep); views too small on screen are culled automatically.
 - **Strafe-jump / circle-jump acceleration**: Quake movement model. Ground friction, ground accel capped at run speed, but *air* acceleration with a very high cap. Timing jumps and strafing builds speed far past run speed. The HUD bar goes hot/orange past run speed; FOV widens with speed.
 - **Grab and throw**: Interact with physics cubes scattered around the map. Pick them up and throw them through portals.
-- **Rockets**: Switch to the rocket launcher to bounce around!
-- **Portal & instagib audio FX**: three-part positional portal open/close sounds, an instagib shot sound emitted from the shooter, a zap where the beam strikes a wall, plus dark burnt scorch marks that stick to the hit surface for 30 s and fade out over 0.5 s — networked, so every player sees them, including through the portals.
+- **Rockets**: Switch to the rocket launcher to blast around — rockets blow holes in the arena walls, and portals anchored to a destroyed wall are cancelled automatically.
+- **Portal & instagib audio FX**: three-part positional portal open/close sounds, an instagib shot sound emitted from the shooter, a zap where the beam strikes a wall, plus dark burnt scorch marks that stick to the hit surface for 30 s and fade out over 0.5 s — networked, so every player sees them, including through the portals. All rendered as stereo spatial audio with chamber reverb.
+- **Kill feed & event log**: kills, player connects/disconnects, and other events appear in a top-right event log that fades out after a while.
+
+## The Arena
+
+Each match takes place in a procedurally generated 50 × 50 m gothic duel arena: towering walls, high-platform spawns, lava pools that kill on touch, and a night sky with a flat moon, stars, and drifting clouds.
 
 ## How to Play (Multiplayer)
 
@@ -57,6 +63,7 @@ If a player disconnects mid-round, the round is voided and the scores reset for 
 | Space | Jump - hold it and land to bunnyhop |
 | 1 / 2 / 3 | Switch weapon (Portal Gun / Rocket Launcher / Instagib) |
 | LMB / RMB | Fire Portal 1 / Portal 2 (or Shoot Rocket) |
+| RMB (hold) | Zoom (Instagib) |
 | E | Grab / Drop physics cube |
 | Shift | Walk (precise positioning) |
 | C / Ctrl | Crouch |
