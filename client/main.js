@@ -1427,6 +1427,84 @@ function start(ns) {
      PORTAL RENDERING (Extracted)
      ======================================================================= */
   const { renderPortalViews, placePortalVisuals, makeRTs } = initPortalRendering({ TH, innerWidth, innerHeight, renderer, camera, scene, portals, PORT, R_AB, R_BA, frames, sparkles, quads, quadMats, glowLights, skyGroup });
+  /* Pre-warm the renderer after every map load.
+     three.js keys each lit shader program by the scene's point-light count,
+     and every map gets a random number of torch/brazier PointLights, so
+     swapping maps invalidates every compiled program. Programs of objects
+     that are not drawn in the first frame of the new map (the pooled kill
+     FX, the layer-1 player model that is only drawn through portal views)
+     would otherwise compile on first use — a visible hitch on the first
+     kill and on the first portal pair. One offscreen frame with all of
+     them visible compiles everything up front. */
+  function prewarmFX() {
+    camera.updateMatrixWorld();
+    const camPos = new TH.Vector3();
+    const camDir = new TH.Vector3();
+    camera.getWorldPosition(camPos);
+    camera.getWorldDirection(camDir);
+    if (camDir.lengthSq() < 0.1) camDir.set(0, 0, -1);
+
+    // Two portal pairs 2 units ahead of the camera: compiles the portal
+    // shaders, sparkles and the render-target passes.
+    portals.forEach(p => {
+      p.placed = true;
+      p.c.copy(camPos).addScaledVector(camDir, 2);
+      p.n.copy(camDir).negate();
+      const f = frameFor(p.n);
+      p.r.copy(f.r);
+      p.u.copy(f.u);
+    });
+    updatePair();
+    placePortalVisuals();
+    quads.forEach(q => q.visible = true);
+
+    // The local player model is on layer 1 — only drawn by the portal
+    // views — so park it just past the pre-warm portals, inside the portal
+    // camera's frustum, to compile its locally-clipped program now.
+    const pmPos = playerModel.position.clone();
+    const pmVis = playerModel.visible;
+    playerModel.visible = true;
+    playerModel.position.copy(camPos).addScaledVector(camDir, 3);
+
+    // Pooled kill FX: gibs + every instagib beam slot (a kill beam through a
+    // portal spans 2-4 segments; each slot's particle geometry allocates its
+    // VBO/VAO on first render, so all slots must be drawn once).
+    for (const g of _gibPool.items) { g.mesh.visible = true; g.mesh.position.set(0, -9999, 0); g.mesh.frustumCulled = false; }
+    for (const b of _ibPool.items) {
+      b.group.visible = true; b.group.position.set(0, -9999, 0);
+      b.core.frustumCulled = false; b.glow.frustumCulled = false; b.points.frustumCulled = false;
+      b.points.geometry.setDrawRange(0, IB_MAX_PTS);
+    }
+
+    // One scorch mark: its MeshBasicMaterial(map) program would otherwise
+    // compile on the first instagib wall hit.
+    const _ws = _scorchPool.items[0];
+    _ws.mesh.visible = true; _ws.mesh.position.set(0, -9999, 0); _ws.mesh.frustumCulled = false;
+
+    // Render to a throwaway target so the pre-warm frame never flashes on
+    // screen.
+    const _preRT = new TH.WebGLRenderTarget(64, 64);
+    renderer.setRenderTarget(_preRT);
+    renderPortalViews();
+    renderer.setRenderTarget(_preRT);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    _preRT.dispose();
+
+    // Tear the pre-warm state back down.
+    portals.forEach(p => { p.placed = false; p.closing = false; });
+    placePortalVisuals();
+    quads.forEach(q => q.visible = false);
+    playerModel.position.copy(pmPos);
+    playerModel.visible = pmVis;
+    for (const g of _gibPool.items) { g.mesh.visible = false; g.mesh.frustumCulled = true; }
+    for (const b of _ibPool.items) {
+      b.group.visible = false;
+      b.core.frustumCulled = true; b.glow.frustumCulled = true; b.points.frustumCulled = true;
+      b.points.geometry.setDrawRange(0, 0);
+    }
+    _ws.mesh.visible = false; _ws.mesh.frustumCulled = true;
+  }
 
   /* =======================================================================
      MAP LOADING / RESET
@@ -1538,6 +1616,7 @@ function start(ns) {
     won = false; localReady = false; lastInstagibTime = -999; lastRocketTime = -999;
     winPanel.classList.add('hidden');
     dom('seedinfo').textContent = seedStr;
+    prewarmFX();
   }
   function newMap(s) { 
     Network.send({ type: 'new_map', seed: s });
@@ -2082,48 +2161,8 @@ function start(ns) {
     makeRTs();
   });
 
-  /* first map (preview behind menu) */
+  /* first map (preview behind menu) — loadMap() runs the renderer pre-warm */
   loadMap(String(Math.floor(Math.random() * 1e9)));
-  
-  // Pre-warm the renderer to prevent stutter on first portal pair placement
-  camera.updateMatrixWorld();
-  const camPos = new TH.Vector3();
-  const camDir = new TH.Vector3();
-  camera.getWorldPosition(camPos);
-  camera.getWorldDirection(camDir);
-  if (camDir.lengthSq() < 0.1) camDir.set(0, 0, -1);
-  
-  portals.forEach(p => { 
-    p.placed = true; 
-    p.c.copy(camPos).add(camDir.clone().multiplyScalar(2));
-    p.n.copy(camDir).multiplyScalar(-1);
-    const f = frameFor(p.n);
-    p.r.copy(f.r);
-    p.u.copy(f.u);
-  });
-
-  updatePair();
-  placePortalVisuals();
-  quads.forEach(q => q.visible = true);
-  renderPortalViews();
-  renderer.render(scene, camera);
-  portals.forEach(p => { p.placed = false; p.closing = false; });
-  placePortalVisuals();
-  quads.forEach(q => q.visible = false);
-  renderer.clear();
-
-  // Pre-warm particle shaders + pooled FX geometry — prevents GPU stall on first
-  // kill (shader compile + VBO/VAO allocation happen on first render of each).
-  for (const g of _gibPool.items) { g.mesh.visible = true; g.mesh.position.set(0, -9999, 0); g.mesh.frustumCulled = false; }
-  const _wb = _ibPool.items[0];
-  _wb.group.visible = true; _wb.group.position.set(0, -9999, 0);
-  _wb.core.frustumCulled = false; _wb.glow.frustumCulled = false; _wb.points.frustumCulled = false;
-  _wb.points.geometry.setDrawRange(0, IB_MAX_PTS);
-  renderer.render(scene, camera);
-  for (const g of _gibPool.items) { g.mesh.visible = false; g.mesh.frustumCulled = true; }
-  _wb.group.visible = false;
-  _wb.core.frustumCulled = true; _wb.glow.frustumCulled = true; _wb.points.frustumCulled = true;
-  _wb.points.geometry.setDrawRange(0, 0);
 
   requestAnimationFrame(frame);
 }
