@@ -234,7 +234,7 @@ export function generateMap(seedStr) {
 
   // ------------------------------------------------------------- lava pools
   function lavaPool(x, z, r) {
-    const rim = 1.0;
+    const rim = 0.5; // low lip: easy to hop over accidentally, straight into the lava
     add(x, rim / 2, z - r - 0.5, 2 * r + 2, rim, 1, WALL);
     add(x, rim / 2, z + r + 0.5, 2 * r + 2, rim, 1, WALL);
     add(x - r - 0.5, rim / 2, z, 1, rim, 2 * r + 1, WALL);

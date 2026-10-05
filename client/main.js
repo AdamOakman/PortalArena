@@ -1558,6 +1558,7 @@ function start(ns) {
     requestAnimationFrame(frame);
     let dt = Math.min(0.05, (now - last) / 1000); last = now;
     AudioSys.listenerPos = pl.pos;
+    AudioSys.listenerYaw = pl.yaw;
     nowT += dt;
     if (started && isConnected && localPlayerId != null && nowT >= nextPingT) {
       Network.send({ type: 'ping', t: performance.now(), ping: lastPingMs });
