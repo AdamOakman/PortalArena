@@ -59,6 +59,7 @@ If a player disconnects mid-round, the round is voided and the scores reset for 
 | LMB / RMB | Fire Portal 1 / Portal 2 (or Shoot Rocket) |
 | E | Grab / Drop physics cube |
 | Shift | Walk (precise positioning) |
+| C / Ctrl | Crouch |
 | F | Fullscreen |
 | ESC | Pause Menu |
 | [ ] | FOV +5 (starts at 115) |
@@ -70,7 +71,19 @@ If a player disconnects mid-round, the round is voided and the scores reset for 
 ## Project Structure
 
 - `server/` - Node.js authoritative server (`server.js`) and global state (`gamestate.js`)
-- `client/` - Web client (`index.html`) and game engine / renderer (`main.js`)
+- `client/` - Web client (ES modules):
+  - `index.html` - UI shell (menu, HUD, panels)
+  - `main.js` - composition root: builds the shared game context `G` and initializes the modules below
+  - `engine.js` - renderer, scene, camera, sky
+  - `world.js` - map build, colliders, lava/hint zones, destructible walls
+  - `portals.js` - portal state, placement, A↔B pair transforms, portal visuals
+  - `weapons.js` - portal gun / rockets / instagib + pooled FX (smoke, scorch, gibs)
+  - `players.js` - local/remote players, movement stepping, death
+  - `input.js` - pointer lock, mouse/keyboard, menu controls
+  - `loop.js` - main animation frame
+  - `messages.js` - server → client message handling
+  - `render_portals.js` - mirrored portal view rendering (render targets)
+  - `models.js`, `textures.js`, `hud.js`, `audio.js`, `network.js` - supporting modules
 - `shared/` - Shared logic executed by both the server and client (`physics.js`, `constants.js`, `mapgen.js`)
 
 ## Development & LLM Guidelines
@@ -88,5 +101,13 @@ ESLint is configured via `eslint.config.js` to strictly catch:
 - Basic JavaScript syntax errors
 
 If ESLint returns any errors, you must fix them before attempting to start the client or server. Do not deploy untested code with active linter errors.
+
+## AI Tooling
+
+This project was designed and built with LLM assistance:
+
+- **Qwen3.8-Flash-Next** — the first outline of the project
+- **Qwen3.8-27B** — most of the development: adjustments and adding features
+- **agy CLI** with **Gemini 3.1 Pro** and **Claude Sonnet/Opus 4.6** — complex fixes, in particular physics edge cases and portal recursion
 
 
