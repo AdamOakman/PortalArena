@@ -47,8 +47,11 @@ export function generateMap(seedStr) {
   const decor = [];
   const lava = [];
   const spawns = [];
-  const add = (cx, cy, cz, sx, sy, sz, kind, ry = 0, rz = 0) =>
-    slabs.push({ c: [cx, cy, cz], s: [sx, sy, sz], kind, ry, rz });
+  const add = (cx, cy, cz, sx, sy, sz, kind, ry = 0, rz = 0, boundary = false) => {
+    const rec = { c: [cx, cy, cz], s: [sx, sy, sz], kind, ry, rz };
+    if (boundary) rec.boundary = true; // indestructible by rockets
+    slabs.push(rec);
+  };
 
   const PLAT = 'plat', RAMP = 'ramp', WALL = 'wall', LAVA = 'lava';
   const HALF = 50; // arena is 100 x 100
@@ -70,10 +73,10 @@ export function generateMap(seedStr) {
 
   // ------------------------------------------------------------- boundary
   const BW = 72; // boundary walls
-  add(0, BW / 2, -(HALF + 0.75), HALF * 2 + 3, BW, 1.5, WALL);
-  add(0, BW / 2, HALF + 0.75, HALF * 2 + 3, BW, 1.5, WALL);
-  add(-(HALF + 0.75), BW / 2, 0, 1.5, BW, HALF * 2, WALL);
-  add(HALF + 0.75, BW / 2, 0, 1.5, BW, HALF * 2, WALL);
+  add(0, BW / 2, -(HALF + 0.75), HALF * 2 + 3, BW, 1.5, WALL, 0, 0, true);
+  add(0, BW / 2, HALF + 0.75, HALF * 2 + 3, BW, 1.5, WALL, 0, 0, true);
+  add(-(HALF + 0.75), BW / 2, 0, 1.5, BW, HALF * 2, WALL, 0, 0, true);
+  add(HALF + 0.75, BW / 2, 0, 1.5, BW, HALF * 2, WALL, 0, 0, true);
   const TOWER_H = 160;
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     add(sx * HALF, TOWER_H / 2, sz * HALF, 14, TOWER_H, 14, WALL); // corner towers
