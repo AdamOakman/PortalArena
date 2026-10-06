@@ -187,7 +187,7 @@ export function initWorld(G) {
 
   function destroyWall(obb, point, normal) {
     if (obb.kind !== 'wall') return;
-    if (Math.abs(obb.ax[1].y) < 0.99) return; // Only vertical walls
+    if (obb.boundary) return; // Boundary walls are indestructible by rockets
     // Long axis = the wider horizontal extent; the other is the wall's thickness.
     const uIdx = obb.he[0] >= obb.he[2] ? 0 : 2;
     const tIdx = uIdx === 0 ? 2 : 0;
@@ -316,7 +316,7 @@ export function initWorld(G) {
       const q = new TH.Quaternion().setFromRotationMatrix(m);
       const ax = [new V3(1, 0, 0).applyQuaternion(q), new V3(0, 1, 0).applyQuaternion(q), new V3(0, 0, 1).applyQuaternion(q)];
       const rad = Math.hypot(sx, sy, sz) / 2 + 3;
-      G.obbs.push({ c: new V3(...rec.c), he: [sx / 2, sy / 2, sz / 2], ax, rad, kind, mesh: meshObj });
+      G.obbs.push({ c: new V3(...rec.c), he: [sx / 2, sy / 2, sz / 2], ax, rad, kind, boundary: rec.boundary, mesh: meshObj });
     }
 
     for (const kind in geoBatches) {
