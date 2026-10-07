@@ -180,43 +180,43 @@ export function generateMap(seedStr) {
   function vantage(side) {
     // side 0 = north (z -50), 1 = east (x +50), 2 = south (z +50), 3 = west (x -50)
     if (side === 0) {
-       ramp(-17.1, -44, 0, 40.2, 9.8, 6, 0);                // floor -> 9.8, x -37..3 (flush at mid edge)
-      add(10, 9.3, -44, 14, 1, 10, PLAT);                     // mid, top 9.8
-       ramp(-12, -40, 2, 33, 8, 6, 9.8);                // mid -> 17.7, x -29..5
-      add(-33, 17.2, -44, 12, 1, 8, PLAT);                    // high, top 17.7
+       ramp(-17.1, -44.5, 0, 40.2, 9.8, 11, 0);                // floor -> 9.8, x -37..3 (flush, z -50..-39, =mid width)
+      add(10, 9.3, -44.5, 14, 1, 11, PLAT);                     // mid, top 9.8 (z -50..-39)
+       ramp(-14, -47.25, 2, 37.5, 8, 5.5, 9.8);             // mid -> 17.7, x -33.4..5.4 (extended to shifted high, half width)
+      add(-37, 17.2, -45, 12, 1, 10, PLAT);                   // high, top 17.7 (x -43..-31 touches NW column, z -50..-40 flush wall)
       reserveRect(-6, -44, 46, 14);
       reserveRect(10, -44, 18, 12);
-      reserveRect(-33, -44, 16, 12);
+      reserveRect(-37, -44, 16, 12);
       decor.push({ t: 'torch', c: [10, 9.8, -44] });
       decor.push({ t: 'brazier', c: [-33, 17.7, -44] });
     } else if (side === 1) {
-       ramp(44, -17.1, 1, 40.2, 9.8, 6, 0);                 // floor -> 9.8, z -37..3 (flush at mid edge)
-      add(44, 9.3, 10, 10, 1, 14, PLAT);                      // mid, top 9.8
-       ramp(40, -12.67, 3, 33, 8, 6, 9.8);              // mid -> 17.7, z -29..4
-      add(44, 17.2, -33, 8, 1, 12, PLAT);                     // high, top 17.7
+       ramp(44.5, -17.1, 1, 40.2, 9.8, 11, 0);                 // floor -> 9.8, z -37..3 (flush, x 39..50, =mid width)
+      add(44.5, 9.3, 10, 11, 1, 14, PLAT);                      // mid, top 9.8 (x 39..50)
+       ramp(47.25, -14, 3, 37.5, 8, 5.5, 9.8);               // mid -> 17.7, z -33.4..5.4 (extended to shifted high, half width)
+      add(45, 17.2, -37, 10, 1, 12, PLAT);                    // high, top 17.7 (z -43..-31 touches NE column, x 40..50 flush wall)
       reserveRect(44, -6.67, 14, 46);
       reserveRect(44, 10, 14, 18);
-      reserveRect(44, -33, 12, 16);
+      reserveRect(44, -37, 12, 16);
       decor.push({ t: 'torch', c: [44, 9.8, 10] });
       decor.push({ t: 'brazier', c: [44, 17.7, -33] });
     } else if (side === 2) {
-       ramp(17.1, 44, 2, 40.2, 9.8, 6, 0);                  // floor -> 9.8, x 37..-3 (flush at mid edge)
-      add(-10, 9.3, 44, 14, 1, 10, PLAT);                     // mid, top 9.8
-       ramp(-19.67, 40, 2, 33, 8, 6, 9.8);             // mid -> 17.7, x -36..-3
-      add(-33, 17.2, 44, 12, 1, 8, PLAT);                     // high, top 17.7
+       ramp(17.1, 44.5, 2, 40.2, 9.8, 11, 0);                  // floor -> 9.8, x 37..-3 (flush, z 39..50, =mid width)
+      add(-10, 9.3, 44.5, 14, 1, 11, PLAT);                     // mid, top 9.8 (z 39..50)
+       ramp(-22.8, 47.25, 2, 33, 8, 5.5, 9.8);               // mid -> 17.7, x -40..-5.6 (repositioned to shifted high, half width)
+      add(-37, 17.2, 45, 12, 1, 10, PLAT);                   // high, top 17.7 (x -43..-31 touches SW column, z 40..50 flush wall)
       reserveRect(6, 44, 46, 14);
       reserveRect(-10, 44, 18, 12);
-      reserveRect(-33, 44, 16, 12);
+      reserveRect(-37, 44, 16, 12);
       decor.push({ t: 'torch', c: [-10, 9.8, 44] });
       decor.push({ t: 'brazier', c: [-33, 17.7, 44] });
     } else {
-       ramp(-44, 17.1, 3, 40.2, 9.8, 6, 0);                 // floor -> 9.8, z 37..-3 (flush at mid edge)
-      add(-44, 9.3, -10, 10, 1, 14, PLAT);                    // mid, top 9.8
-       ramp(-40, 12.67, 1, 33, 8, 6, 9.8);              // mid -> 17.7, z -4..29
-      add(-44, 17.2, 33, 8, 1, 12, PLAT);                     // high, top 17.7
+       ramp(-44.5, 17.1, 3, 40.2, 9.8, 11, 0);                 // floor -> 9.8, z 37..-3 (flush, x -50..-39, =mid width)
+      add(-44.5, 9.3, -10, 11, 1, 14, PLAT);                    // mid, top 9.8 (x -50..-39)
+       ramp(-47.25, 9, 1, 47.5, 8, 5.5, 9.8);                // mid -> 17.7, z -15.3..33.3 (extended to shifted high, half width)
+      add(-45, 17.2, 37, 10, 1, 12, PLAT);                    // high, top 17.7 (z 31..43 touches SW column, x -50..-40 flush wall)
       reserveRect(-44, 6.67, 14, 46);
       reserveRect(-44, -10, 14, 18);
-      reserveRect(-44, 33, 12, 16);
+      reserveRect(-44, 37, 12, 16);
       decor.push({ t: 'torch', c: [-44, 9.8, -10] });
       decor.push({ t: 'brazier', c: [-44, 17.7, 33] });
     }
