@@ -180,7 +180,10 @@ export function initPlayers(G) {
       if (G.pl.viewOffset.angleTo(id) < 0.001) G.pl.viewOffset = null;
       else camera.quaternion.multiply(G.pl.viewOffset);
     }
-    if (G.activeWeapon === 3 && G.isZooming) {
+    // Zoom: Z / L-Shift scope in with any weapon, RMB with rocket & instagib.
+    // Not possible on the death camera — decays back out even while held.
+    const zoomHeld = !G.isDead && (G.keys['KeyZ'] || G.keys['ShiftLeft'] || (G.isZooming && (G.activeWeapon === 2 || G.activeWeapon === 3)));
+    if (zoomHeld) {
        G.zoomAmt = Math.min(1.0, G.zoomAmt + dt / 0.1);
     } else {
        G.zoomAmt = Math.max(0.0, G.zoomAmt - dt / 0.1);

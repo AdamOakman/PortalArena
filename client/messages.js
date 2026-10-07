@@ -21,6 +21,9 @@ export function onMessage(G, data) {
     G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
 
     G.started = true; G.startPanel.classList.add('hidden');
+    G.gun.visible = (G.activeWeapon === 1);
+    G.rocketGun.visible = (G.activeWeapon === 2);
+    G.instagibGun.visible = (G.activeWeapon === 3);
     if (G.currentSeed !== data.seed) G.loadMap(data.seed);
     if (data.spawn) { G.pl.pos.fromArray(data.spawn); G.pl.vel.set(0, 0, 0); G.pl.cp.copy(G.pl.pos); }
     G.isConnected = true;

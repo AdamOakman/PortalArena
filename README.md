@@ -64,9 +64,10 @@ If a player disconnects mid-round, the round is voided and the scores reset for 
 | Space | Jump - hold it and land to bunnyhop |
 | 1 / 2 / 3 | Switch weapon (Portal Gun / Rocket Launcher / Instagib) |
 | LMB / RMB | Fire Portal 1 / Portal 2 (or Shoot Rocket) |
-| RMB (hold) | Zoom (Instagib) |
+| RMB (hold) | Zoom (Rocket / Instagib) |
+| Z (hold) | Zoom (all weapons) |
 | E | Grab / Drop physics cube |
-| Shift | Walk (precise positioning) |
+| Shift | Walk (precise positioning) + Zoom (all weapons, left shift) |
 | C / Ctrl | Crouch |
 | F | Fullscreen |
 | ESC | Pause Menu |

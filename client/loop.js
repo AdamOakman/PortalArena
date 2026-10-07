@@ -25,6 +25,7 @@ export function initLoop(G) {
       const t = now * 0.00012;
       G.camera.position.set(Math.cos(t) * 20, 17, Math.sin(t) * 20);
       G.camera.lookAt(0, 2.5, 0);
+      G.gun.visible = false; G.rocketGun.visible = false; G.instagibGun.visible = false; // no weapon in the menu orbit view
     } else if (!G.won) {
 
       const activeKeys = G.pointerLocked ? G.keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
