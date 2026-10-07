@@ -72,7 +72,7 @@ export function initInput(G) {
     }
     else if (e.button === 2) {
       if (G.activeWeapon === 1 && !G.grabbedCube) G.firePortal(G.localPlayerIndex * 2 + 1);
-      else if (G.activeWeapon === 3) G.isZooming = true;
+      else if (G.activeWeapon === 2 || G.activeWeapon === 3) G.isZooming = true;
     }
   });
   document.addEventListener('mouseup', e => {
