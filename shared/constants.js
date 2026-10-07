@@ -6,7 +6,8 @@ export const CFG = {
   GMAX: 12.0, 
   WALK: 6.0, 
   AIRCAP: 35,
-  AACC: 12, 
+  AACC: 8, 
+  STRAFE_FOLLOW: 1.0, // air-strafe: heading follows the mouse turn 1:1 (keeps velocity 90° off the wish, so momentum is preserved)
   GACC: 80, 
   FR: 7.5, 
   SLOPE_FR: 1.2, // slope friction: gives downhill slides a terminal speed (G*sin/SLOPE_FR)

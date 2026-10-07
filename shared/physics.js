@@ -213,6 +213,10 @@ export function initPhysics(TH, CFG, PORT) {
 
   function physStep(pl, keys, autohop, dt, obbs, portals, grabCubes, grabbedCube, tpState, events) {
     if (pl.grounded) pl.groundT = tpState.nowT;
+    // Yaw change since the previous step; gates air-strafing (the mouse must
+    // be turning with the held strafe key).
+    const dyaw = pl.yaw - (pl.prevYaw ?? pl.yaw);
+    pl.prevYaw = pl.yaw;
     const wish = wishDir(keys, pl.yaw);
     applyFriction(pl, dt);
     const wantWalk = keys.ShiftLeft || keys.ShiftRight;
@@ -221,6 +225,7 @@ export function initPhysics(TH, CFG, PORT) {
     else if (wish) {
       accelerate(pl.vel, wish, CFG.AACC, CFG.AIRCAP, dt);
       if (!keys.KeyA && !keys.KeyD && (keys.KeyW || keys.KeyS)) {
+        // Forward glide: W/S alone curves the path without losing speed.
         const speed = Math.hypot(pl.vel.x, pl.vel.z);
         if (speed > 1.0) {
           const vDir = new V3(pl.vel.x, 0, pl.vel.z).normalize();
@@ -229,6 +234,25 @@ export function initPhysics(TH, CFG, PORT) {
             vDir.lerp(wish, 4.0 * dt).normalize();
             pl.vel.x = vDir.x * speed;
             pl.vel.z = vDir.z * speed;
+          }
+        }
+      } else if (!keys.KeyW && !keys.KeyS && (keys.KeyA || keys.KeyD)) {
+        // Air-strafe (Quake's accidental mechanic, made explicit): release the
+        // forward key, hold A/D, and turn the mouse in that same direction ->
+        // the heading rotates toward the strafe direction, following the mouse
+        // turn (STRAFE_FOLLOW x) at preserved magnitude: the flight path curves
+        // without losing momentum.
+        const turningWithStrafe = (keys.KeyA && dyaw > 0) || (keys.KeyD && dyaw < 0);
+        if (turningWithStrafe) {
+          const speed = Math.hypot(pl.vel.x, pl.vel.z);
+          if (speed > 1.0) {
+            const vx = pl.vel.x / speed, vz = pl.vel.z / speed;
+            // Signed angle from the current heading to the strafe wish (XZ plane)
+            const a = Math.atan2(vx * wish.z - vz * wish.x, vx * wish.x + vz * wish.z);
+            const turn = Math.min(Math.abs(dyaw) * CFG.STRAFE_FOLLOW, Math.abs(a));
+            const sa = Math.sign(a) * turn;
+            pl.vel.x = speed * (vx * Math.cos(sa) - vz * Math.sin(sa));
+            pl.vel.z = speed * (vx * Math.sin(sa) + vz * Math.cos(sa));
           }
         }
       }
