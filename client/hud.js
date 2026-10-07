@@ -8,6 +8,7 @@ function fmtTime(t, tenths) {
 export function initHUD(document) {
   const dom = id => document.getElementById(id);
   const hud = { 
+    root: dom('hud'),
     speed: dom('speedval'), 
     fill: dom('barfill'), 
     hint: dom('hint'), 
@@ -65,8 +66,10 @@ export function initHUD(document) {
   }
 
   function updateHUD(state) {
-    const { pl, CFG, currentSeed, hit, msg, match, localReady, localIndex, statsOpen, localPid } = state;
-    
+    const { pl, CFG, currentSeed, hit, msg, match, localReady, localIndex, statsOpen, localPid, started } = state;
+
+    // The whole HUD stays hidden in the main menu (orbit preview)
+    hud.root.classList.toggle('hidden', !started);
     // Speed
     const sp = pl.vel.length();
     hud.speed.innerHTML = Math.round(sp * 10) + '<span>u/s</span>';

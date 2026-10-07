@@ -412,7 +412,7 @@ export function initLoop(G) {
     const aimDir = new V3(0, 0, -1).applyQuaternion(G.camera.quaternion).normalize();
     const hit = G.raycast(G.camera.getWorldPosition(new V3()), aimDir, 140);
 
-    G.updateHUD({ pl: G.pl, CFG, currentSeed: G.currentSeed, hit, msg: !G.isConnected ? "RECONNECTING..." : msg, match: G.match, localReady: G.localReady, localIndex: G.localPlayerIndex, statsOpen: G.statsOpen, localPid: G.localPlayerId });
+    G.updateHUD({ started: G.started, pl: G.pl, CFG, currentSeed: G.currentSeed, hit, msg: !G.isConnected ? "RECONNECTING..." : msg, match: G.match, localReady: G.localReady, localIndex: G.localPlayerIndex, statsOpen: G.statsOpen, localPid: G.localPlayerId });
     G.skyGroup.position.copy(G.camera.position);
     G.updateSky(G.nowT);
     G.renderer.setRenderTarget(null);
