@@ -22,15 +22,23 @@ export function initPhysics(TH, CFG, PORT) {
 
   function applyFriction(pl, dt) {
     if (!pl.grounded) return;
-    const speed = Math.hypot(pl.vel.x, pl.vel.z);
-    if (speed < 0.02) { pl.vel.x = 0; pl.vel.z = 0; return; }
-    // Slopes use gentler friction so a downhill slide settles at a real
-    // terminal speed (G*sin(theta)/SLOPE_FR) instead of running away; flat
-    // ground keeps the strong FR for snappy stops.
-    const fr = pl.groundNormal.y < 0.99 ? CFG.SLOPE_FR : CFG.FR;
-    const drop = Math.max(speed, CFG.WALK) * fr * dt;
+    // A slope is any grounded face more than ~8° from horizontal. Slopes use
+    // gentler friction so a downhill slide settles at a real terminal speed
+    // (G*sin(theta)/SLOPE_FR); flat ground keeps the strong FR for snappy
+    // stops. The WALK stop floor applies only on flat ground — on slopes the
+    // stop is SLOPE_STOP so slow slides stay sustainable. On a slope the full
+    // 3-D tangential velocity is damped (it carries a y component); on flat
+    // ground y is 0 while grounded, so damping x/z is exact there.
+    const isSlope = pl.groundNormal.y < 0.99;
+    const fr = isSlope ? CFG.SLOPE_FR : CFG.FR;
+    const stop = isSlope ? CFG.SLOPE_STOP : CFG.WALK;
+    const v = pl.vel;
+    const speed = isSlope ? v.length() : Math.hypot(v.x, v.z);
+    if (speed < 0.02) { v.x = 0; v.z = 0; if (isSlope) v.y = 0; return; }
+    const drop = Math.max(speed, stop) * fr * dt;
     const f = Math.max(0, speed - drop) / speed;
-    pl.vel.x *= f; pl.vel.z *= f;
+    v.x *= f; v.z *= f;
+    if (isSlope) v.y *= f;
   }
 
   function playerHeight(crouchT) {
@@ -95,16 +103,16 @@ export function initPhysics(TH, CFG, PORT) {
         p.addScaledVector(n, depth + 0.0005);
         const vn = pl.vel.dot(n);
         if (vn < 0) {
-          const oldSpd = pl.vel.length();
+          // Absorb the normal component only: the surface cancels it. The
+          // tangential part (including its y component on a slope) survives,
+          // so ramps can be walked up at any speed with no running start —
+          // and no energy is injected on landing, sliding, or hopping.
           pl.vel.addScaledVector(n, -vn);
-          // Slopes (8°..84° from horizontal) always preserve the player's
-          // momentum so ramps can be walked up at any speed — no running start.
-          if (n.y > 0.1 && n.y < 0.99) {
-            const newSpd = pl.vel.length();
-            if (newSpd > 0.001) pl.vel.multiplyScalar(oldSpd / newSpd);
-          }
         }
-        if (n.y > 0.5) {
+        // Any face within 84° of horizontal grounds the player (friction,
+        // jumping, coyote time all apply); only near-vertical walls (n.y
+        // < 0.1) count as air contacts.
+        if (n.y > 0.1) {
           if (!pl.grounded && vn < -6 && events && events.onLand) events.onLand(Math.min(1, -vn / 24));
           pl.grounded = true;
           pl.groundNormal.copy(n);
@@ -221,9 +229,31 @@ export function initPhysics(TH, CFG, PORT) {
     applyFriction(pl, dt);
     const wantWalk = keys.ShiftLeft || keys.ShiftRight;
     const crouchScale = 1 - (pl.crouchT || 0) * 0.5;
-    if (pl.grounded) accelerate(pl.vel, wish, CFG.GACC, (wantWalk ? CFG.WALK : CFG.GMAX) * crouchScale, dt);
+    if (pl.grounded) {
+      // On a slope, drive along the surface: project the (horizontal) wish
+      // onto the tangent plane of the ground normal so GACC builds tangential
+      // speed the surface can sustain. Flat ground (normal = +y) projects to
+      // the identity, so flat behavior is unchanged.
+      let gw = wish;
+      if (wish) {
+        const dot = wish.dot(pl.groundNormal);
+        if (Math.abs(dot) > 1e-4) {
+          gw = wish.clone().addScaledVector(pl.groundNormal, -dot);
+          if (gw.lengthSq() < 1e-6) gw = null;
+          else gw.normalize();
+        }
+      }
+      accelerate(pl.vel, gw, CFG.GACC, (wantWalk ? CFG.WALK : CFG.GMAX) * crouchScale, dt);
+    }
     else if (wish) {
-      accelerate(pl.vel, wish, CFG.AACC, CFG.AIRCAP, dt);
+      // Air acceleration is the strafe reward: it applies only while a
+      // strafe key (A/D) is held, where the wish carries a lateral component
+      // and accelerate() builds speed toward AIRCAP as the strafe rotates
+      // the heading off the velocity. Straight W/S in the air adds no speed,
+      // so a straight bunnyhop preserves its launch speed for free.
+      if (keys.KeyA || keys.KeyD) {
+        accelerate(pl.vel, wish, CFG.AACC, CFG.AIRCAP, dt);
+      }
       if (!keys.KeyA && !keys.KeyD && (keys.KeyW || keys.KeyS)) {
         // Forward glide: W/S alone curves the path without losing speed.
         const speed = Math.hypot(pl.vel.x, pl.vel.z);

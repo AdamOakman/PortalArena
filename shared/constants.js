@@ -11,6 +11,7 @@ export const CFG = {
   GACC: 80, 
   FR: 7.5, 
   SLOPE_FR: 1.2, // slope friction: gives downhill slides a terminal speed (G*sin/SLOPE_FR)
+  SLOPE_STOP: 0.5, // slope stop speed: small, so slow slides stay sustainable (flat ground keeps WALK)
   JUMPV: 8.6,
   COYOTE: 0.09, 
   BUFFER: 0.11,
