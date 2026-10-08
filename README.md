@@ -4,14 +4,14 @@ A browser portal game with Portal-style momentum physics and Warsow/Quake moveme
 
 ## Features
 
-- **Multiplayer**: Jump in with a friend! Player 1 controls Green and Dark Green portals, while Player 2 controls Light Red and Dark Red portals. You can seamlessly travel through each other's portals!
+- **Multiplayer & Bot Support**: Jump in with a friend or practice against AI bots! When the server is empty or only one player is connected, bots automatically populate the arena to practice against. When a second human player joins, bots are replaced, and the duel gamestate resets back to warmup.
 - **Momentum through portals**: Velocity is rotated by the portal-pair transform. Fall into a floor portal, exit a wall portal - your falling speed becomes sideways speed. Speed magnitude is preserved (energy-conserving, like Portal).
-- **Portals stick to any flat face**: Floors, ceilings, vertical walls, and ramps of any angle - as long as the whole mouth fits on that one face. Shots that would clip a face edge are refused (buzz sound).
+- **Portals stick to any flat face**: Floors, ceilings, vertical walls, and ramps of any angle - as long as the whole mouth fits on that one face. Shots that would clip a face edge, overlap an existing portal, or target a destroyed wall are refused (buzz sound). Portal gun placements have a 0.2s cooldown.
 - **Nested portal views**: Portals render recursively — look through one portal and you see through another portal nested in that view (up to 3 levels deep); views too small on screen are culled automatically.
 - **Strafe-jump / circle-jump acceleration**: Quake movement model. Ground friction, ground accel capped at run speed. *Air* acceleration with a very high cap applies only while a strafe key (A/D) is held — timing jumps and strafing builds speed far past run speed, while a straight W-only bunnyhop preserves speed with no free gains. The HUD bar goes hot/orange past run speed; FOV widens with speed.
 - **Air-strafing**: the classic Quake accidental mechanic. Mid-air, release the forward key, hold A or D, and turn your mouse in that same direction — your flight path curves without losing momentum, so you can steer long jumps and bank around corners at full speed.
 - **Grab and throw**: Interact with physics cubes scattered around the map. Pick them up and throw them through portals.
-- **Rockets**: Switch to the rocket launcher to blast around — rockets blow holes in the arena walls (the boundary walls are indestructible), and portals anchored to a destroyed wall are cancelled automatically.
+- **Rockets**: Switch to the rocket launcher to blast around — rockets blow holes in thin arena walls (boundary walls and corner towers are indestructible), launch players and bots with explosion knockback impulses, and portals anchored to a destroyed wall are cancelled automatically.
 - **Portal & instagib audio FX**: three-part positional portal open/close sounds, an instagib shot sound emitted from the shooter, a zap where the beam strikes a wall, plus dark burnt scorch marks that stick to the hit surface for 30 s and fade out over 0.5 s — networked, so every player sees them, including through the portals. All rendered as stereo spatial audio with chamber reverb.
 - **Kill feed & event log**: kills, player connects/disconnects, and other events appear in a top-right event log that fades out after a while.
 
@@ -46,14 +46,15 @@ To test multiplayer locally, simply open a second tab or window to the same addr
 
 ### 4. Duel Rounds (Score System)
 
-The game is a two-player duel that runs in rounds:
+The game is a duel that runs in rounds:
 
-1. **Waiting** — a duel only exists when *both* players are connected; until then the top-center scoreboard shows `WAITING FOR OPPONENT`.
-2. **Warmup (up to 1 minute)** — both players can move and shoot freely (kills don't score). Press **R** to ready up; the moment *both* players are ready the round starts. If not, it starts automatically after 60 seconds.
-3. **Round (5 minutes)** — both players are reset to the map's starting position, then a countdown timer runs at the top center of the screen. Each kill (instagib beam) scores **+1** for the killer, shown next to each player's name on either side of the timer.
-4. **Summary** — when the 5 minutes elapse, a panel declares who won (most kills; equal kills = draw), showing each player's kill count and the cumulative rounds-won tally. **N** / *New Universe* or *Replay This Seed* starts the next round (new or same map) straight into warmup.
+1. **Waiting** — until at least two combatants (human or bot) are present, the top-center scoreboard displays `WAITING FOR OPPONENT`.
+2. **Warmup (up to 1 minute)** — players can move and practice shooting freely. Press **R** to ready up. When both players are ready (or the warmup timer expires), the match initiates a countdown. Any walls destroyed during warmup and all placed portals are cleanly reset.
+3. **Countdown (3, 2, 1, FIGHT!)** — a large animated countdown displays in the center of the screen with audio cues. Player movement and weapon firing are temporarily frozen while players aim and prepare.
+4. **Round (5 minutes)** — players spawn into active duel positions and the round timer begins. Each instagib kill scores **+1** for the killer (+2 for portal frags; -1 for void/lava suicides), shown next to each player's name on either side of the timer.
+5. **Summary** — when the round elapses, a panel declares the winner (most kills; equal kills = draw), showing each player's kill count and the cumulative rounds-won tally. **N** / *New Universe* or *Replay This Seed* starts the next round (new or same map) straight into warmup.
 
-If a player disconnects mid-round, the round is voided and the scores reset for the next one.
+If a human player disconnects mid-round, the round is voided and the scores reset for the next one. Joining when an existing human is playing against a bot smoothly kicks the bot and resets to warmup.
 
 ## Controls
 
