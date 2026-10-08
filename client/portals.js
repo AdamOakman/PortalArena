@@ -131,6 +131,10 @@ export function initPortals(G) {
   }
 
   function tryPlace(pi, hit) {
+    if (hit.obb.noPortal || hit.obb.destroyed) {
+      AudioSys.tone(220, 120, 0.15, 'square', 0.06);
+      return false;
+    }
     const P = G.portals[pi];
     const n = hit.normal.clone().normalize();
     const f = frameFor(n);
@@ -161,16 +165,19 @@ export function initPortals(G) {
 
     // Reconstruct c and offset slightly
     c.copy(hit.obb.c).add(dvec).addScaledVector(n, 0.02);
-    /* no overlapping placement on the same face */
+    /* no overlapping placement on the same face or intersecting nearby */
     for (let i = 0; i < G.portals.length; i++) {
       if (i === pi) continue;
       const Q = G.portals[i];
       if (Q.placed) {
-        const sameFace = Math.abs(n.dot(Q.n)) > 0.999 && Math.abs(c.clone().sub(Q.c).dot(n)) < 0.08;
+        const sameFace = Math.abs(n.dot(Q.n)) > 0.98 && Math.abs(c.clone().sub(Q.c).dot(n)) < 0.2;
         if (sameFace) {
           const d = c.clone().sub(Q.c);
           const du = Math.abs(d.dot(f.r)), dv = Math.abs(d.dot(f.u));
           if (du < PORT.hw * 2 + 0.35 && dv < PORT.hh * 2 + 0.35) { AudioSys.tone(220, 120, 0.15, 'square', 0.06); return false; }
+        }
+        if (c.distanceTo(Q.c) < Math.max(PORT.hw, PORT.hh) * 1.5) {
+          AudioSys.tone(220, 120, 0.15, 'square', 0.06); return false;
         }
       }
     }

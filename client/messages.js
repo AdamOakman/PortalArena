@@ -25,6 +25,19 @@ export function onMessage(G, data) {
     G.rocketGun.visible = (G.activeWeapon === 2);
     G.instagibGun.visible = (G.activeWeapon === 3);
     if (G.currentSeed !== data.seed) G.loadMap(data.seed);
+    if (data.destroyedWalls && data.destroyedWalls.length > 0) {
+      for (const dw of data.destroyedWalls) {
+        const cCenter = dw.wallCenter ? new V3(...dw.wallCenter) : null;
+        const cPt = new V3(...dw.point);
+        let obb = null;
+        if (dw.wallId) obb = G.obbs.find(o => o.id === dw.wallId);
+        if (!obb && cCenter) obb = G.obbs.find(o => o.c.distanceTo(cCenter) < 0.3);
+        if (!obb) obb = G.obbs.find(o => o.kind === 'wall' && !o.boundary && o.c.distanceTo(cPt) <= o.rad + 0.5);
+        if (obb) {
+          G.destroyWall(obb, cPt, dw.normal ? new V3(...dw.normal) : null, false);
+        }
+      }
+    }
     if (data.spawn) { G.pl.pos.fromArray(data.spawn); G.pl.vel.set(0, 0, 0); G.pl.cp.copy(G.pl.pos); }
     G.isConnected = true;
     if (data.match) {
@@ -41,6 +54,12 @@ export function onMessage(G, data) {
     G.addEventLog(data.name + ' dropped from the game');
   } else if (data.type === 'map_change') {
     G.loadMap(data.seed);
+    if (data.spawn) {
+      G.pl.pos.fromArray(data.spawn);
+      G.pl.vel.set(0, 0, 0);
+      G.pl.cp.copy(G.pl.pos);
+      G.pl.yaw = Math.atan2(-data.spawn[0], -data.spawn[2]);
+    }
   } else if (data.type === 'state') {
     if (data.match) {
       G.match = data.match;
@@ -49,6 +68,14 @@ export function onMessage(G, data) {
       G.won = (G.match.phase === 'summary');
       if (G.won) { if (G.winPanel.classList.contains('hidden')) G.showSummary(); }
       else if (!G.winPanel.classList.contains('hidden')) G.winPanel.classList.add('hidden');
+      if (data.match.phase === 'countdown') {
+        if (!G.countdownActive) {
+          G.countdownActive = true;
+          if (G.showCountdown) G.showCountdown();
+        }
+      } else {
+        G.countdownActive = false;
+      }
     }
     for (const pid in data.players) {
        if (pid === G.localPlayerId) {
@@ -72,9 +99,25 @@ export function onMessage(G, data) {
       const sp = data.portals[i];
       const P = G.portals[i];
       if (P.closing) continue; // close animation in progress; server already reflects the removal
+      const wasPlaced = P.placed;
       P.placed = sp.placed;
       if (P.placed) {
-         P.c.fromArray(sp.c); P.n.fromArray(sp.n); P.r.fromArray(sp.r); P.u.fromArray(sp.u);
+        P.c.fromArray(sp.c); P.n.fromArray(sp.n); P.r.fromArray(sp.r); P.u.fromArray(sp.u);
+        let onBadWall = false;
+        for (const obb of G.obbs) {
+          if ((obb.destroyed || obb.noPortal) && P.c.distanceTo(obb.c) < obb.rad + 0.5) {
+            onBadWall = true;
+            break;
+          }
+        }
+        if (onBadWall) {
+          P.placed = false;
+          P.openTime = 0;
+        } else if (!wasPlaced && !P.openTime) {
+          P.openTime = performance.now() / 1000;
+        }
+      } else {
+        P.openTime = 0;
       }
     }
     G.updatePair();
@@ -85,8 +128,41 @@ export function onMessage(G, data) {
         G.grabCubes[i].vel.fromArray(data.cubes[i].vel);
       }
     }
+  } else if (data.type === 'portal_place') {
+    const pC = new V3(...data.c);
+    let onBadWall = false;
+    for (const obb of G.obbs) {
+      if ((obb.destroyed || obb.noPortal) && pC.distanceTo(obb.c) < obb.rad + 0.5) {
+        onBadWall = true;
+        break;
+      }
+    }
+    if (!onBadWall) {
+      const P = G.portals[data.pi];
+      if (P) {
+        P.placed = true;
+        P.closing = false;
+        P.c.fromArray(data.c);
+        P.n.fromArray(data.n);
+        P.r.fromArray(data.r);
+        P.u.fromArray(data.u);
+        P.openTime = performance.now() / 1000;
+        G.updatePair();
+        AudioSys.portalOpen(P.c);
+      }
+    }
   } else if (data.type === 'portal_remove') {
     G.cancelPortal(data.pi, false);
+  } else if (data.type === 'destroy_wall') {
+    const cCenter = data.wallCenter ? new V3(...data.wallCenter) : null;
+    const cPt = new V3(...data.point);
+    let obb = null;
+    if (data.wallId) obb = G.obbs.find(o => o.id === data.wallId);
+    if (!obb && cCenter) obb = G.obbs.find(o => o.c.distanceTo(cCenter) < 0.3);
+    if (!obb) obb = G.obbs.find(o => o.kind === 'wall' && !o.boundary && o.c.distanceTo(cPt) <= o.rad + 0.5);
+    if (obb) {
+      G.destroyWall(obb, cPt, data.normal ? new V3(...data.normal) : null, false);
+    }
   } else if (data.type === 'fire_beam') {
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
     G.spawnBeam(G.portals[data.pi].color, new V3(...data.start), new V3(...data.end));
@@ -106,7 +182,7 @@ export function onMessage(G, data) {
     rMesh.rotateX(Math.PI / 2);
     rMesh.position.fromArray(data.pos);
     G.scene.add(rMesh);
-    G.rockets.push({ pos: new V3(...data.pos), vel: new V3(...data.vel), mesh: rMesh, life: 5, isLocal: false });
+    G.rockets.push({ pos: new V3(...data.pos), vel: new V3(...data.vel), mesh: rMesh, life: 5, isLocal: false, shooterId: data.playerId });
     AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1, 0, new V3(...data.pos));
   } else if (data.type === 'fire_instagib') {
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
@@ -132,8 +208,10 @@ export function onMessage(G, data) {
        G.die(data.playerId, data.pts.length > 2);
     }
   } else if (data.type === 'player_died') {
-    const pos = new V3(...data.pos);
-    G.spawnDeathAnimation(pos, data.color);
+    if (data.playerId !== G.localPlayerId) {
+      const pos = new V3(...data.pos);
+      G.spawnDeathAnimation(pos, data.color);
+    }
     if (data.feedMsg) G.addEventLog(data.feedMsg, data.feedHot);
   } else if (data.type === 'respawn') {
     G.isDead = false;
@@ -151,6 +229,9 @@ export function onMessage(G, data) {
     G.match = data.match;
     G.won = true;
     G.showSummary();
+  } else if (data.type === 'countdown_start') {
+    G.countdownActive = true;
+    if (G.showCountdown) G.showCountdown();
   }
 }
 

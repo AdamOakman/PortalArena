@@ -28,7 +28,11 @@ export function initLoop(G) {
       G.gun.visible = false; G.rocketGun.visible = false; G.instagibGun.visible = false; // no weapon in the menu orbit view
     } else if (!G.won) {
 
-      const activeKeys = G.pointerLocked ? G.keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
+      let activeKeys = G.pointerLocked ? G.keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
+      if (G.match && G.match.phase === 'countdown') {
+        activeKeys = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
+        G.pl.vel.set(0, 0, 0);
+      }
       const isCrouching = activeKeys.KeyC || activeKeys.ControlLeft;
       G.pl.crouchT = Math.max(0, Math.min(1, G.pl.crouchT + (isCrouching ? dt * 10 : -dt * 10)));
 
@@ -149,10 +153,54 @@ export function initLoop(G) {
       }
 
       if (!teleported) {
-        const hit = G.raycast(r.pos, r.vel.clone().normalize(), step.length(), 0.0);
-        if (hit || r.life <= 0) {
-          G.explosion(hit ? hit.point : r.pos, r.isLocal);
-          if (hit) G.destroyWall(hit.obb, hit.point, hit.normal);
+        const rDir = r.vel.clone().normalize();
+        const stepLen = step.length();
+        const wallHit = G.raycast(r.pos, rDir, stepLen, 0.0);
+
+        let targetHit = null;
+        let bestDist = wallHit ? wallHit.distance : stepLen;
+
+        for (const pid in G.remotePlayers) {
+          if (r.shooterId && String(pid) === String(r.shooterId)) continue;
+          const rp = G.remotePlayers[pid];
+          if (!rp || rp.isDead) continue;
+          const box = new TH.Box3();
+          const rpPos = new TH.Vector3().fromArray(rp.pos);
+          box.min.copy(rpPos).add(new TH.Vector3(-0.45, 0, -0.45));
+          box.max.copy(rpPos).add(new TH.Vector3(0.45, CFG.H, 0.45));
+          const ray = new TH.Ray(r.pos, rDir);
+          const pt = ray.intersectBox(box, new TH.Vector3());
+          if (pt) {
+            const d = r.pos.distanceTo(pt);
+            if (d < bestDist) {
+              bestDist = d;
+              targetHit = { point: pt, isWall: false };
+            }
+          }
+        }
+
+        if (!r.isLocal && !G.isDead && (!r.shooterId || String(r.shooterId) !== String(G.localPlayerId))) {
+          const box = new TH.Box3();
+          box.min.copy(G.pl.pos).add(new TH.Vector3(-0.45, 0, -0.45));
+          box.max.copy(G.pl.pos).add(new TH.Vector3(0.45, CFG.H, 0.45));
+          const ray = new TH.Ray(r.pos, rDir);
+          const pt = ray.intersectBox(box, new TH.Vector3());
+          if (pt) {
+            const d = r.pos.distanceTo(pt);
+            if (d < bestDist) {
+              targetHit = { point: pt, isWall: false };
+            }
+          }
+        }
+
+        if (!targetHit && wallHit) {
+          targetHit = { point: wallHit.point, isWall: true, obb: wallHit.obb, normal: wallHit.normal };
+        }
+
+        if (targetHit || r.life <= 0) {
+          const explPos = targetHit ? targetHit.point : r.pos;
+          G.explosion(explPos, r.isLocal);
+          if (targetHit && targetHit.isWall) G.destroyWall(targetHit.obb, targetHit.point, targetHit.normal, r.isLocal);
           G.scene.remove(r.mesh);
           r.mesh.traverse(o => { if(o.material) o.material.dispose(); if(o.geometry) o.geometry.dispose(); });
           G.rockets.splice(i, 1);

@@ -1,6 +1,7 @@
 export const CFG = {
   G: 24, 
   R: 0.34, 
+  WEAPON_LEN: 1.35, // margin for longest weapon to prevent wall clipping
   H: 1.7,
   CROUCH_H: 1.0,
   GMAX: 12.0, 

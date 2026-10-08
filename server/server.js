@@ -2,13 +2,85 @@ import { WebSocketServer } from 'ws';
 import * as TH from 'three';
 import { CFG, PORT, TICK_RATE } from '../shared/constants.js';
 import { initPhysics } from '../shared/physics.js';
-
+import { tickBot, removeBot, cleanupBotPortals, resetBotState, getBotPortalBase, checkPortalOverlap } from './bots.js';
 
 const wss = new WebSocketServer({ port: 3001 });
 const physics = initPhysics(TH, CFG, PORT);
 
 const SERVER_PASSWORD = "secret";
- import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, beginRound, matchToWaiting, matchInfo, pickSpawn, placeAtSpawn } from './gamestate.js';
+import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, startCountdown, beginRound, matchToWaiting, matchInfo, pickSpawn, placeAtSpawn, serverDestroyWall, resetMapState, assignRoundSpawns } from './gamestate.js';
+
+// ------------------------------------------------------------------ bot management
+const BOT_COUNT = 2; // how many bots to fill the server with when empty
+let nextBotId = 0;
+
+function addBot() {
+  const botId = 'bot_' + (nextBotId++);
+  const taken = new Set(Object.keys(gameState.players).map(id => gameState.players[id].playerIndex));
+  const playerIndex = taken.has(0) ? (taken.has(1) ? 0 : 1) : 0;
+  const usedIdxs = Object.values(gameState.players).map(p => p.spawnIdx).filter(i => i != null);
+  const spawnIdx = pickSpawn(usedIdxs);
+  const spawn = mapData.spawns[spawnIdx];
+  const botName = 'Bot_' + nextBotId;
+  gameState.players[botId] = {
+    isBot: true,
+    playerIndex,
+    name: botName,
+    ws: null,
+    pos: new TH.Vector3(spawn.x, spawn.y, spawn.z),
+    vel: new TH.Vector3(),
+    yaw: 0, pitch: 0,
+    grounded: false, groundNormal: new TH.Vector3(0, 1, 0),
+    groundT: -1, jumpBuf: -1, maxSpeed: 0,
+    ping: 0, shots: 0, hits: 0,
+    inputBuffer: [], spawnIdx,
+    activeWeapon: 1, crouchT: 0,
+  };
+  return botId;
+}
+
+function removeABot() {
+  const pids = Object.keys(gameState.players);
+  for (let i = pids.length - 1; i >= 0; i--) {
+    const pid = pids[i];
+    const pl = gameState.players[pid];
+    if (pl.isBot) {
+      const base = getBotPortalBase(pl);
+      cleanupBotPortals(pid, pl, gameState.portals);
+      updatePair();
+      [base, base + 1].forEach(pi => {
+        const msg = JSON.stringify({ type: 'portal_remove', pi });
+        wss.clients.forEach(c => { if (c.readyState === 1) c.send(msg); });
+      });
+      delete gameState.players[pid];
+      delete match.ready[pid];
+      removeBot(pid);
+      return pid;
+    }
+  }
+  return null;
+}
+
+function countBots() {
+  return Object.keys(gameState.players).filter(id => gameState.players[id].isBot).length;
+}
+
+function countHumans() {
+  return Object.keys(gameState.players).filter(id => !gameState.players[id].isBot).length;
+}
+
+function fillWithBots() {
+  if (countHumans() > 0) return; // don't auto-add bots when humans are connected
+  while (Object.keys(gameState.players).length < BOT_COUNT) {
+    addBot();
+  }
+  if (Object.keys(gameState.players).length >= 2 && match.phase === 'waiting') {
+    beginWarmup();
+  }
+}
+
+// Initial bot fill (give map a tick to initialise)
+setTimeout(fillWithBots, 200);
 let nextPlayerId = 0;
 // Kill feed message pools ({v} = victim, {k} = killer)
 const KILL_MSGS = [
@@ -40,6 +112,62 @@ function feedPick(pool, victim, killer) {
   return pool[Math.floor(Math.random() * pool.length)].replace('{v}', victim).replace('{k}', killer || '');
 }
 
+function handlePlayerDeath(victimId, killerId = null, cause = null, viaPortal = false) {
+  const pl = gameState.players[victimId];
+  if (!pl || pl.isDead) return;
+  pl.isDead = true;
+
+  const scoring = match.phase === 'active' || match.phase === 'warmup';
+  const killerPid = (killerId && killerId !== victimId && gameState.players[killerId]) ? killerId : null;
+  let feedMsg = null, feedHot = false;
+
+  if (cause === 'void' || cause === 'lava') {
+    if (scoring) match.scores[victimId] = (match.scores[victimId] || 0) - 1;
+    feedMsg = feedPick(cause === 'lava' ? LAVA_MSGS : VOID_MSGS, pl.name, null);
+  } else if (killerPid) {
+    if (scoring) match.scores[killerPid] = (match.scores[killerPid] || 0) + (viaPortal ? 2 : 1);
+    feedMsg = feedPick(viaPortal ? PORTAL_KILL_MSGS : KILL_MSGS, pl.name, gameState.players[killerPid].name);
+    feedHot = viaPortal;
+  } else if (viaPortal) {
+    if (scoring) match.scores[victimId] = (match.scores[victimId] || 0) - 2;
+    feedMsg = feedPick(PORTAL_SUICIDE_MSGS, pl.name, null);
+  }
+
+  const deathColor = pl.playerIndex === 0 ? 0x33ff33 : 0xff3333;
+  const deathMsg = JSON.stringify({
+    type: 'player_died',
+    playerId: victimId,
+    color: deathColor,
+    pos: pl.pos.toArray(),
+    killerId: killerPid,
+    viaPortal: !!viaPortal,
+    cause: cause || null,
+    feedMsg,
+    feedHot
+  });
+
+  wss.clients.forEach(c => {
+    if (c.readyState === 1) c.send(deathMsg);
+  });
+
+  setTimeout(() => {
+    if (pl.isDead && gameState.players[victimId]) {
+      pl.isDead = false;
+      const pids = Object.keys(gameState.players);
+      const other = pids.find(id => id !== victimId && gameState.players[id] && !gameState.players[id].isDead);
+      const avoid = pids.filter(id => id !== victimId).map(id => gameState.players[id] && gameState.players[id].spawnIdx).filter(i => i != null);
+      const opp = other ? gameState.players[other] : null;
+      placeAtSpawn(pl, pickSpawn(avoid, opp ? opp.pos : null, 2));
+
+      if (pl.isBot) {
+        resetBotState(victimId);
+      } else if (pl.ws && pl.ws.readyState === 1) {
+        pl.ws.send(JSON.stringify({ type: 'respawn', pos: pl.pos.toArray() }));
+      }
+    }
+  }, 3000);
+}
+
 wss.on('connection', (ws) => {
   let playerId = null;
 
@@ -51,13 +179,14 @@ wss.on('connection', (ws) => {
         ws.close(1008, "Invalid password");
         return;
       }
+      // If server is full (e.g. 2 bots or 2 players), kick one bot to make room
       if (Object.keys(gameState.players).length >= 2) {
-        ws.close(1008, "Server full");
-        return;
-      }
-      // First player into an empty chamber always regenerates the map; the second just joins.
-      if (Object.keys(gameState.players).length === 0) {
-        updateMap(String(Math.floor(Math.random() * 1e9)));
+        if (countBots() > 0) {
+          removeABot();
+        } else {
+          ws.close(1008, "Server full");
+          return;
+        }
       }
       playerId = String(nextPlayerId++);
       const taken = new Set(Object.keys(gameState.players).map(id => gameState.players[id].playerIndex));
@@ -76,22 +205,49 @@ wss.on('connection', (ws) => {
         ping: 0, shots: 0, hits: 0, inputBuffer: [], spawnIdx
       };
       
-      // Warmup starts the moment a second player is connected (before the init snapshot)
-      if (Object.keys(gameState.players).length === 2 && match.phase !== 'warmup' && match.phase !== 'active') beginWarmup();
+      const isSecondHuman = (countHumans() === 2);
+      if (isSecondHuman) {
+        // Reset gamestate to warmup phase and zero everything on the map
+        resetMapState();
+        updatePair();
+        beginWarmup();
+
+        // Broadcast map_change and respawn to the existing human player
+        for (const pid in gameState.players) {
+          if (pid !== playerId) {
+            const op = gameState.players[pid];
+            if (op.ws && op.ws.readyState === 1) {
+              op.ws.send(JSON.stringify({
+                type: 'map_change',
+                seed: seedStr,
+                spawn: op.pos.toArray()
+              }));
+              op.ws.send(JSON.stringify({
+                type: 'respawn',
+                pos: op.pos.toArray()
+              }));
+            }
+          }
+        }
+      } else if (Object.keys(gameState.players).length >= 2 && match.phase !== 'warmup' && match.phase !== 'active') {
+        beginWarmup();
+      }
 
       ws.send(JSON.stringify({
         type: 'init',
         playerId,
         playerIndex,
         seed: seedStr,
-        spawn: [spawn.x, spawn.y, spawn.z],
-        match: matchInfo()
+        spawn: [gameState.players[playerId].pos.x, gameState.players[playerId].pos.y, gameState.players[playerId].pos.z],
+        match: matchInfo(),
+        destroyedWalls: gameState.destroyedWalls
       }));
 
       const evtMsg = JSON.stringify({ type: 'player_connected', name: pName });
       wss.clients.forEach(client => {
          if (client.readyState === 1) client.send(evtMsg);
       });
+
     } else if (data.type === 'input') {
       if (!playerId) return;
       const p = gameState.players[playerId];
@@ -113,8 +269,11 @@ wss.on('connection', (ws) => {
       if (p && (match.phase === 'warmup' || match.phase === 'waiting')) {
         match.ready[playerId] = !!data.ready;
         if (match.phase === 'warmup') {
+          for (const id in gameState.players) {
+            if (gameState.players[id].isBot) match.ready[id] = true;
+          }
           const pids = Object.keys(gameState.players);
-          if (pids.length === 2 && pids.every(id => match.ready[id])) beginRound();
+          if (pids.length === 2 && pids.every(id => match.ready[id])) triggerCountdown();
         }
       }
     } else if (data.type === 'ping') {
@@ -124,13 +283,41 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ type: 'pong', t: data.t }));
       }
     } else if (data.type === 'portal_place') {
+      const candidateC = new TH.Vector3().fromArray(data.c);
+      const candidateN = new TH.Vector3().fromArray(data.n);
+      const candidateR = new TH.Vector3().fromArray(data.r);
+      const candidateU = new TH.Vector3().fromArray(data.u);
+      if (checkPortalOverlap(candidateC, candidateN, candidateR, candidateU, gameState.portals, data.pi, PORT)) {
+        return;
+      }
+      for (const obb of obbs) {
+        if ((obb.destroyed || obb.noPortal) && candidateC.distanceTo(obb.c) < obb.rad + 0.5) {
+          return;
+        }
+      }
       const P = gameState.portals[data.pi];
       P.placed = true;
-      P.c.fromArray(data.c);
-      P.n.fromArray(data.n);
-      P.r.fromArray(data.r);
-      P.u.fromArray(data.u);
+      P.c.copy(candidateC);
+      P.n.copy(candidateN);
+      P.r.copy(candidateR);
+      P.u.copy(candidateU);
       updatePair();
+      const msg = JSON.stringify(data);
+      wss.clients.forEach(c => {
+        if (c !== ws && c.readyState === 1) c.send(msg);
+      });
+    } else if (data.type === 'destroy_wall') {
+      const result = serverDestroyWall(data.wallId, data.wallCenter, data.point);
+      if (result) {
+        updatePair();
+        gameState.destroyedWalls.push(data);
+        for (const pi of result.cancelledPortals) {
+          const cancelMsg = JSON.stringify({ type: 'portal_remove', pi });
+          wss.clients.forEach(c => { if (c.readyState === 1) c.send(cancelMsg); });
+        }
+        const fwdMsg = JSON.stringify(data);
+        wss.clients.forEach(c => { if (c !== ws && c.readyState === 1) c.send(fwdMsg); });
+      }
     } else if (data.type === 'portal_remove') {
       const P = gameState.portals[data.pi];
       P.placed = false;
@@ -147,6 +334,24 @@ wss.on('connection', (ws) => {
             if (c.rotVel) cube.rotVel.fromArray(c.rotVel);
          }
       });
+    } else if (data.type === 'rocket_explosion') {
+      const explPos = new TH.Vector3().fromArray(data.pos);
+      for (const pid in gameState.players) {
+        const pl = gameState.players[pid];
+        if (!pl.isDead) {
+          const pCenter = pl.pos.clone();
+          pCenter.y += CFG.H / 2;
+          const dvec = new TH.Vector3().subVectors(pCenter, explPos);
+          const dist = dvec.length();
+          if (dist < 12) {
+            if (dvec.y < 0.2) dvec.y = 0.2;
+            dvec.normalize();
+            const force = (12 - dist) * 2.25;
+            pl.vel.add(dvec.multiplyScalar(force));
+            pl.grounded = false;
+          }
+        }
+      }
     } else if (data.type === String.fromCharCode(116,104,114,111,119,95,99,117,98,101)) {
       const c = gameState.grabCubes[data.idx];
       if (c) {
@@ -156,11 +361,14 @@ wss.on('connection', (ws) => {
     } else if (data.type === 'fire_beam' || data.type === 'fire_rocket' || data.type === 'fire_instagib') {
       data.playerId = playerId;
       // Accuracy: instagib is the one weapon whose hits the server can see
-      if (data.type === 'fire_instagib' && match.phase === 'active') {
+      if (data.type === 'fire_instagib') {
         const fp = gameState.players[playerId];
-        if (fp) {
+        if (fp && match.phase === 'active') {
           fp.shots++;
           if (data.hitPlayerId && gameState.players[data.hitPlayerId]) fp.hits++;
+        }
+        if (data.hitPlayerId && gameState.players[data.hitPlayerId]?.isBot) {
+          handlePlayerDeath(data.hitPlayerId, playerId, 'instagib', !!(data.pts && data.pts.length > 2));
         }
       }
       const msg = JSON.stringify(data);
@@ -168,50 +376,7 @@ wss.on('connection', (ws) => {
         if (c !== ws && c.readyState === 1) c.send(msg);
       });
     } else if (data.type === 'player_died') {
-      const pl = gameState.players[playerId];
-      if (pl && !pl.isDead) {
-        pl.isDead = true;
-        // Kill/void/lava feed and scoring apply in both warmup and active.
-        // The score resets when the active round begins, so warmup is live practice.
-        // In the waiting phase (no opponent yet) the feed is still shown for
-        // environmental self-kill (lava/void/portal), but nothing is scored.
-        const scoring = match.phase === 'active' || match.phase === 'warmup';
-        if (scoring || match.phase === 'waiting') {
-          const viaPortal = !!data.viaPortal;
-          const killerPid = (data.killerId && data.killerId !== playerId && gameState.players[data.killerId]) ? data.killerId : null;
-          let feedMsg = null, feedHot = false;
-          if (data.cause === 'void' || data.cause === 'lava') {
-            if (scoring) match.scores[playerId] = (match.scores[playerId] || 0) - 1;
-            feedMsg = feedPick(data.cause === 'lava' ? LAVA_MSGS : VOID_MSGS, pl.name, null);
-          } else if (killerPid) {
-            match.scores[killerPid] = (match.scores[killerPid] || 0) + (viaPortal ? 2 : 1);
-            feedMsg = feedPick(viaPortal ? PORTAL_KILL_MSGS : KILL_MSGS, pl.name, gameState.players[killerPid].name);
-            feedHot = viaPortal;
-          } else if (viaPortal) {
-            if (scoring) match.scores[playerId] = (match.scores[playerId] || 0) - 2;
-            feedMsg = feedPick(PORTAL_SUICIDE_MSGS, pl.name, null);
-          }
-          if (feedMsg) { data.feedMsg = feedMsg; data.feedHot = feedHot; }
-        }
-        data.playerId = playerId;
-        const msg = JSON.stringify(data);
-        wss.clients.forEach(c => {
-          // In the waiting phase the dying player is alone, so the feed is delivered to them too.
-          if (c.readyState === 1 && (c !== ws || match.phase === 'waiting')) c.send(msg);
-        });
-        setTimeout(() => {
-          if (pl.isDead) {
-            pl.isDead = false;
-            // Respawn: random one of the 2 spawn points farthest from the opponent
-            const pids = Object.keys(gameState.players);
-            const other = pids.find(id => id !== playerId && gameState.players[id] && !gameState.players[id].isDead);
-            const avoid = pids.filter(id => id !== playerId).map(id => gameState.players[id] && gameState.players[id].spawnIdx).filter(i => i != null);
-            const opp = other ? gameState.players[other] : null;
-            placeAtSpawn(pl, pickSpawn(avoid, opp ? opp.pos : null, 2));
-            ws.send(JSON.stringify({ type: 'respawn', pos: pl.pos.toArray() }));
-          }
-        }, 3000);
-      }
+      handlePlayerDeath(playerId, data.killerId, data.cause, data.viaPortal);
     } else if (data.type === 'new_map') {
       updateMap(data.seed);
       updatePair();
@@ -238,9 +403,13 @@ wss.on('connection', (ws) => {
        wss.clients.forEach(client => {
           if (client.readyState === 1) client.send(evtMsg);
        });
+       if (countHumans() === 0) {
+         fillWithBots();
+       }
     }
   });
 });
+
 
 // Physics Loop (128 Tick)
 
@@ -271,6 +440,35 @@ const DT = 1 / TICK_RATE;
 const tpState = { nowT: 0, tpGracePortal: null, tpGraceT: -1, R_AB, R_BA };
 const events = {};
 
+function triggerCountdown() {
+  startCountdown();
+  updatePair();
+  const pids = Object.keys(gameState.players);
+  assignRoundSpawns(pids);
+  for (const id in gameState.players) {
+    const p = gameState.players[id];
+    p.isDead = false;
+    p.vel.set(0, 0, 0);
+    if (p.isBot) {
+      resetBotState(id);
+    } else if (p.ws && p.ws.readyState === 1) {
+      p.ws.send(JSON.stringify({
+        type: 'map_change',
+        seed: seedStr,
+        spawn: p.pos.toArray()
+      }));
+      p.ws.send(JSON.stringify({
+        type: 'respawn',
+        pos: p.pos.toArray()
+      }));
+    }
+  }
+  const startMsg = JSON.stringify({ type: 'countdown_start' });
+  wss.clients.forEach(c => {
+    if (c.readyState === 1) c.send(startMsg);
+  });
+}
+
 function endRound() {
   const pids = Object.keys(gameState.players);
   let winner = null;
@@ -295,7 +493,8 @@ function endRound() {
 setInterval(() => {
   tpState.nowT = Date.now() / 1000;
 
-  if (match.phase === 'warmup' && Date.now() >= match.deadlineMs) beginRound();
+  if (match.phase === 'warmup' && Date.now() >= match.deadlineMs) triggerCountdown();
+  else if (match.phase === 'countdown' && Date.now() >= match.deadlineMs) beginRound();
   else if (match.phase === 'active' && Date.now() >= match.deadlineMs) endRound();
 
   for (const pid in gameState.players) {
@@ -303,19 +502,61 @@ setInterval(() => {
     
     let lastKeys = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false };
     let autohop = false;
-    while (pl.inputBuffer.length > 0) {
-      const input = pl.inputBuffer.shift();
-      pl.yaw = input.yaw;
-      pl.pitch = input.pitch;
-      if (input.keys) lastKeys = input.keys;
-      if (input.autohop !== undefined) autohop = input.autohop;
-      if (input.jumpBuf !== undefined) pl.jumpBuf = input.jumpBuf;
-      if (!pl.isDead && input.pos) pl.pos.fromArray(input.pos);
-      if (!pl.isDead && input.vel) pl.vel.fromArray(input.vel);
-      if (input.activeWeapon !== undefined) pl.activeWeapon = input.activeWeapon;
-      if (input.crouchT !== undefined) pl.crouchT = input.crouchT;
+
+    if (pl.isBot) {
+      if (!pl.isDead) {
+        lastKeys = tickBot(pid, pl, tpState.nowT, gameState.portals, PORT, (pIdx, surface, eyePos) => {
+          updatePair();
+          const P = gameState.portals[pIdx];
+          const placeMsg = JSON.stringify({
+            type: 'portal_place',
+            pi: pIdx,
+            c: P.c.toArray(),
+            n: P.n.toArray(),
+            r: P.r.toArray(),
+            u: P.u.toArray()
+          });
+          const beamMsg = JSON.stringify({
+            type: 'fire_beam',
+            playerId: pid,
+            pi: pIdx,
+            start: eyePos.toArray(),
+            end: surface.c.toArray()
+          });
+          wss.clients.forEach(c => {
+            if (c.readyState === 1) {
+              c.send(placeMsg);
+              c.send(beamMsg);
+            }
+          });
+        });
+        autohop = true;
+      } else {
+        lastKeys = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false };
+        pl.vel.set(0, 0, 0);
+      }
+    } else {
+
+      while (pl.inputBuffer.length > 0) {
+        const input = pl.inputBuffer.shift();
+        pl.yaw = input.yaw;
+        pl.pitch = input.pitch;
+        if (input.keys) lastKeys = input.keys;
+        if (input.autohop !== undefined) autohop = input.autohop;
+        if (input.jumpBuf !== undefined) pl.jumpBuf = input.jumpBuf;
+        if (!pl.isDead && input.pos) pl.pos.fromArray(input.pos);
+        if (!pl.isDead && input.vel) pl.vel.fromArray(input.vel);
+        if (input.activeWeapon !== undefined) pl.activeWeapon = input.activeWeapon;
+        if (input.crouchT !== undefined) pl.crouchT = input.crouchT;
+      }
     }
     
+    if (match.phase === 'countdown') {
+      lastKeys = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false };
+      autohop = false;
+      pl.vel.set(0, 0, 0);
+    }
+
     physics.physStep(
       pl, 
       lastKeys, 
@@ -328,7 +569,27 @@ setInterval(() => {
       tpState, 
       events
     );
+
+    // Bot death check (void / lava)
+    if (pl.isBot && !pl.isDead) {
+      let deadCause = null;
+      if (pl.pos.y < -40.5) {
+        deadCause = 'void';
+      } else if (mapData.lava) {
+        for (const L of mapData.lava) {
+          const dx = pl.pos.x - L.x, dz = pl.pos.z - L.z;
+          if (dx * dx + dz * dz < L.r * L.r && pl.pos.y < L.y + 0.6) {
+            deadCause = 'lava';
+            break;
+          }
+        }
+      }
+      if (deadCause) {
+        handlePlayerDeath(pid, null, deadCause, false);
+      }
+    }
   }
+
 
 
   for (const c of gameState.grabCubes) {
