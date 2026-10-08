@@ -1,3 +1,5 @@
+import { AudioSys } from './audio.js';
+
 function fmtTime(t, tenths) {
   const v = Math.max(0, t);
   const m = String(Math.floor(v / 60)).padStart(2, '0');
@@ -7,6 +9,47 @@ function fmtTime(t, tenths) {
 
 export function initHUD(document) {
   const dom = id => document.getElementById(id);
+  const countdownEl = dom('countdown');
+  let countdownTimer = null;
+
+  function showCountdown() {
+    if (!countdownEl) return;
+    if (countdownTimer) {
+      clearTimeout(countdownTimer);
+      countdownTimer = null;
+    }
+    const steps = [
+      { text: '3', isFight: false, f0: 320, f1: 260, dur: 0.18, type: 'triangle', vol: 0.18 },
+      { text: '2', isFight: false, f0: 360, f1: 300, dur: 0.18, type: 'triangle', vol: 0.18 },
+      { text: '1', isFight: false, f0: 420, f1: 350, dur: 0.18, type: 'triangle', vol: 0.18 },
+      { text: 'FIGHT!', isFight: true, f0: 600, f1: 950, dur: 0.35, type: 'sawtooth', vol: 0.25 }
+    ];
+    let stepIdx = 0;
+    function playStep() {
+      if (stepIdx >= steps.length) {
+        countdownEl.classList.add('hidden');
+        countdownEl.classList.remove('count-pulse', 'fight');
+        countdownTimer = null;
+        return;
+      }
+      const s = steps[stepIdx++];
+      countdownEl.textContent = s.text;
+      countdownEl.classList.remove('hidden', 'fight', 'count-pulse');
+      void countdownEl.offsetWidth; // retrigger css animation
+      countdownEl.classList.add('count-pulse');
+      if (s.isFight) countdownEl.classList.add('fight');
+      if (s.isFight) {
+        AudioSys.tone(s.f0, s.f1, s.dur, s.type, s.vol);
+        AudioSys.tone(300, 480, 0.45, 'square', 0.15);
+      } else {
+        AudioSys.tone(s.f0, s.f1, s.dur, s.type, s.vol);
+      }
+      const delay = s.isFight ? 800 : 1000;
+      countdownTimer = setTimeout(playStep, delay);
+    }
+    playStep();
+  }
+
   const hud = { 
     root: dom('hud'),
     speed: dom('speedval'), 
@@ -96,6 +139,11 @@ export function initHUD(document) {
         hud.matchtimer.classList.add('dim');
         setReadyRow(hud.readyA, A, localIndex === 0, localReady);
         setReadyRow(hud.readyB, B, localIndex === 1, localReady);
+      } else if (match.phase === 'countdown') {
+        hud.matchtimer.textContent = 'STARTING...';
+        hud.matchtimer.classList.remove('dim');
+        hud.readyA.textContent = ''; hud.readyA.classList.remove('on');
+        hud.readyB.textContent = ''; hud.readyB.classList.remove('on');
       } else if (match.phase === 'active') {
         hud.matchtimer.textContent = fmtTime(match.timeLeft, true);
         hud.matchtimer.classList.remove('dim');
@@ -133,5 +181,5 @@ export function initHUD(document) {
     renderStats(match, statsOpen, localPid);
   }
 
-  return { updateHUD };
+  return { updateHUD, showCountdown };
 }

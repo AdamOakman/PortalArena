@@ -19,16 +19,41 @@ export function initWorld(G) {
   G.currentSeed = '';
 
   function clearWorld() {
-    if (!G.worldGroup) return;
-    G.scene.remove(G.worldGroup);
-    G.worldGroup.traverse(o => {
-      if (o.geometry) o.geometry.dispose();
-      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { for (const k of ['map', 'emissiveMap']) if (m[k]) m[k].dispose(); m.dispose(); });
-    });
-    G.worldGroup = null; G.obbs = []; G.animObjects = [];
-    G._gibPool.releaseAll(); for (const g of G._gibPool.items) g.mesh.visible = false;
-    G._ibPool.releaseAll(); for (const b of G._ibPool.items) b.group.visible = false;
-    G._scorchPool.releaseAll(); for (const s of G._scorchPool.items) s.mesh.visible = false;
+    if (G.worldGroup) {
+      G.scene.remove(G.worldGroup);
+      G.worldGroup.traverse(o => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { for (const k of ['map', 'emissiveMap']) if (m[k]) m[k].dispose(); m.dispose(); });
+      });
+      G.worldGroup = null;
+    }
+    G.obbs = [];
+    if (G.animObjects) {
+      for (const a of G.animObjects) {
+        if (a.obj && a.obj.parent) a.obj.parent.remove(a.obj);
+      }
+      G.animObjects = [];
+    }
+    if (G.rockets && G.rockets.length > 0) {
+      for (const r of G.rockets) {
+        if (r.mesh) {
+          G.scene.remove(r.mesh);
+          r.mesh.traverse(o => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
+        }
+      }
+      G.rockets.length = 0;
+    }
+    if (G.activeBeams && G.activeBeams.length > 0) {
+      for (const b of G.activeBeams) {
+        if (b.coreMesh) G.scene.remove(b.coreMesh);
+        if (b.hMesh) G.scene.remove(b.hMesh);
+        if (b.points) G.scene.remove(b.points);
+      }
+      G.activeBeams.length = 0;
+    }
+    if (G._gibPool) { G._gibPool.releaseAll(); for (const g of G._gibPool.items) g.mesh.visible = false; }
+    if (G._ibPool) { G._ibPool.releaseAll(); for (const b of G._ibPool.items) b.group.visible = false; }
+    if (G._scorchPool) { G._scorchPool.releaseAll(); for (const s of G._scorchPool.items) s.mesh.visible = false; }
   }
 
   function mergeBufferGeometries(geometries, useNormalsAndUVs) {
@@ -149,7 +174,7 @@ export function initWorld(G) {
     mergeAdd(boneG, bone); mergeAdd(eyeG, eye);
   }
 
-  function addWallFragment(obb, uIdx, u, y, w, h) {
+  function addWallFragment(obb, uIdx, u, y, w, h, fragIdx) {
     // Fragment of a destroyed wall in the parent's frame: u = center along the
     // wall's long axis, w = width along it, y = center height, h = height.
     // Inherits the parent's orientation (also covers rotated cover walls).
@@ -176,22 +201,35 @@ export function initWorld(G) {
     else G.scene.add(meshObj);
 
     G.obbs.push({
+      id: `${obb.id || 'wall'}_f${fragIdx !== undefined ? fragIdx : 0}`,
       c,
       ax: [A[0].clone(), A[1].clone(), A[2].clone()],
       he: [sx / 2, h / 2, sz / 2],
       rad: Math.hypot(sx, h, sz) / 2 + 3,
       kind: 'wall',
+      destroyed: true,
+      noPortal: true,
       mesh: meshObj
     });
   }
 
-  function destroyWall(obb, point, normal) {
-    if (obb.kind !== 'wall') return;
+  function destroyWall(obb, point, normal, broadcast = true) {
+    if (!obb || obb.kind !== 'wall') return;
     if (obb.boundary) return; // Boundary walls are indestructible by rockets
     // Long axis = the wider horizontal extent; the other is the wall's thickness.
     const uIdx = obb.he[0] >= obb.he[2] ? 0 : 2;
     const tIdx = uIdx === 0 ? 2 : 0;
     if (obb.he[tIdx] > 2.5) return; // Only destroy thin vertical walls (not corner towers)
+
+    if (broadcast) {
+      G.Network.send({
+        type: 'destroy_wall',
+        wallId: obb.id,
+        wallCenter: obb.c.toArray(),
+        point: point.toArray(),
+        normal: normal ? normal.toArray() : [0, 1, 0]
+      });
+    }
 
     if (obb.mesh) {
       if (G.worldGroup) G.worldGroup.remove(obb.mesh);
@@ -247,8 +285,9 @@ export function initWorld(G) {
         pieces.push({ u: (bandMinU + bandMaxU) / 2, w: bandW, y: (bandMaxY + yMax) / 2, h: yMax - bandMaxY });
     }
 
-    for (const p of pieces) {
-      addWallFragment(obb, uIdx, p.u, p.y, p.w, p.h);
+    for (let pIdx = 0; pIdx < pieces.length; pIdx++) {
+      const p = pieces[pIdx];
+      addWallFragment(obb, uIdx, p.u, p.y, p.w, p.h, pIdx);
     }
 
     // Spawn physical debris chunks
@@ -286,6 +325,7 @@ export function initWorld(G) {
 
     // --- Batched World Build ---
     const geoBatches = {}, edgeBatches = {};
+    let slabIdx = 0;
     for (const rec of map.slabs) {
       const [sx, sy, sz] = rec.s;
       const baseGeo = new TH.BoxGeometry(sx, sy, sz);
@@ -316,7 +356,7 @@ export function initWorld(G) {
       const q = new TH.Quaternion().setFromRotationMatrix(m);
       const ax = [new V3(1, 0, 0).applyQuaternion(q), new V3(0, 1, 0).applyQuaternion(q), new V3(0, 0, 1).applyQuaternion(q)];
       const rad = Math.hypot(sx, sy, sz) / 2 + 3;
-      G.obbs.push({ c: new V3(...rec.c), he: [sx / 2, sy / 2, sz / 2], ax, rad, kind, boundary: rec.boundary, mesh: meshObj });
+      G.obbs.push({ id: `slab_${slabIdx}`, slabIdx: slabIdx++, c: new V3(...rec.c), he: [sx / 2, sy / 2, sz / 2], ax, rad, kind, boundary: rec.boundary, mesh: meshObj });
     }
 
     for (const kind in geoBatches) {

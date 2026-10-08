@@ -8,6 +8,7 @@ export let mapData = generateMap(seedStr);
 export const gameState = {
   tick: 0,
   players: {},
+  destroyedWalls: [],
   portals: [
     { placed: false, c: new TH.Vector3(), n: new TH.Vector3(), r: new TH.Vector3(), u: new TH.Vector3(), color: 0x2eeaff },
     { placed: false, c: new TH.Vector3(), n: new TH.Vector3(), r: new TH.Vector3(), u: new TH.Vector3(), color: 0x0055ff },
@@ -79,12 +80,24 @@ export function beginWarmup() {
   for (const id in gameState.players) { gameState.players[id].shots = 0; gameState.players[id].hits = 0; }
 }
 
+export function startCountdown() {
+  match.phase = 'countdown';
+  match.deadlineMs = Date.now() + 3800;
+  match.scores = {};
+  match.winner = null;
+  match.ready = {};
+  for (const id in gameState.players) {
+    gameState.players[id].shots = 0;
+    gameState.players[id].hits = 0;
+  }
+  resetMapState();
+}
+
 export function beginRound() {
   match.phase = 'active';
   match.scores = {};  // reset warmup practice score for the active round
   match.deadlineMs = Date.now() + ROUND_TIME * 1000;
-  for (const p of gameState.portals) p.placed = false;  // clear portals for the fresh round
-  // Round start: p0 to a random spawn, p1 to a random one of the 2 farthest
+  resetMapState();
   assignRoundSpawns(Object.keys(gameState.players));
   for (const id in gameState.players) {
     const p = gameState.players[id];
@@ -117,7 +130,7 @@ export function matchInfo() {
       acc: shots > 0 ? Math.round((hits / shots) * 100) : 0
     };
   }
-  const msLeft = (match.phase === 'warmup' || match.phase === 'active') ? match.deadlineMs - Date.now() : 0;
+  const msLeft = (match.phase === 'warmup' || match.phase === 'active' || match.phase === 'countdown') ? match.deadlineMs - Date.now() : 0;
   return {
     phase: match.phase,
     timeLeft: Math.max(0, msLeft / 1000),
@@ -129,6 +142,7 @@ export function matchInfo() {
 
 
 function buildObbs(map) {
+  let slabIdx = 0;
   return map.slabs.map(s => {
     const mesh = new TH.Mesh(new TH.BoxGeometry(s.s[0], s.s[1], s.s[2]));
     mesh.position.set(...s.c);
@@ -142,21 +156,115 @@ function buildObbs(map) {
     ax[2].transformDirection(mesh.matrixWorld);
     
     return {
+      id: `slab_${slabIdx}`,
+      slabIdx: slabIdx++,
       c: new TH.Vector3(...s.c),
       ax,
       he: [s.s[0]/2, s.s[1]/2, s.s[2]/2],
       rad: Math.hypot(s.s[0]/2, s.s[1]/2, s.s[2]/2),
-      kind: s.kind
+      kind: s.kind,
+      boundary: s.boundary
     };
   });
 }
 
-export function updateMap(newSeed) {
-  seedStr = newSeed;
-  mapData = generateMap(seedStr);
+export function serverDestroyWall(wallId, wallCenter, point) {
+  const cPt = new TH.Vector3(...point);
+  const cCenter = wallCenter ? new TH.Vector3(...wallCenter) : null;
+
+  let obb = null;
+  if (wallId) obb = obbs.find(o => o.id === wallId);
+  if (!obb && cCenter) obb = obbs.find(o => o.c.distanceTo(cCenter) < 0.3);
+  if (!obb) {
+    obb = obbs.find(o => o.kind === 'wall' && !o.boundary && o.c.distanceTo(cPt) <= o.rad + 0.5);
+  }
+
+  if (!obb || obb.kind !== 'wall' || obb.boundary) return null;
+
+  const uIdx = obb.he[0] >= obb.he[2] ? 0 : 2;
+  const tIdx = uIdx === 0 ? 2 : 0;
+  if (obb.he[tIdx] > 2.5) return null;
+
+  const idx = obbs.indexOf(obb);
+  if (idx > -1) obbs.splice(idx, 1);
+
+  const cancelledPortals = [];
+  for (let i = 0; i < gameState.portals.length; i++) {
+    const P = gameState.portals[i];
+    if (P.placed && P.c.distanceTo(obb.c) < obb.rad + 1) {
+      if (Math.abs(P.n.dot(obb.ax[tIdx])) > 0.99) {
+        P.placed = false;
+        cancelledPortals.push(i);
+      }
+    }
+  }
+
+  const rel = new TH.Vector3(cPt.x - obb.c.x, cPt.y - obb.c.y, cPt.z - obb.c.z);
+  const uC = rel.dot(obb.ax[uIdx]);
+  const yC = rel.dot(obb.ax[1]);
+
+  const R = 4.8;
+  const MIN_PIECE = 0.3;
+  const uMin = -obb.he[uIdx], uMax = obb.he[uIdx];
+  const yMin = -obb.he[1], yMax = obb.he[1];
+
+  const pieces = [];
+  const startU = uC - R;
+  const endU = uC + R;
+
+  if (startU > uMin + MIN_PIECE) pieces.push({ u: (uMin + startU) / 2, w: startU - uMin, y: 0, h: yMax - yMin });
+  if (endU < uMax - MIN_PIECE) pieces.push({ u: (endU + uMax) / 2, w: uMax - endU, y: 0, h: yMax - yMin });
+
+  const bandMinU = Math.max(uMin, startU);
+  const bandMaxU = Math.min(uMax, endU);
+  const bandW = bandMaxU - bandMinU;
+  const bandMinY = Math.max(yMin, yC - R);
+  const bandMaxY = Math.min(yMax, yC + R);
+
+  if (bandW >= MIN_PIECE && bandMaxY - bandMinY >= MIN_PIECE) {
+    if (bandMinY - yMin > MIN_PIECE)
+      pieces.push({ u: (bandMinU + bandMaxU) / 2, w: bandW, y: (yMin + bandMinY) / 2, h: bandMinY - yMin });
+    if (yMax - bandMaxY > MIN_PIECE)
+      pieces.push({ u: (bandMinU + bandMaxU) / 2, w: bandW, y: (bandMaxY + yMax) / 2, h: yMax - bandMaxY });
+  }
+
+  const A = obb.ax, C = obb.c;
+  for (let pIdx = 0; pIdx < pieces.length; pIdx++) {
+    const p = pieces[pIdx];
+    const c = new TH.Vector3(
+      C.x + A[uIdx].x * p.u + A[1].x * p.y,
+      C.y + A[uIdx].y * p.u + A[1].y * p.y,
+      C.z + A[uIdx].z * p.u + A[1].z * p.y
+    );
+    const sx = uIdx === 0 ? p.w : obb.he[tIdx] * 2;
+    const sz = uIdx === 2 ? p.w : obb.he[tIdx] * 2;
+
+    obbs.push({
+      id: `${obb.id}_f${pIdx}`,
+      c,
+      ax: [A[0].clone(), A[1].clone(), A[2].clone()],
+      he: [sx / 2, p.h / 2, sz / 2],
+      rad: Math.hypot(sx, p.h, sz) / 2 + 3,
+      kind: 'wall',
+      destroyed: true,
+      noPortal: true
+    });
+  }
+
+  return { cancelledPortals, obbId: obb.id };
+}
+
+export function resetMapState() {
   obbs = buildObbs(mapData);
+  gameState.destroyedWalls = [];
   
-  for (const p of gameState.portals) p.placed = false;
+  for (const p of gameState.portals) {
+    p.placed = false;
+    p.c.set(0, 0, 0);
+    p.n.set(0, 0, 0);
+    p.r.set(0, 0, 0);
+    p.u.set(0, 0, 0);
+  }
   
   gameState.grabCubes = mapData.grabCubes.map(c => ({
     pos: new TH.Vector3(...c.c),
@@ -165,6 +273,17 @@ export function updateMap(newSeed) {
   }));
   
   assignRoundSpawns(Object.keys(gameState.players));
+  for (const pid in gameState.players) {
+    const p = gameState.players[pid];
+    p.isDead = false;
+    p.inputBuffer = [];
+  }
+}
+
+export function updateMap(newSeed) {
+  seedStr = newSeed;
+  mapData = generateMap(seedStr);
+  resetMapState();
   for (const pid in gameState.players) {
     const p = gameState.players[pid];
     if (p.ws && p.ws.readyState === 1) {

@@ -81,6 +81,27 @@
   .fadeflash{ animation:fl .45s ease-out forwards; }
   @keyframes fl{ from{opacity:.5} to{opacity:0} }
 
+  #countdown{
+    position:fixed; top:48%; left:50%; transform:translate(-50%,-50%);
+    font-family:var(--display); font-size:140px; font-weight:900;
+    color:var(--bone); text-shadow:0 0 35px rgba(255,122,34,.95), 0 0 80px rgba(255,50,0,.8);
+    letter-spacing:.08em; text-align:center; pointer-events:none; z-index:25;
+    line-height:1;
+  }
+  #countdown.fight{
+    font-size:160px; color:#ffd27f;
+    text-shadow:0 0 50px rgba(255,179,77,1), 0 0 110px rgba(255,60,0,.95);
+  }
+  .count-pulse{
+    animation:countAnim .78s cubic-bezier(.12,.9,.24,1) forwards;
+  }
+  @keyframes countAnim{
+    0%{ transform:translate(-50%,-50%) scale(1.85); opacity:0; filter:blur(4px); }
+    18%{ transform:translate(-50%,-50%) scale(1.0); opacity:1; filter:blur(0); }
+    75%{ transform:translate(-50%,-50%) scale(.96); opacity:1; filter:blur(0); }
+    100%{ transform:translate(-50%,-50%) scale(.85); opacity:0; filter:blur(2px); }
+  }
+
   /* ---------- overlays ---------- */
   .overlay{ position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
     background:radial-gradient(ellipse at 50% 38%, rgba(34,14,10,.85), rgba(8,5,6,.96)); }
@@ -166,6 +187,7 @@
   <div id="hint" style="display:none"></div>
   <div id="infoline">seed <b id="seedinfo">–</b> · fov <b id="fovinf">115</b> · sound <b id="muteinf">on</b><br>
     [ ] fov · F fullscreen · R ready · N new universe · TAB stats · M mute</div>
+  <div id="countdown" class="hidden"></div>
   <div id="flash"></div>
 </div>
 

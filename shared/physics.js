@@ -54,8 +54,13 @@ export function initPhysics(TH, CFG, PORT) {
     pl.grounded = false;
     const p = pl.pos;
     const hs = capsuleSamples(p, pl.crouchT);
+    const fwdX = -Math.sin(pl.yaw || 0), fwdZ = -Math.cos(pl.yaw || 0);
+    const pitchCos = Math.max(0, Math.cos(pl.pitch || 0));
+    const weaponLen = CFG.WEAPON_LEN || 1.35;
+
     for (const obb of obbs) {
-      if ((p.x - obb.c.x) ** 2 + (p.y - obb.c.y) ** 2 + (p.z - obb.c.z) ** 2 > obb.rad * obb.rad) continue;
+      const maxR = obb.rad + weaponLen;
+      if ((p.x - obb.c.x) ** 2 + (p.y - obb.c.y) ** 2 + (p.z - obb.c.z) ** 2 > maxR * maxR) continue;
       for (let si = 0; si < 3; si++) {
         const sy = hs[si];
         const dx = p.x - obb.c.x, dy = sy - obb.c.y, dz = p.z - obb.c.z;
@@ -68,16 +73,34 @@ export function initPhysics(TH, CFG, PORT) {
           let kBest = 0, best = -Infinity;
           for (let k = 0; k < 3; k++) { const over = Math.abs(lc[k]) - obb.he[k]; if (over > best) { best = over; kBest = k; } }
           n = obb.ax[kBest].clone().multiplyScalar(Math.sign(lc[kBest]) || 1);
-          depth = obb.he[kBest] - Math.abs(lc[kBest]) + CFG.R;
+          let rMargin = CFG.R;
+          if (n.y <= 0.1) {
+            const hLen = Math.hypot(n.x, n.z);
+            if (hLen > 0.001) {
+              const facing = -(fwdX * (n.x / hLen) + fwdZ * (n.z / hLen)) * pitchCos;
+              if (facing > 0) rMargin += (weaponLen - CFG.R) * facing;
+            }
+          }
+          depth = obb.he[kBest] - Math.abs(lc[kBest]) + rMargin;
         } else {
           const q = new V3();
           for (let k = 0; k < 3; k++) q.addScaledVector(obb.ax[k], Math.max(-obb.he[k], Math.min(obb.he[k], lc[k])));
           const cp = obb.c.clone().add(q);
           const dvec = new V3(p.x - cp.x, sy - cp.y, p.z - cp.z);
           const dist = dvec.length();
-          if (dist >= CFG.R || dist < 1e-7) continue;
-          n = dvec.divideScalar(dist);
-          depth = CFG.R - dist;
+          if (dist < 1e-7) continue;
+          const candidateN = dvec.clone().divideScalar(dist);
+          let rMargin = CFG.R;
+          if (candidateN.y <= 0.1) {
+            const hLen = Math.hypot(candidateN.x, candidateN.z);
+            if (hLen > 0.001) {
+              const facing = -(fwdX * (candidateN.x / hLen) + fwdZ * (candidateN.z / hLen)) * pitchCos;
+              if (facing > 0) rMargin += (weaponLen - CFG.R) * facing;
+            }
+          }
+          if (dist >= rMargin) continue;
+          n = candidateN;
+          depth = rMargin - dist;
         }
         
         let hole = false;

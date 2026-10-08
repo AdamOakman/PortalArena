@@ -167,6 +167,7 @@ export function initWeapons(G) {
 
   /* ------------------------------------------------------ portal gun */
   G.muzzleT = 0;
+  G.lastPortalTime = -999;
   function muzzleFlash(pi) {
     G.muzzleT = 1;
     const hex = G.portals[pi].color;
@@ -175,6 +176,11 @@ export function initWeapons(G) {
   }
 
   function firePortal(pi) {
+    if (G.match && G.match.phase === 'countdown') return;
+    const t = performance.now() / 1000;
+    if (t - G.lastPortalTime < 0.2) return;
+    G.lastPortalTime = t;
+
     G.camera.updateMatrixWorld(true);
     const dir = new V3(); G.camera.getWorldDirection(dir);
     const hit = G.raycast(G.camera.position.clone(), dir, 140);
@@ -215,6 +221,7 @@ export function initWeapons(G) {
   G._releaseSmoke = _releaseSmoke;
 
   function fireRocket() {
+    if (G.match && G.match.phase === 'countdown') return;
     const t = performance.now() / 1000;
     if (t - G.lastRocketTime < 0.5) return;
     G.muzzleT = 1;
@@ -241,8 +248,9 @@ export function initWeapons(G) {
     rMesh.position.copy(pos);
     G.scene.add(rMesh);
 
-    G.rockets.push({ pos: pos.clone(), vel: dir.multiplyScalar(70), mesh: rMesh, life: 5, isLocal: true });
-    G.Network.send({ type: 'fire_rocket', pos: pos.toArray(), vel: dir.toArray() });
+    const vel = dir.clone().multiplyScalar(70);
+    G.rockets.push({ pos: pos.clone(), vel, mesh: rMesh, life: 5, isLocal: true, shooterId: G.localPlayerId });
+    G.Network.send({ type: 'fire_rocket', pos: pos.toArray(), vel: vel.toArray() });
   }
 
   /* ------------------------------------------------------ instagib */
@@ -276,6 +284,7 @@ export function initWeapons(G) {
 
   G.lastInstagibTime = -999;
   function fireInstagib() {
+    if (G.match && G.match.phase === 'countdown') return;
     if (G.nowT - G.lastInstagibTime < 1.0) return;
     G.muzzleT = 1;
     G.lastInstagibTime = G.nowT;
@@ -429,10 +438,29 @@ export function initWeapons(G) {
     const dist = dvec.length();
 
     if (dist < 12) {
+       if (dvec.y < 0.2) dvec.y = 0.2;
        dvec.normalize();
        const force = (12 - dist) * 2.25;
        G.pl.vel.add(dvec.multiplyScalar(force));
        G.pl.grounded = false;
+    }
+
+    // Also apply local visual impulse to remote players / bots
+    for (const pid in G.remotePlayers) {
+      const rp = G.remotePlayers[pid];
+      if (rp && !rp.isDead) {
+        const rpCenter = new TH.Vector3(rp.pos[0], rp.pos[1] + CFG.H / 2, rp.pos[2]);
+        const rpdvec = new TH.Vector3().subVectors(rpCenter, pos);
+        const rpDist = rpdvec.length();
+        if (rpDist < 12) {
+          if (rpdvec.y < 0.2) rpdvec.y = 0.2;
+          rpdvec.normalize();
+          const rForce = (12 - rpDist) * 2.25;
+          rp.vel[0] += rpdvec.x * rForce;
+          rp.vel[1] += rpdvec.y * rForce;
+          rp.vel[2] += rpdvec.z * rForce;
+        }
+      }
     }
 
     // Blast cubes
@@ -454,6 +482,9 @@ export function initWeapons(G) {
     }
     if (isLocal && blasted.length > 0) {
         G.Network.send({ type: 'blast_cubes', cubes: blasted });
+    }
+    if (isLocal) {
+        G.Network.send({ type: 'rocket_explosion', pos: pos.toArray() });
     }
   }
 
