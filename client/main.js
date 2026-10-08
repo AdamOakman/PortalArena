@@ -39,21 +39,38 @@ import { initPlayers } from './players.js';
 import { initInput } from './input.js';
 import { initLoop } from './loop.js';
 import { onMessage, onNetworkClose } from './messages.js';
+import { LoadingScreen } from './loading-screen.js';
 
 /* ------------------------------------------------------------------ loader */
+let loading = null;
 function boot() {
+  // The loading overlay fades in (0.3 s) on the dark background straight
+  // away; its 3-D animation starts as soon as three.js arrives.
+  // TEMP (preview): artificial 5 s minimum display so the animation can be
+  // watched as if loading took longer — remove delayMs for release.
+  loading = new LoadingScreen({ delayMs: 5000 });
+
+  // Fonts gate — the page fonts (Cinzel / IM Fell English) are "loaded" once
+  // the browser settles font loading for the initial stylesheets.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready
+      .then(() => loading.markReady('fonts'))
+      .catch(() => loading.markReady('fonts'));
+  } else {
+    loading.markReady('fonts');
+  }
   const CDN_ESM = 'https://unpkg.com/three@0.160.0/build/three.module.js';
   const CDNS_UMD = [
     'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
   ];
-  import(CDN_ESM).then(ns => start(ns)).catch(() => {
+  import(CDN_ESM).then(ns => start(ns, loading)).catch(() => {
     let i = 0;
     const tryNext = () => {
       if (i >= CDNS_UMD.length) { showFatal('Could not load three.js from any CDN — check your internet connection.'); return; }
       const s = document.createElement('script');
       s.src = CDNS_UMD[i++];
-      s.onload = () => window.THREE ? start(window.THREE) : tryNext();
+      s.onload = () => window.THREE ? start(window.THREE, loading) : tryNext();
       s.onerror = tryNext;
       document.head.appendChild(s);
     };
@@ -61,6 +78,7 @@ function boot() {
   });
 }
 function showFatal(msg) {
+  if (loading) loading.dispose(); // let the fatal error show
   const d = document.createElement('div'); d.id = 'err'; d.textContent = msg; document.body.appendChild(d);
 }
 if (typeof window !== 'undefined') boot();
@@ -69,8 +87,12 @@ if (typeof window !== 'undefined') boot();
    GAME — THREE runtime: build the shared context G, init the modules in
    dependency order, and start the loop.
    ========================================================================== */
-function start(ns) {
+function start(ns, loading) {
   const TH = ns;
+  if (loading) {
+    loading.injectThree(TH);            // loading animation can start at once
+    loading.markReady('three');
+  }
   const G = {
     TH,
     V3: TH.Vector3,
@@ -127,5 +149,17 @@ function start(ns) {
   });
 
   /* ------------------------------------------------------------- main loop */
-  initLoop(G).start();
+  initLoop(G).start();                  // loads the first map (synchronously) + starts the game RAF
+  if (loading) {
+    loading.markReady('map');           // map with orbit view is built
+    // Queued right after the game loop's own first frame, so this fires
+    // once the orbit view has actually rendered the new map:
+    requestAnimationFrame(() => loading.markReady('frame'));
+    // When everything is ready the screen auto-hides (0.3 s fade) and the
+    // arena + main menu fade in (0.3 s) from the darkness:
+    loading.onHide = () => {
+      G.canvas.style.opacity = '1';
+      G.startPanel.style.opacity = '1';
+    };
+  }
 }

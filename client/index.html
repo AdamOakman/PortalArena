@@ -22,7 +22,7 @@
   *{ margin:0; padding:0; box-sizing:border-box; }
   html,body{ width:100%; height:100%; overflow:hidden; background:var(--bg);
     font-family:var(--serif); color:#d8d0c0; user-select:none; }
-  #gl{ position:fixed; inset:0; display:block; }
+  #gl{ position:fixed; inset:0; display:block; opacity:0; transition:opacity .3s ease; }
 
   /* ---------- HUD ---------- */
   #hud{ position:fixed; inset:0; pointer-events:none; z-index:5; }
@@ -84,6 +84,9 @@
   /* ---------- overlays ---------- */
   .overlay{ position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
     background:radial-gradient(ellipse at 50% 38%, rgba(34,14,10,.85), rgba(8,5,6,.96)); }
+  /* Main menu: invisible until the loading screen has faded out, then
+     fades in (0.3 s) when the app flips its opacity to 1 */
+  #startpanel{ opacity:0; transition:opacity .3s ease; }
   .panel{ position:relative; width:min(680px, 92vw); padding:38px 44px; border-radius:4px; text-align:center;
     background:linear-gradient(165deg, rgba(42,20,14,.93), rgba(16,9,9,.96));
     border:1px solid rgba(255,122,34,.35); outline:1px solid rgba(255,122,34,.16); outline-offset:5px;
@@ -130,7 +133,7 @@
 <body>
 <canvas id="gl"></canvas>
 
-<div id="hud">
+<div id="hud" class="hidden">
   <div id="crosshair"></div>
   <div id="aimring"></div>
   <div id="matchbar">
