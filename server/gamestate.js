@@ -8,6 +8,7 @@ export let mapData = generateMap(seedStr);
 export const gameState = {
   tick: 0,
   players: {},
+  spectators: {},
   destroyedWalls: [],
   portals: [
     { placed: false, c: new TH.Vector3(), n: new TH.Vector3(), r: new TH.Vector3(), u: new TH.Vector3(), color: 0x2eeaff },
@@ -97,14 +98,9 @@ export function beginRound() {
   match.phase = 'active';
   match.scores = {};  // reset warmup practice score for the active round
   match.deadlineMs = Date.now() + ROUND_TIME * 1000;
-  resetMapState();
-  assignRoundSpawns(Object.keys(gameState.players));
   for (const id in gameState.players) {
     const p = gameState.players[id];
     p.isDead = false;
-    if (p.ws && p.ws.readyState === 1) {
-      p.ws.send(JSON.stringify({ type: 'respawn', pos: p.pos.toArray() }));
-    }
   }
 }
 
@@ -127,7 +123,16 @@ export function matchInfo() {
       score: match.scores[pid] || 0,
       ping: p.ping || 0,
       shots, hits,
-      acc: shots > 0 ? Math.round((hits / shots) * 100) : 0
+      acc: shots > 0 ? Math.round((hits / shots) * 100) : 0,
+      isBot: !!p.isBot
+    };
+  }
+  const spectators = {};
+  for (const sid in gameState.spectators) {
+    const s = gameState.spectators[sid];
+    spectators[sid] = {
+      name: s.name,
+      ping: s.ping || 0
     };
   }
   const msLeft = (match.phase === 'warmup' || match.phase === 'active' || match.phase === 'countdown') ? match.deadlineMs - Date.now() : 0;
@@ -135,6 +140,8 @@ export function matchInfo() {
     phase: match.phase,
     timeLeft: Math.max(0, msLeft / 1000),
     players,
+    spectators,
+    spectatorCount: Object.keys(gameState.spectators).length,
     winner: match.winner,
     roundWins: Object.assign({}, match.roundWins)
   };

@@ -112,6 +112,13 @@ function start(ns, loading) {
     pointerLocked: false,
     lastIp: null, lastPass: null, lastName: null,
     localPlayerId: null, localPlayerIndex: 0,
+    isSpectator: true,
+    spectatorMode: 'freefly',
+    followPerspective: 'pov',
+    spectateTargetPid: null,
+    specPos: new TH.Vector3(0, 10, 20),
+    specYaw: 0,
+    specPitch: -0.2,
   };
 
   /* ------------------------------------------------ renderer / scene core */
@@ -129,6 +136,45 @@ function start(ns, loading) {
   G.winPanel = G.dom('winpanel');
 
   /* ------------------------------------------------------ game subsystems */
+  G.requestJoin = () => {
+    if (G.Network) G.Network.send({ type: 'join_game' });
+  };
+  G.requestSpectate = () => {
+    if (G.Network) G.Network.send({ type: 'spectate_game' });
+  };
+  G.cycleSpectatorTarget = (dir = 1) => {
+    const activePids = Object.keys(G.remotePlayers);
+    if (activePids.length === 0) {
+      G.spectatorMode = 'freefly';
+      G.spectateTargetPid = null;
+      return;
+    }
+    if (G.spectatorMode === 'freefly') {
+      G.spectatorMode = 'follow';
+      G.spectateTargetPid = activePids[dir > 0 ? 0 : activePids.length - 1];
+    } else {
+      const idx = activePids.indexOf(G.spectateTargetPid);
+      if (idx === -1) {
+        G.spectateTargetPid = activePids[0];
+      } else {
+        const nextIdx = idx + dir;
+        if (nextIdx >= activePids.length || nextIdx < 0) {
+          G.spectatorMode = 'freefly';
+          G.spectateTargetPid = null;
+        } else {
+          G.spectateTargetPid = activePids[nextIdx];
+        }
+      }
+    }
+  };
+  G.toggleFollowPerspective = () => {
+    if (G.spectatorMode === 'follow') {
+      G.followPerspective = (G.followPerspective === 'pov') ? 'chase' : 'pov';
+    } else {
+      G.cycleSpectatorTarget(-1);
+    }
+  };
+
   initWorld(G);
   initPortals(G);
   initWeapons(G);

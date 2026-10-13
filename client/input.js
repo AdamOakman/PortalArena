@@ -35,8 +35,12 @@ export function initInput(G) {
   document.addEventListener('pointerlockchange', () => {
     pointerLocked = document.pointerLockElement === G.canvas;
     G.pointerLocked = pointerLocked;
-    if (pointerLocked) menuPanel.classList.add(String.fromCharCode(104,105,100,100,101,110));
-
+    if (pointerLocked) {
+      menuPanel.classList.add(String.fromCharCode(104,105,100,100,101,110));
+    } else {
+      const switchBtn = G.dom('btnswitchmode');
+      if (switchBtn) switchBtn.textContent = G.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
+    }
   });
   G.canvas.addEventListener('click', () => { AudioSys.ensure(); if (G.started && !pointerLocked && !G.won) requestLock(); });
 
@@ -44,13 +48,30 @@ export function initInput(G) {
     if (!pointerLocked || document.pointerLockElement !== G.canvas) return;
     if (Math.abs(e.movementX) > 100 || Math.abs(e.movementY) > 100) return;
     const sens = 0.0023 * (camera.fov / G.baseFov);
+    if (G.isSpectator) {
+      if (G.spectatorMode === 'freefly') {
+        G.specYaw -= e.movementX * sens;
+        G.specPitch = Math.max(-1.55, Math.min(1.55, G.specPitch - e.movementY * sens));
+      }
+      return;
+    }
     G.pl.yaw -= e.movementX * sens;
     G.pl.pitch = Math.max(-1.55, Math.min(1.55, G.pl.pitch - e.movementY * sens));
   });
 
   document.addEventListener('mousedown', e => {
-    if (!pointerLocked || G.won || G.isDead) return;
+    if (!pointerLocked || G.won) return;
     AudioSys.ensure();
+    if (G.isSpectator) {
+      if (e.button === 0) {
+        G.cycleSpectatorTarget(1);
+      } else if (e.button === 2) {
+        G.toggleFollowPerspective();
+      }
+      return;
+    }
+    if (G.isDead) return;
+    if (G.countdownActive || (G.match && G.match.phase === 'countdown')) return;
     if (e.button === 0) {
       if (G.grabbedCube) {
          // Throw cube
@@ -80,8 +101,12 @@ export function initInput(G) {
   });
   document.addEventListener('contextmenu', e => e.preventDefault());
 
-  document.addEventListener('wheel', () => {
+  document.addEventListener('wheel', (e) => {
     if (!pointerLocked || G.won || !G.started) return;
+    if (G.isSpectator) {
+      G.cycleSpectatorTarget(e.deltaY > 0 ? 1 : -1);
+      return;
+    }
     G.activeWeapon = (G.activeWeapon === 1) ? 2 : 1;
     if (G.activeWeapon === 1) { G.gun.visible = true; G.rocketGun.visible = false; }
     else { G.gun.visible = false; G.rocketGun.visible = true; }
@@ -96,17 +121,40 @@ export function initInput(G) {
     }
     if (e.target.tagName === 'INPUT') return;
     const c = e.code;
-    if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'ControlLeft', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) e.preventDefault();
+    if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyJ', 'ControlLeft', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) e.preventDefault();
     G.keys[c] = true;
     if (c === 'Tab') { e.preventDefault(); G.statsOpen = G.started; }
-    if (!G.started || G.isDead) return;
+    if (!G.started) return;
+
+    if (c === 'KeyJ' && !e.repeat) {
+      if (G.isSpectator) {
+        G.requestJoin();
+        return;
+      }
+    }
+
+    if (c === 'KeyF') toggleFullscreen();
+    if (c === String.fromCharCode(69,115,99,97,112,101)) {
+      if (!G.won) {
+        menuPanel.classList.toggle(String.fromCharCode(104,105,100,100,101,110));
+        const switchBtn = G.dom('btnswitchmode');
+        if (switchBtn) switchBtn.textContent = G.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
+      }
+    }
+    if (c === 'KeyM') { AudioSys.toggleMute(); G.dom('muteinf').textContent = AudioSys.muted ? 'off' : 'on'; syncMuteBtn(); }
+    if (c === 'BracketLeft') setFov(G.baseFov - 5);
+    if (c === 'BracketRight') setFov(G.baseFov + 5);
+
+    if (G.isSpectator || G.isDead) return;
+
     if (c === 'Digit1') { G.activeWeapon = 1; G.gun.visible = true; G.rocketGun.visible = false; G.instagibGun.visible = false; }
     if (c === 'Digit2') { G.activeWeapon = 2; G.gun.visible = false; G.rocketGun.visible = true; G.instagibGun.visible = false; }
     if (c === 'Digit3') { G.activeWeapon = 3; G.gun.visible = false; G.rocketGun.visible = false; G.instagibGun.visible = true; }
+    if (G.countdownActive || (G.match && G.match.phase === 'countdown')) {
+      if (['Space', 'KeyE'].includes(c)) return;
+    }
     if (c === 'Space') G.pl.jumpBuf = G.nowT;
 
-    if (c === 'KeyF') toggleFullscreen();
-    if (c === String.fromCharCode(69,115,99,97,112,101)) { if (G.started && !G.won) menuPanel.classList.toggle(String.fromCharCode(104,105,100,100,101,110)); }
     if (c === 'KeyR' && !e.repeat) {
       if (G.match && (G.match.phase === 'warmup' || G.match.phase === 'waiting')) {
         G.localReady = !G.localReady;
@@ -174,6 +222,18 @@ export function initInput(G) {
 
   });
   G.dom('btnresume').addEventListener('click', requestLock);
+  const switchBtn = G.dom('btnswitchmode');
+  if (switchBtn) {
+    switchBtn.addEventListener('click', () => {
+      if (G.isSpectator) {
+        G.requestJoin();
+      } else {
+        G.requestSpectate();
+      }
+      menuPanel.classList.add(String.fromCharCode(104,105,100,100,101,110));
+      requestLock();
+    });
+  }
   G.dom('btnnewmap').addEventListener('click', () => {
     const s = G.dom('seedinput2').value.trim() || String(Math.floor(Math.random() * 1e9));
     G.newMap(s);

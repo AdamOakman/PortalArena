@@ -186,7 +186,7 @@
   </div>
   <div id="hint" style="display:none"></div>
   <div id="infoline">seed <b id="seedinfo">–</b> · fov <b id="fovinf">115</b> · sound <b id="muteinf">on</b><br>
-    [ ] fov · F fullscreen · R ready · N new universe · TAB stats · M mute</div>
+    [ ] fov · F fullscreen · R ready · N new universe · TAB stats · M mute · J join</div>
   <div id="countdown" class="hidden"></div>
   <div id="flash"></div>
 </div>
@@ -200,7 +200,7 @@
       <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold to bunnyhop</span>
       <span><b>MOUSE</b> — look · circle-jump to gain speed</span><span><b>LMB / RMB</b> — fire / action</span>
       <span><b>1 / 2</b> or <b>SCROLL</b> — change weapons</span><span><b>E</b> — grab / drop cubes</span>
-      <span><b>Z / L-SHIFT</b> (hold) — zoom (all weapons)</span><span><b>RMB</b> (hold) — zoom (rocket / instagib)</span>
+      <span><b>Z / L-SHIFT</b> (hold) — zoom (all weapons)</span><span><b>J</b> — join game as active player</span>
       <span><b>[ ]</b> — FOV · <b>F</b> — fullscreen</span><span><b>R</b> — ready up · <b>N</b> — new map · <b>TAB</b> — stats · <b>ESC</b> — menu</span>
     </div>
     <div class="btnrow"><button id="btnstart">▶ ENTER THE CHAMBER</button></div>
@@ -213,8 +213,8 @@
     </div>
     <div class="row"><label>seed <input type="text" id="seedinput" placeholder="random"></label>
       <label>FOV <input type="range" id="fovslider" min="90" max="135" value="115"> <span id="fovval">115</span></label></div>
-    <div class="row" style="color:#6f93b2;font-size:12px">Portals stick to any flat face — floors, ceilings, walls and ramps.
-      Falling into one keeps your speed and takes the direction of the other.</div>
+    <div class="row" style="color:#6f93b2;font-size:12px">You join as spectator by default. Press J or use the Pause Menu to join active game.
+      Spectator: LMB cycles freefly/players, RMB toggles 1st/3rd person, Space/C moves up/down.</div>
   </div>
 </div>
 
@@ -224,7 +224,9 @@
     <div class="sub">THE CHAMBER WAITS</div>
     <div class="divider"><span>✠</span></div>
     <div class="btnrow">
-      <button id="btnresume">RESUME</button><button id="btnnewmap" class="warm">NEW UNIVERSE (N)</button>
+      <button id="btnresume">RESUME</button>
+      <button id="btnswitchmode">JOIN GAME (J)</button>
+      <button id="btnnewmap" class="warm">NEW UNIVERSE (N)</button>
       <button id="btnfs">FULLSCREEN (F)</button>
     </div>
     <div class="row">

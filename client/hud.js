@@ -50,6 +50,17 @@ export function initHUD(document) {
     playStep();
   }
 
+  function cancelCountdown() {
+    if (countdownTimer) {
+      clearTimeout(countdownTimer);
+      countdownTimer = null;
+    }
+    if (countdownEl) {
+      countdownEl.classList.add('hidden');
+      countdownEl.classList.remove('count-pulse', 'fight');
+    }
+  }
+
   const hud = { 
     root: dom('hud'),
     speed: dom('speedval'), 
@@ -103,21 +114,35 @@ export function initHUD(document) {
     lastStatsT = now;
     const rows = Object.keys(match.players).map(pid => ({ pid, p: match.players[pid] }))
       .sort((a, b) => (b.p.score - a.p.score) || (b.p.hits - a.p.hits) || String(a.p.name).localeCompare(String(b.p.name)));
+    let specNote = '';
+    if (match.spectators && Object.keys(match.spectators).length > 0) {
+      const names = Object.values(match.spectators).map(s => esc(s.name)).join(', ');
+      specNote = `<div class="sbnote" style="margin-top:6px;color:#a89f8c">Spectators: ${names}</div>`;
+    }
     hud.statsbody.innerHTML = rows.map((r, i) =>
       `<tr class="${r.pid === localPid ? 'me' : ''}"><td>${i + 1}</td><td>${esc(r.p.name)}</td><td>${r.p.ping} ms</td><td>${r.p.acc}%</td><td>${r.p.score}</td></tr>`
-    ).join('');
+    ).join('') + (specNote ? `<tr><td colspan="5" style="padding-top:10px">${specNote}</td></tr>` : '');
   }
 
   function updateHUD(state) {
-    const { pl, CFG, currentSeed, hit, msg, match, localReady, localIndex, statsOpen, localPid, started } = state;
+    const { pl, CFG, currentSeed, hit, msg, match, localReady, localIndex, statsOpen, localPid, started, isSpectator, spectatorSpeed, spectatorMode, followPerspective, isTargetDead } = state;
 
     // The whole HUD stays hidden in the main menu (orbit preview)
     hud.root.classList.toggle('hidden', !started);
     // Speed
-    const sp = pl.vel.length();
+    const sp = isSpectator ? (spectatorSpeed || 0) : pl.vel.length();
     hud.speed.innerHTML = Math.round(sp * 10) + '<span>u/s</span>';
     hud.fill.style.width = Math.min(100, (sp / 34) * 100) + '%';
     hud.fill.classList.toggle('hot', sp > CFG.GMAX + 2);
+
+    const crosshairEl = dom('crosshair');
+    if (crosshairEl) {
+      if (isSpectator && spectatorMode === 'follow' && (followPerspective === 'chase' || isTargetDead)) {
+        crosshairEl.style.display = 'none';
+      } else {
+        crosshairEl.style.display = '';
+      }
+    }
     
     
     // Match bar: names, scores, countdown, ready state
@@ -165,7 +190,7 @@ export function initHUD(document) {
     }
     
     // Aimring
-    hud.aim.classList.toggle('valid', !!hit);
+    hud.aim.classList.toggle('valid', !isSpectator && !!hit);
 
     if (match && match.phase === 'summary' && hud.winstats) {
       const seat = seats(match);
@@ -181,5 +206,5 @@ export function initHUD(document) {
     renderStats(match, statsOpen, localPid);
   }
 
-  return { updateHUD, showCountdown };
+  return { updateHUD, showCountdown, cancelCountdown };
 }
