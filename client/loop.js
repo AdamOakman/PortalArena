@@ -8,12 +8,162 @@ import { CFG, PORT } from '../shared/constants.js';
 export function initLoop(G) {
   const { TH, V3 } = G;
 
+  const SPEC_RADIUS = 0.35;
+
+  function collideSpectator(pos) {
+    if (!G.obbs) return;
+    const r = SPEC_RADIUS;
+    for (let iter = 0; iter < 3; iter++) {
+      let collided = false;
+      for (const obb of G.obbs) {
+        if (!obb || obb.destroyed) continue;
+        const dx0 = pos.x - obb.c.x, dy0 = pos.y - obb.c.y, dz0 = pos.z - obb.c.z;
+        if (dx0 * dx0 + dy0 * dy0 + dz0 * dz0 > (obb.rad + r) * (obb.rad + r)) continue;
+
+        const lc = [
+          dx0 * obb.ax[0].x + dy0 * obb.ax[0].y + dz0 * obb.ax[0].z,
+          dx0 * obb.ax[1].x + dy0 * obb.ax[1].y + dz0 * obb.ax[1].z,
+          dx0 * obb.ax[2].x + dy0 * obb.ax[2].y + dz0 * obb.ax[2].z
+        ];
+
+        const inside = Math.abs(lc[0]) < obb.he[0] && Math.abs(lc[1]) < obb.he[1] && Math.abs(lc[2]) < obb.he[2];
+        let n, depth;
+        if (inside) {
+          let kBest = 0, best = -Infinity;
+          for (let k = 0; k < 3; k++) {
+            const over = Math.abs(lc[k]) - obb.he[k];
+            if (over > best) { best = over; kBest = k; }
+          }
+          const lcVal = kBest === 0 ? lc[0] : (kBest === 1 ? lc[1] : lc[2]);
+          n = obb.ax[kBest].clone().multiplyScalar(Math.sign(lcVal) || 1);
+          depth = obb.he[kBest] - Math.abs(lcVal) + r;
+        } else {
+          const q = new V3();
+          for (let k = 0; k < 3; k++) {
+            q.addScaledVector(obb.ax[k], Math.max(-obb.he[k], Math.min(obb.he[k], lc[k])));
+          }
+          const cp = obb.c.clone().add(q);
+          const dvec = new V3(pos.x - cp.x, pos.y - cp.y, pos.z - cp.z);
+          const dist = dvec.length();
+          if (dist >= r || dist < 1e-7) continue;
+          n = dvec.divideScalar(dist);
+          depth = r - dist;
+        }
+
+        let hole = false;
+        if (G.portals) {
+          for (let i = 0; i < G.portals.length; i += 2) {
+            if (!G.portals[i].placed || !G.portals[i + 1].placed) continue;
+            for (const P of [G.portals[i], G.portals[i + 1]]) {
+              if (Math.abs(n.dot(P.n)) < 0.8) continue;
+              const du = Math.abs((pos.x - P.c.x) * P.r.x + (pos.y - P.c.y) * P.r.y + (pos.z - P.c.z) * P.r.z);
+              const dv = Math.abs((pos.x - P.c.x) * P.u.x + (pos.y - P.c.y) * P.u.y + (pos.z - P.c.z) * P.u.z);
+              const dn = Math.abs((pos.x - P.c.x) * P.n.x + (pos.y - P.c.y) * P.n.y + (pos.z - P.c.z) * P.n.z);
+              if (du < PORT.hw && dv < PORT.hh && dn < 2.0) { hole = true; break; }
+            }
+            if (hole) break;
+          }
+        }
+        if (hole) continue;
+
+        pos.addScaledVector(n, depth + 0.001);
+        collided = true;
+      }
+
+      if (G.grabCubes) {
+        const ch = 0.75;
+        for (const c of G.grabCubes) {
+          const dx = pos.x - c.pos.x, dy = pos.y - c.pos.y, dz = pos.z - c.pos.z;
+          if (Math.abs(dx) > ch + r || Math.abs(dy) > ch + r || Math.abs(dz) > ch + r) continue;
+          const insideC = Math.abs(dx) < ch && Math.abs(dy) < ch && Math.abs(dz) < ch;
+          let cn, cdepth;
+          if (insideC) {
+            const ox = ch - Math.abs(dx) + r;
+            const oy = ch - Math.abs(dy) + r;
+            const oz = ch - Math.abs(dz) + r;
+            if (ox < oy && ox < oz) {
+              cn = new V3(Math.sign(dx) || 1, 0, 0);
+              cdepth = ox;
+            } else if (oz < oy) {
+              cn = new V3(0, 0, Math.sign(dz) || 1);
+              cdepth = oz;
+            } else {
+              cn = new V3(0, Math.sign(dy) || 1, 0);
+              cdepth = oy;
+            }
+          } else {
+            const qx = Math.max(-ch, Math.min(ch, dx));
+            const qy = Math.max(-ch, Math.min(ch, dy));
+            const qz = Math.max(-ch, Math.min(ch, dz));
+            const dvec = new V3(dx - qx, dy - qy, dz - qz);
+            const dist = dvec.length();
+            if (dist >= r || dist < 1e-7) continue;
+            cn = dvec.divideScalar(dist);
+            cdepth = r - dist;
+          }
+          pos.addScaledVector(cn, cdepth + 0.001);
+          collided = true;
+        }
+      }
+
+      if (!collided) break;
+    }
+  }
+
+  function teleportSpectator(prevPos, nextPos) {
+    if (!G.portals || !G.R_AB || !G.R_BA) return false;
+    for (let pairIdx = 0; pairIdx < 2; pairIdx++) {
+      const offset = pairIdx * 2;
+      const p0 = G.portals[offset], p1 = G.portals[offset + 1];
+      if (p0 && p1 && p0.placed && p1.placed) {
+        for (let pi = 0; pi < 2; pi++) {
+          const P = pi === 0 ? p0 : p1, Q = pi === 0 ? p1 : p0;
+          if (G.specGracePortal === P && G.nowT - (G.specGraceT || 0) < 0.25) continue;
+
+          const a = (prevPos.x - P.c.x) * P.n.x + (prevPos.y - P.c.y) * P.n.y + (prevPos.z - P.c.z) * P.n.z;
+          const b = (nextPos.x - P.c.x) * P.n.x + (nextPos.y - P.c.y) * P.n.y + (nextPos.z - P.c.z) * P.n.z;
+          if ((a > 0) !== (b > 0)) {
+            const t = Math.max(0, Math.min(1, a / (a - b)));
+            const cx = prevPos.x + (nextPos.x - prevPos.x) * t;
+            const cy = prevPos.y + (nextPos.y - prevPos.y) * t;
+            const cz = prevPos.z + (nextPos.z - prevPos.z) * t;
+            const du = Math.abs((cx - P.c.x) * P.r.x + (cy - P.c.y) * P.r.y + (cz - P.c.z) * P.r.z);
+            const dv = Math.abs((cx - P.c.x) * P.u.x + (cy - P.c.y) * P.u.y + (cz - P.c.z) * P.u.z);
+            if (du <= PORT.hw && dv <= PORT.hh) {
+              const R = pi === 0 ? G.R_AB[pairIdx] : G.R_BA[pairIdx];
+              const cross = new V3(cx, cy, cz);
+              const rel = cross.clone().sub(P.c).applyMatrix4(R);
+              nextPos.copy(Q.c).add(rel).addScaledVector(Q.n, 0.45);
+
+              const curDir = new V3(0, 0, -1).applyEuler(new TH.Euler(G.specPitch, G.specYaw, 0, 'YXZ'));
+              const newDir = curDir.clone().applyMatrix4(R).normalize();
+              G.specYaw = Math.atan2(-newDir.x, -newDir.z);
+              G.specPitch = Math.asin(Math.max(-0.99, Math.min(0.99, newDir.y)));
+
+              G.specGracePortal = Q;
+              G.specGraceT = G.nowT;
+              return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   let last = performance.now();
   function frame(now) {
     requestAnimationFrame(frame);
     let dt = Math.min(0.05, (now - last) / 1000); last = now;
-    AudioSys.listenerPos = G.pl.pos;
-    AudioSys.listenerYaw = G.pl.yaw;
+    if (G.isSpectator) {
+      AudioSys.listenerPos = G.camera.position;
+      AudioSys.listenerYaw = (G.spectatorMode === 'follow' && G.spectateTargetPid && G.remotePlayers[G.spectateTargetPid])
+        ? G.remotePlayers[G.spectateTargetPid].yaw
+        : G.specYaw;
+    } else {
+      AudioSys.listenerPos = G.pl.pos;
+      AudioSys.listenerYaw = G.pl.yaw;
+    }
     G.nowT += dt;
     if (G.started && G.isConnected && G.localPlayerId != null && G.nowT >= G.nextPingT) {
       G.Network.send({ type: 'ping', t: performance.now(), ping: G.lastPingMs });
@@ -26,10 +176,107 @@ export function initLoop(G) {
       G.camera.position.set(Math.cos(t) * 20, 17, Math.sin(t) * 20);
       G.camera.lookAt(0, 2.5, 0);
       G.gun.visible = false; G.rocketGun.visible = false; G.instagibGun.visible = false; // no weapon in the menu orbit view
+    } else if (G.isSpectator) {
+      let activeKeys = G.pointerLocked ? G.keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
+
+      if (G.spectatorMode === 'freefly') {
+        const fwd = new V3(0, 0, -1).applyEuler(new TH.Euler(G.specPitch, G.specYaw, 0, 'YXZ')).normalize();
+        const right = new V3(Math.cos(G.specYaw), 0, -Math.sin(G.specYaw)).normalize();
+        const move = new V3();
+        if (activeKeys.KeyW) move.add(fwd);
+        if (activeKeys.KeyS) move.sub(fwd);
+        if (activeKeys.KeyD) move.add(right);
+        if (activeKeys.KeyA) move.sub(right);
+        if (activeKeys.Space) move.y += 1;
+        if (activeKeys.KeyC || activeKeys.ControlLeft) move.y -= 1;
+        if (move.lengthSq() > 0) move.normalize();
+        const speed = (activeKeys.ShiftLeft ? 32 : 16);
+
+        const moveDist = move.length() * speed * dt;
+        if (moveDist > 0) {
+          const numSteps = Math.min(6, Math.max(1, Math.ceil(moveDist / 0.15)));
+          const stepVec = move.clone().multiplyScalar((speed * dt) / numSteps);
+          for (let s = 0; s < numSteps; s++) {
+            const prevPos = G.specPos.clone();
+            G.specPos.add(stepVec);
+            const teleported = teleportSpectator(prevPos, G.specPos);
+            if (teleported) {
+              break;
+            }
+            collideSpectator(G.specPos);
+          }
+        } else {
+          collideSpectator(G.specPos);
+        }
+
+        G.camera.position.copy(G.specPos);
+        G.camera.rotation.order = 'YXZ';
+        G.camera.quaternion.setFromEuler(new TH.Euler(G.specPitch, G.specYaw, 0, 'YXZ'));
+      } else if (G.spectatorMode === 'follow') {
+        const pids = Object.keys(G.remotePlayers);
+        if (pids.length === 0) {
+          G.spectatorMode = 'freefly';
+          G.spectateTargetPid = null;
+        } else {
+          if (!G.spectateTargetPid || !G.remotePlayers[G.spectateTargetPid]) {
+            G.spectateTargetPid = pids[0];
+          }
+          const rp = G.remotePlayers[G.spectateTargetPid];
+          if (rp) {
+            if (rp.isDead) {
+              if (!rp.deathCamPos) {
+                const deadPos = new V3(rp.pos[0], rp.pos[1], rp.pos[2]);
+                const offset = new V3(0, 2, 4).applyAxisAngle(new V3(0, 1, 0), rp.yaw || 0);
+                const backDir = offset.clone().normalize();
+                const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length()) : null;
+                const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
+                rp.deathCamPos = deadPos.clone().addScaledVector(backDir, camDist);
+                rp.deathCamTarget = deadPos.clone();
+              }
+              G.camera.position.lerp(rp.deathCamPos, Math.min(1, dt * 5));
+              const lookMat = new TH.Matrix4().lookAt(G.camera.position, rp.deathCamTarget, new TH.Vector3(0, 1, 0));
+              G.camera.quaternion.slerp(new TH.Quaternion().setFromRotationMatrix(lookMat), Math.min(1, dt * 5));
+              G.specPos.copy(G.camera.position);
+              const euler = new TH.Euler().setFromQuaternion(G.camera.quaternion, 'YXZ');
+              G.specYaw = euler.y;
+              G.specPitch = euler.x;
+            } else {
+              rp.deathCamPos = null;
+              rp.deathCamTarget = null;
+              if (G.followPerspective === 'pov') {
+                const crouchOffset = (CFG.H - (CFG.H - CFG.CROUCH_H) * (rp.crouchT || 0)) - 0.12;
+                G.camera.position.set(rp.pos[0], rp.pos[1] + crouchOffset, rp.pos[2]);
+                G.camera.rotation.order = 'YXZ';
+                G.camera.quaternion.setFromEuler(new TH.Euler(rp.pitch, rp.yaw, 0, 'YXZ'));
+                G.specPos.copy(G.camera.position);
+                G.specYaw = rp.yaw;
+                G.specPitch = rp.pitch;
+              } else {
+                const targetPos = new V3(rp.pos[0], rp.pos[1] + 1.5, rp.pos[2]);
+                const backDir = new V3(Math.sin(rp.yaw), 0.35, Math.cos(rp.yaw)).normalize();
+                const camPos = targetPos.clone().addScaledVector(backDir, 3.8);
+                const rayHit = G.raycast(targetPos, backDir, 3.8);
+                if (rayHit) {
+                  camPos.copy(targetPos).addScaledVector(backDir, Math.max(0.5, rayHit.distance - 0.3));
+                }
+                G.camera.position.copy(camPos);
+                G.camera.lookAt(targetPos);
+                G.specPos.copy(G.camera.position);
+              }
+            }
+          }
+        }
+      }
+
+      G.playerModel.visible = false;
+
+      // Render remote players
+      G.updateRemotePlayers(dt, G.nowT);
+
     } else if (!G.won) {
 
       let activeKeys = G.pointerLocked ? G.keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
-      if (G.match && G.match.phase === 'countdown') {
+      if (G.countdownActive || (G.match && G.match.phase === 'countdown')) {
         activeKeys = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
         G.pl.vel.set(0, 0, 0);
       }
@@ -71,22 +318,54 @@ export function initLoop(G) {
     const lZ = -0.5 + mt * 0.2;
     const lRot = mt * 0.4;
 
-    G.gun.scale.setScalar(1); G.gun.position.z = -0.5; G.gun.rotation.x = 0;
-    G.rocketGun.scale.setScalar(1); G.rocketGun.position.z = -0.5; G.rocketGun.rotation.x = 0;
-    G.instagibGun.scale.setScalar(1); G.instagibGun.position.z = -0.5; G.instagibGun.rotation.x = 0;
+    const isFollowPOV = G.isSpectator && G.spectatorMode === 'follow' && G.followPerspective === 'pov' && G.spectateTargetPid && G.remotePlayers[G.spectateTargetPid];
+    const targetPl = isFollowPOV ? G.remotePlayers[G.spectateTargetPid] : null;
 
-    const pM = G.playerModel.userData;
-    if (pM.mirrorGun) { pM.mirrorGun.scale.setScalar(1); pM.mirrorGun.position.z = -0.4; pM.mirrorGun.rotation.x = 0; }
-    if (pM.mirrorRocketGun) { pM.mirrorRocketGun.scale.setScalar(1); pM.mirrorRocketGun.position.z = -0.4; pM.mirrorRocketGun.rotation.x = 0; }
-    if (pM.mirrorInstagibGun) { pM.mirrorInstagibGun.scale.setScalar(1); pM.mirrorInstagibGun.position.z = -0.4; pM.mirrorInstagibGun.rotation.x = 0; }
+    if (!G.isSpectator) {
+      G.gun.scale.setScalar(1); G.gun.position.z = -0.5; G.gun.rotation.x = 0;
+      G.rocketGun.scale.setScalar(1); G.rocketGun.position.z = -0.5; G.rocketGun.rotation.x = 0;
+      G.instagibGun.scale.setScalar(1); G.instagibGun.position.z = -0.5; G.instagibGun.rotation.x = 0;
 
-    const aw = G.activeWeapon || 1;
-    const actHUD = aw === 1 ? G.gun : (aw === 2 ? G.rocketGun : G.instagibGun);
-    const actMir = aw === 1 ? pM.mirrorGun : (aw === 2 ? pM.mirrorRocketGun : pM.mirrorInstagibGun);
+      const pM = G.playerModel.userData;
+      if (pM.mirrorGun) { pM.mirrorGun.scale.setScalar(1); pM.mirrorGun.position.z = -0.4; pM.mirrorGun.rotation.x = 0; }
+      if (pM.mirrorRocketGun) { pM.mirrorRocketGun.scale.setScalar(1); pM.mirrorRocketGun.position.z = -0.4; pM.mirrorRocketGun.rotation.x = 0; }
+      if (pM.mirrorInstagibGun) { pM.mirrorInstagibGun.scale.setScalar(1); pM.mirrorInstagibGun.position.z = -0.4; pM.mirrorInstagibGun.rotation.x = 0; }
 
-    actHUD.scale.setScalar(scale); actHUD.position.z = lZ; actHUD.rotation.x = lRot;
-    if (aw === 1 && G.gun.userData.core) G.gun.userData.core.material.emissiveIntensity = 2.2 + mt * 6;
-    if (actMir) { actMir.scale.setScalar(1 + mt * 0.12); actMir.position.z = -0.4 + mt * 0.15; actMir.rotation.x = mt * 0.3; }
+      const aw = G.activeWeapon || 1;
+      const actHUD = aw === 1 ? G.gun : (aw === 2 ? G.rocketGun : G.instagibGun);
+      const actMir = aw === 1 ? pM.mirrorGun : (aw === 2 ? pM.mirrorRocketGun : pM.mirrorInstagibGun);
+
+      actHUD.scale.setScalar(scale); actHUD.position.z = lZ; actHUD.rotation.x = lRot;
+      if (aw === 1 && G.gun.userData.core) G.gun.userData.core.material.emissiveIntensity = 2.2 + mt * 6;
+      if (actMir) { actMir.scale.setScalar(1 + mt * 0.12); actMir.position.z = -0.4 + mt * 0.15; actMir.rotation.x = mt * 0.3; }
+    } else if (targetPl && !targetPl.isDead) {
+      G.gun.scale.setScalar(1); G.gun.position.z = -0.5; G.gun.rotation.x = 0;
+      G.rocketGun.scale.setScalar(1); G.rocketGun.position.z = -0.5; G.rocketGun.rotation.x = 0;
+      G.instagibGun.scale.setScalar(1); G.instagibGun.position.z = -0.5; G.instagibGun.rotation.x = 0;
+
+      const aw = targetPl.activeWeapon || 1;
+      G.gun.visible = (aw === 1);
+      G.rocketGun.visible = (aw === 2);
+      G.instagibGun.visible = (aw === 3);
+      G.playerModel.visible = false;
+
+      if (aw === 1) {
+        let tIdx = (targetPl.playerIndex !== undefined) ? targetPl.playerIndex : (G.match && G.match.players[G.spectateTargetPid] ? G.match.players[G.spectateTargetPid].index : 0);
+        if (tIdx < 0) tIdx = 0;
+        const pCol = G.portals[tIdx * 2] ? G.portals[tIdx * 2].color : 0x0affff;
+        if (G.gun.userData.core) G.gun.userData.core.material.emissive.setHex(pCol);
+        if (G.gun.userData.ring) G.gun.userData.ring.material.emissive.setHex(pCol);
+      }
+
+      const actHUD = aw === 1 ? G.gun : (aw === 2 ? G.rocketGun : G.instagibGun);
+      actHUD.scale.setScalar(scale); actHUD.position.z = lZ; actHUD.rotation.x = lRot;
+      if (aw === 1 && G.gun.userData.core) G.gun.userData.core.material.emissiveIntensity = 2.2 + mt * 6;
+    } else {
+      G.gun.visible = false;
+      G.rocketGun.visible = false;
+      G.instagibGun.visible = false;
+      G.playerModel.visible = false;
+    }
 
     for (let i = G.activeBeams.length - 1; i >= 0; i--) {
       const b = G.activeBeams[i];
@@ -443,7 +722,21 @@ export function initLoop(G) {
     }
 
     let msg = '';
-    if (G.match && G.match.phase === 'warmup') {
+    let specSpeed = 0;
+    if (G.isSpectator) {
+      if (G.spectatorMode === 'freefly') {
+        msg = 'FREE FLY — [LMB] Follow Player · [WASD] Fly · [SPACE/C] Up/Down · [J] Join Game';
+      } else {
+        const targetPl = (G.match && G.match.players[G.spectateTargetPid]) || (G.remotePlayers[G.spectateTargetPid]);
+        const tName = targetPl ? targetPl.name : 'Player';
+        const modeLabel = G.followPerspective === 'pov' ? '1st Person' : '3rd Person';
+        msg = `SPECTATING ${tName} (${modeLabel}) — [LMB] Next Player · [RMB] 1st/3rd Person · [J] Join Game`;
+        if (G.remotePlayers[G.spectateTargetPid] && G.remotePlayers[G.spectateTargetPid].vel) {
+          const v = G.remotePlayers[G.spectateTargetPid].vel;
+          specSpeed = Math.hypot(v[0], v[2]);
+        }
+      }
+    } else if (G.match && G.match.phase === 'warmup') {
       msg = G.localReady ? 'READY — WAITING FOR OPPONENT' : 'PRESS R TO READY UP';
     } else if (G.match && G.match.phase === 'waiting' && Object.keys(G.match.players).length < 2) {
       msg = 'WAITING FOR OPPONENT — PRESS R WHEN READY';
@@ -460,7 +753,24 @@ export function initLoop(G) {
     const aimDir = new V3(0, 0, -1).applyQuaternion(G.camera.quaternion).normalize();
     const hit = G.raycast(G.camera.getWorldPosition(new V3()), aimDir, 140);
 
-    G.updateHUD({ started: G.started, pl: G.pl, CFG, currentSeed: G.currentSeed, hit, msg: !G.isConnected ? "RECONNECTING..." : msg, match: G.match, localReady: G.localReady, localIndex: G.localPlayerIndex, statsOpen: G.statsOpen, localPid: G.localPlayerId });
+    G.updateHUD({
+      started: G.started,
+      pl: G.pl,
+      CFG,
+      currentSeed: G.currentSeed,
+      hit,
+      msg: !G.isConnected ? "RECONNECTING..." : msg,
+      match: G.match,
+      localReady: G.localReady,
+      localIndex: G.localPlayerIndex,
+      statsOpen: G.statsOpen,
+      localPid: G.localPlayerId,
+      isSpectator: G.isSpectator,
+      spectatorSpeed: specSpeed,
+      spectatorMode: G.spectatorMode,
+      followPerspective: G.followPerspective,
+      isTargetDead: !!(G.spectateTargetPid && G.remotePlayers[G.spectateTargetPid] && G.remotePlayers[G.spectateTargetPid].isDead)
+    });
     G.skyGroup.position.copy(G.camera.position);
     G.updateSky(G.nowT);
     G.renderer.setRenderTarget(null);

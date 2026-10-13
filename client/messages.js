@@ -9,21 +9,34 @@ export function onMessage(G, data) {
   const { TH, V3 } = G;
   if (data.type === 'init') {
     G.localPlayerId = data.playerId;
-    G.localPlayerIndex = data.playerIndex % 2;
+    G.isSpectator = !!data.isSpectator;
+    G.localPlayerIndex = (data.playerIndex >= 0) ? (data.playerIndex % 2) : -1;
 
-    const localColor = G.localPlayerIndex === 0 ? 0x33ff33 : 0xff3333;
-    const bMesh = G.playerModel.children.find(c => c.name === 'bodyMesh');
-    if (bMesh) bMesh.material.color.setHex(localColor);
-    const headGroup = G.playerModel.children.find(c => c.name === 'headGroup');
-    if (headGroup) { const hMesh = headGroup.children.find(c => c.name === 'headMesh'); if (hMesh) hMesh.material.color.setHex(localColor); }
+    if (!G.isSpectator && G.localPlayerIndex >= 0) {
+      const localColor = G.localPlayerIndex === 0 ? 0x33ff33 : 0xff3333;
+      const bMesh = G.playerModel.children.find(c => c.name === 'bodyMesh');
+      if (bMesh) bMesh.material.color.setHex(localColor);
+      const headGroup = G.playerModel.children.find(c => c.name === 'headGroup');
+      if (headGroup) { const hMesh = headGroup.children.find(c => c.name === 'headMesh'); if (hMesh) hMesh.material.color.setHex(localColor); }
 
-    G.gun.userData.core.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
-    G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
+      G.gun.userData.core.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
+      G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
+      G.gun.visible = (G.activeWeapon === 1);
+      G.rocketGun.visible = (G.activeWeapon === 2);
+      G.instagibGun.visible = (G.activeWeapon === 3);
+      G.playerModel.visible = true;
+    } else {
+      G.gun.visible = false;
+      G.rocketGun.visible = false;
+      G.instagibGun.visible = false;
+      G.playerModel.visible = false;
+      G.spectatorMode = 'freefly';
+      G.specPos.set(0, 8, 14);
+      G.specYaw = 0;
+      G.specPitch = -0.2;
+    }
 
     G.started = true; G.startPanel.classList.add('hidden');
-    G.gun.visible = (G.activeWeapon === 1);
-    G.rocketGun.visible = (G.activeWeapon === 2);
-    G.instagibGun.visible = (G.activeWeapon === 3);
     if (G.currentSeed !== data.seed) G.loadMap(data.seed);
     if (data.destroyedWalls && data.destroyedWalls.length > 0) {
       for (const dw of data.destroyedWalls) {
@@ -38,23 +51,77 @@ export function onMessage(G, data) {
         }
       }
     }
-    if (data.spawn) { G.pl.pos.fromArray(data.spawn); G.pl.vel.set(0, 0, 0); G.pl.cp.copy(G.pl.pos); }
+    if (data.spawn && !G.isSpectator) { G.pl.pos.fromArray(data.spawn); G.pl.vel.set(0, 0, 0); G.pl.cp.copy(G.pl.pos); }
     G.isConnected = true;
     if (data.match) {
       G.match = data.match;
       const me = G.match.players[G.localPlayerId];
       G.localReady = me ? !!me.ready : false;
       G.won = (G.match.phase === 'summary');
-      if (G.won) G.showSummary();
+      if (G.won && !G.isSpectator) G.showSummary();
     }
+    const switchBtn = document.getElementById('btnswitchmode');
+    if (switchBtn) switchBtn.textContent = G.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
     if (!G.pointerLocked) G.requestLock();
+  } else if (data.type === 'join_success') {
+    G.isSpectator = false;
+    G.localPlayerId = data.playerId;
+    G.localPlayerIndex = data.playerIndex % 2;
+    const localColor = G.localPlayerIndex === 0 ? 0x33ff33 : 0xff3333;
+    const bMesh = G.playerModel.children.find(c => c.name === 'bodyMesh');
+    if (bMesh) bMesh.material.color.setHex(localColor);
+    const headGroup = G.playerModel.children.find(c => c.name === 'headGroup');
+    if (headGroup) { const hMesh = headGroup.children.find(c => c.name === 'headMesh'); if (hMesh) hMesh.material.color.setHex(localColor); }
+
+    G.gun.userData.core.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
+    G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
+    G.gun.visible = (G.activeWeapon === 1);
+    G.rocketGun.visible = (G.activeWeapon === 2);
+    G.instagibGun.visible = (G.activeWeapon === 3);
+    G.playerModel.visible = true;
+
+    if (data.spawn) {
+      G.pl.pos.fromArray(data.spawn);
+      G.pl.vel.set(0, 0, 0);
+      G.pl.cp.copy(G.pl.pos);
+      G.pl.yaw = 0; G.pl.pitch = 0;
+    }
+    if (data.match) {
+      G.match = data.match;
+      G.won = (G.match.phase === 'summary');
+      if (G.winPanel && !G.winPanel.classList.contains('hidden') && !G.won) G.winPanel.classList.add('hidden');
+    }
+    const switchBtn = document.getElementById('btnswitchmode');
+    if (switchBtn) switchBtn.textContent = 'SPECTATE';
+    G.addEventLog('Joined game as active player', true);
+    if (!G.pointerLocked) G.requestLock();
+  } else if (data.type === 'join_denied') {
+    G.addEventLog('Cannot join: ' + (data.reason || 'Server full'), true);
+  } else if (data.type === 'spectate_success') {
+    G.isSpectator = true;
+    G.gun.visible = false;
+    G.rocketGun.visible = false;
+    G.instagibGun.visible = false;
+    G.playerModel.visible = false;
+    G.spectatorMode = 'freefly';
+    G.specPos.copy(G.pl.pos);
+    G.specPos.y += 2;
+    G.specYaw = G.pl.yaw;
+    G.specPitch = G.pl.pitch;
+    if (data.match) G.match = data.match;
+    const switchBtn = document.getElementById('btnswitchmode');
+    if (switchBtn) switchBtn.textContent = 'JOIN GAME (J)';
+    G.addEventLog('Switched to spectator mode', false);
+    if (!G.pointerLocked) G.requestLock();
+  } else if (data.type === 'spectate_denied') {
+    G.addEventLog('Cannot spectate: ' + (data.reason || 'Spectator slots full'), true);
   } else if (data.type === 'player_connected') {
     G.addEventLog(data.name + ' has just connected');
   } else if (data.type === 'player_disconnected') {
     G.addEventLog(data.name + ' dropped from the game');
   } else if (data.type === 'map_change') {
     G.loadMap(data.seed);
-    if (data.spawn) {
+    if (data.spawn && !G.isSpectator) {
       G.pl.pos.fromArray(data.spawn);
       G.pl.vel.set(0, 0, 0);
       G.pl.cp.copy(G.pl.pos);
@@ -66,7 +133,7 @@ export function onMessage(G, data) {
       const me = G.match.players[G.localPlayerId];
       G.localReady = me ? !!me.ready : false;
       G.won = (G.match.phase === 'summary');
-      if (G.won) { if (G.winPanel.classList.contains('hidden')) G.showSummary(); }
+      if (G.won) { if (G.winPanel.classList.contains('hidden') && !G.isSpectator) G.showSummary(); }
       else if (!G.winPanel.classList.contains('hidden')) G.winPanel.classList.add('hidden');
       if (data.match.phase === 'countdown') {
         if (!G.countdownActive) {
@@ -75,10 +142,11 @@ export function onMessage(G, data) {
         }
       } else {
         G.countdownActive = false;
+        if (G.cancelCountdown) G.cancelCountdown();
       }
     }
     for (const pid in data.players) {
-       if (pid === G.localPlayerId) {
+       if (pid === G.localPlayerId && !G.isSpectator) {
          continue;
        }
        const oldRp = G.remotePlayers[pid];
@@ -165,9 +233,16 @@ export function onMessage(G, data) {
     }
   } else if (data.type === 'fire_beam') {
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
+    if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) {
+      G.muzzleT = 1;
+      const hex = G.portals[data.pi] ? G.portals[data.pi].color : 0x0affff;
+      if (G.gun.userData.core) G.gun.userData.core.material.emissive.setHex(hex);
+      if (G.gun.userData.ring) G.gun.userData.ring.material.emissive.setHex(hex);
+    }
     G.spawnBeam(G.portals[data.pi].color, new V3(...data.start), new V3(...data.end));
   } else if (data.type === 'fire_rocket') {
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
+    if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) G.muzzleT = 1;
     const rMesh = new TH.Group();
     const bGeo = new TH.CylinderGeometry(0.06, 0.06, 0.4, 8);
     const bMat = new TH.MeshStandardMaterial({ color: 0x222222 });
@@ -186,6 +261,7 @@ export function onMessage(G, data) {
     AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1, 0, new V3(...data.pos));
   } else if (data.type === 'fire_instagib') {
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
+    if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) G.muzzleT = 1;
     const pts = data.pts.map(a => new V3(...a));
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) {
        const rm = G.remotePlayerMeshes[data.playerId];
@@ -204,33 +280,47 @@ export function onMessage(G, data) {
        AudioSys.zap(sp, AudioSys.listenerPos ? sp.distanceTo(AudioSys.listenerPos) / 343 : 0);
     }
 
-    if (data.hitPlayerId === G.localPlayerId) {
+    if (data.hitPlayerId === G.localPlayerId && !G.isSpectator) {
        G.die(data.playerId, data.pts.length > 2);
     }
   } else if (data.type === 'player_died') {
-    if (data.playerId !== G.localPlayerId) {
+    if (data.playerId !== G.localPlayerId || G.isSpectator) {
       const pos = new V3(...data.pos);
       G.spawnDeathAnimation(pos, data.color);
     }
+    const deadRp = G.remotePlayers[data.playerId];
+    if (deadRp) {
+      deadRp.isDead = true;
+      const deadPos = new V3(...data.pos);
+      const offset = new V3(0, 2, 4).applyAxisAngle(new V3(0, 1, 0), deadRp.yaw || 0);
+      const backDir = offset.clone().normalize();
+      const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length()) : null;
+      const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
+      deadRp.deathCamPos = deadPos.clone().addScaledVector(backDir, camDist);
+      deadRp.deathCamTarget = deadPos.clone();
+    }
     if (data.feedMsg) G.addEventLog(data.feedMsg, data.feedHot);
   } else if (data.type === 'respawn') {
-    G.isDead = false;
-    G.playerModel.visible = true;
-    if (G.activeWeapon === 1) G.gun.visible = true;
-    if (G.activeWeapon === 2) G.rocketGun.visible = true;
-    if (G.activeWeapon === 3) G.instagibGun.visible = true;
-    G.pl.pos.fromArray(data.pos);
-    G.pl.vel.set(0, 0, 0);
-    G.pl.yaw = -Math.PI / 2; G.pl.pitch = 0; G.pl.viewOffset = null;
-    AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
+    if (!G.isSpectator) {
+      G.isDead = false;
+      G.playerModel.visible = true;
+      if (G.activeWeapon === 1) G.gun.visible = true;
+      if (G.activeWeapon === 2) G.rocketGun.visible = true;
+      if (G.activeWeapon === 3) G.instagibGun.visible = true;
+      G.pl.pos.fromArray(data.pos);
+      G.pl.vel.set(0, 0, 0);
+      G.pl.yaw = -Math.PI / 2; G.pl.pitch = 0; G.pl.viewOffset = null;
+      AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
+    }
   } else if (data.type === 'pong') {
     G.lastPingMs = Math.max(0, Math.round(performance.now() - data.t));
   } else if (data.type === 'round_over') {
     G.match = data.match;
     G.won = true;
-    G.showSummary();
+    if (!G.isSpectator) G.showSummary();
   } else if (data.type === 'countdown_start') {
     G.countdownActive = true;
+    if (G.match) G.match.phase = 'countdown';
     if (G.showCountdown) G.showCountdown();
   }
 }

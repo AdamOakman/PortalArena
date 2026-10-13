@@ -176,7 +176,7 @@ export function initWeapons(G) {
   }
 
   function firePortal(pi) {
-    if (G.match && G.match.phase === 'countdown') return;
+    if (G.countdownActive || (G.match && G.match.phase === 'countdown')) return;
     const t = performance.now() / 1000;
     if (t - G.lastPortalTime < 0.2) return;
     G.lastPortalTime = t;
@@ -221,7 +221,7 @@ export function initWeapons(G) {
   G._releaseSmoke = _releaseSmoke;
 
   function fireRocket() {
-    if (G.match && G.match.phase === 'countdown') return;
+    if (G.countdownActive || (G.match && G.match.phase === 'countdown')) return;
     const t = performance.now() / 1000;
     if (t - G.lastRocketTime < 0.5) return;
     G.muzzleT = 1;
@@ -284,7 +284,7 @@ export function initWeapons(G) {
 
   G.lastInstagibTime = -999;
   function fireInstagib() {
-    if (G.match && G.match.phase === 'countdown') return;
+    if (G.countdownActive || (G.match && G.match.phase === 'countdown')) return;
     if (G.nowT - G.lastInstagibTime < 1.0) return;
     G.muzzleT = 1;
     G.lastInstagibTime = G.nowT;

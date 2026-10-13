@@ -87,17 +87,19 @@ export function initPlayers(G) {
   // Render remote players (extracted from the main loop)
   function updateRemotePlayers(dt, nowT) {
     for (const pid in G.remotePlayers) {
+      const rp = G.remotePlayers[pid];
       if (!G.remotePlayerMeshes[pid]) {
-        const remoteIndex = 1 - G.localPlayerIndex;
+        let remoteIndex = (rp.playerIndex !== undefined) ? rp.playerIndex : (G.match && G.match.players[pid] ? G.match.players[pid].index : (1 - G.localPlayerIndex));
+        if (remoteIndex < 0) remoteIndex = 0;
         const remoteColor = remoteIndex === 0 ? 0x33ff33 : 0xff3333;
         const mesh = G.createPlayerModel(remoteColor, 0); // Correct color, layer 0
         G.scene.add(mesh);
         G.remotePlayerMeshes[pid] = mesh;
       }
-      const rp = G.remotePlayers[pid];
       const m = G.remotePlayerMeshes[pid];
       if (rp.predictedDeadUntil && nowT < rp.predictedDeadUntil) rp.isDead = true;
-      m.visible = !rp.isDead;
+      const isTargetFollowPOV = G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === pid && G.followPerspective === 'pov';
+      m.visible = !rp.isDead && !isTargetFollowPOV;
       m.position.set(rp.pos[0], rp.pos[1], rp.pos[2]);
       m.rotation.y = rp.yaw;
       const rpCT = rp.crouchT || 0;
@@ -127,7 +129,7 @@ export function initPlayers(G) {
   // Local camera + player model + clip plane + zoom + grab crosshair
   // (extracted from the main loop)
   function updateLocalView(dt, now) {
-    if (!G.started) return;
+    if (!G.started || G.isSpectator) return;
     const sp = Math.hypot(G.pl.vel.x, G.pl.vel.z);
     if (G.isDead) {
       camera.position.lerp(deathCamPos, Math.min(1, dt * 5));

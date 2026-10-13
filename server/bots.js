@@ -482,6 +482,7 @@ export function resetBotState(pid) {
   if (st) {
     st.targetPos = null;
     st.portalPhase = 'none';
+    st.lastPortalT = Date.now() / 1000;
     st.stuckT = 0;
     st.prevPos = null;
     st.avoidUntilT = 0;
