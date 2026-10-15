@@ -28,7 +28,7 @@ export function initPortals(G) {
     frameGrp.scale.set(PORT.hw + 0.05, PORT.hh + 0.05, 1);
     G.frames.push(frameGrp); G.portalGroup.add(frameGrp);
 
-    const lt = new TH.PointLight(G.portals[i].color, 5.0, 15); G.glowLights.push(lt); G.portalGroup.add(lt);
+    const lt = new TH.PointLight(G.portals[i].color, 13.0, 16, 1.8); G.glowLights.push(lt); G.portalGroup.add(lt);
 
     const sparkGeo = new TH.BufferGeometry();
     const sparkPos = new Float32Array(300);
@@ -131,7 +131,7 @@ export function initPortals(G) {
   }
 
   function tryPlace(pi, hit) {
-    if (hit.obb.noPortal || hit.obb.destroyed) {
+    if (hit.obb.noPortal || hit.obb.destroyed || hit.obb.kind === 'ramp') {
       AudioSys.tone(220, 120, 0.15, 'square', 0.06);
       return false;
     }
@@ -184,7 +184,8 @@ export function initPortals(G) {
     P.placed = true; P.closing = false; P.c.copy(c); P.n.copy(n); P.r.copy(f.r); P.u.copy(f.u); P.openTime = performance.now() / 1000;
     G.Network.send({
         type: 'portal_place', pi,
-        c: P.c.toArray(), n: P.n.toArray(), r: P.r.toArray(), u: P.u.toArray()
+        c: P.c.toArray(), n: P.n.toArray(), r: P.r.toArray(), u: P.u.toArray(),
+        wallId: hit.obb.id
       });
     updatePair();
     // Immediate gun-trigger click from the player's perspective (non-positional)

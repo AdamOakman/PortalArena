@@ -315,6 +315,144 @@ export function initWorld(G) {
     }
   }
 
+  function createCurvedRampGeo(r, TH, M = 32, T = 0.3) {
+    const { cx, cz, dir, len, rise, width, y0 } = r;
+    const ry = dir === 0 ? 0 : dir === 1 ? -Math.PI / 2 : dir === 2 ? Math.PI : Math.PI / 2;
+    const q = new TH.Quaternion().setFromEuler(new TH.Euler(0, ry, 0, 'YZX'));
+    const fwd = new TH.Vector3(1, 0, 0).applyQuaternion(q);
+    const right = new TH.Vector3(0, 0, 1).applyQuaternion(q);
+    const center = new TH.Vector3(cx, 0, cz);
+
+    const positions = [], normals = [], uvs = [], indices = [];
+
+    function addV(s, y, w, nx, ny, nz, u, v) {
+      const p = center.clone().addScaledVector(fwd, s).addScaledVector(right, w);
+      p.y = y;
+      positions.push(p.x, p.y, p.z);
+      normals.push(nx, ny, nz);
+      uvs.push(u, v);
+    }
+
+    // 1. Top curved surface (C2 smootherstep)
+    const topStartIdx = positions.length / 3;
+    for (let j = 0; j <= M; j++) {
+      const u = j / M, s = u * len - len / 2;
+      const y = y0 + rise * (6 * (u ** 5) - 15 * (u ** 4) + 10 * (u ** 3));
+      const dyDs = (rise / len) * (30 * (u ** 2) * ((1 - u) ** 2));
+      const theta = Math.atan2(dyDs, 1);
+      const ns = -Math.sin(theta), ny = Math.cos(theta);
+      const nw = fwd.clone().multiplyScalar(ns);
+      nw.y = ny;
+
+      addV(s, y, -width / 2, nw.x, nw.y, nw.z, s * 0.5, 0);
+      addV(s, y, width / 2, nw.x, nw.y, nw.z, s * 0.5, width * 0.5);
+    }
+    for (let j = 0; j < M; j++) {
+      const r1 = topStartIdx + j * 2, r2 = topStartIdx + (j + 1) * 2;
+      indices.push(r1, r1 + 1, r2 + 1, r1, r2 + 1, r2);
+    }
+
+    // 2. Left side wall (w = -width / 2)
+    const leftStartIdx = positions.length / 3;
+    const leftN = right.clone().multiplyScalar(-1);
+    for (let j = 0; j <= M; j++) {
+      const u = j / M, s = u * len - len / 2;
+      const y = y0 + rise * (6 * (u ** 5) - 15 * (u ** 4) + 10 * (u ** 3));
+      addV(s, y, -width / 2, leftN.x, 0, leftN.z, s * 0.5, y * 0.5);
+      addV(s, y - T, -width / 2, leftN.x, 0, leftN.z, s * 0.5, (y - T) * 0.5);
+    }
+    for (let j = 0; j < M; j++) {
+      const r1 = leftStartIdx + j * 2, r2 = leftStartIdx + (j + 1) * 2;
+      indices.push(r1, r2, r2 + 1, r1, r2 + 1, r1 + 1);
+    }
+
+    // 3. Right side wall (w = +width / 2)
+    const rightStartIdx = positions.length / 3;
+    const rightN = right.clone();
+    for (let j = 0; j <= M; j++) {
+      const u = j / M, s = u * len - len / 2;
+      const y = y0 + rise * (6 * (u ** 5) - 15 * (u ** 4) + 10 * (u ** 3));
+      addV(s, y, width / 2, rightN.x, 0, rightN.z, s * 0.5, y * 0.5);
+      addV(s, y - T, width / 2, rightN.x, 0, rightN.z, s * 0.5, (y - T) * 0.5);
+    }
+    for (let j = 0; j < M; j++) {
+      const r1 = rightStartIdx + j * 2, r2 = rightStartIdx + (j + 1) * 2;
+      indices.push(r1, r1 + 1, r2 + 1, r1, r2 + 1, r2);
+    }
+
+    // 4. Bottom face
+    const botStartIdx = positions.length / 3;
+    for (let j = 0; j <= M; j++) {
+      const u = j / M, s = u * len - len / 2;
+      const y = y0 + rise * (6 * (u ** 5) - 15 * (u ** 4) + 10 * (u ** 3)) - T;
+      addV(s, y, -width / 2, 0, -1, 0, s * 0.5, 0);
+      addV(s, y, width / 2, 0, -1, 0, s * 0.5, width * 0.5);
+    }
+    for (let j = 0; j < M; j++) {
+      const r1 = botStartIdx + j * 2, r2 = botStartIdx + (j + 1) * 2;
+      indices.push(r1, r2 + 1, r1 + 1, r1, r2, r2 + 1);
+    }
+
+    // 5. Low end cap (s = -len/2)
+    const lowStartIdx = positions.length / 3;
+    const lowN = fwd.clone().multiplyScalar(-1);
+    addV(-len / 2, y0, -width / 2, lowN.x, 0, lowN.z, 0, 0);
+    addV(-len / 2, y0, width / 2, lowN.x, 0, lowN.z, width * 0.5, 0);
+    addV(-len / 2, y0 - T, width / 2, lowN.x, 0, lowN.z, width * 0.5, T * 0.5);
+    addV(-len / 2, y0 - T, -width / 2, lowN.x, 0, lowN.z, 0, T * 0.5);
+    indices.push(lowStartIdx, lowStartIdx + 2, lowStartIdx + 1, lowStartIdx, lowStartIdx + 3, lowStartIdx + 2);
+
+    // 6. High end cap (s = +len/2)
+    const highStartIdx = positions.length / 3;
+    const highN = fwd.clone();
+    addV(len / 2, y0 + rise, -width / 2, highN.x, 0, highN.z, 0, 0);
+    addV(len / 2, y0 + rise, width / 2, highN.x, 0, highN.z, width * 0.5, 0);
+    addV(len / 2, y0 + rise - T, width / 2, highN.x, 0, highN.z, width * 0.5, T * 0.5);
+    addV(len / 2, y0 + rise - T, -width / 2, highN.x, 0, highN.z, 0, T * 0.5);
+    indices.push(highStartIdx, highStartIdx + 1, highStartIdx + 2, highStartIdx, highStartIdx + 2, highStartIdx + 3);
+
+    const geo = new TH.BufferGeometry();
+    geo.setAttribute('position', new TH.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('normal', new TH.Float32BufferAttribute(normals, 3));
+    geo.setAttribute('uv', new TH.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+
+    // Build edges outlining the ramp sides and curve profile without drawing transverse seam lines across walking connections
+    const edgePositions = [];
+    function addEdge(p1, p2) {
+      edgePositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+    }
+    const samplePt = (s, yOffset, w) => {
+      const u = (s + len / 2) / len;
+      const y = y0 + rise * (6 * (u ** 5) - 15 * (u ** 4) + 10 * (u ** 3)) + yOffset;
+      const p = center.clone().addScaledVector(fwd, s).addScaledVector(right, w);
+      p.y = y;
+      return p;
+    };
+    for (let j = 0; j < M; j++) {
+      const sA = (j / M) * len - len / 2;
+      const sB = ((j + 1) / M) * len - len / 2;
+      // Top left & right rails
+      addEdge(samplePt(sA, 0, -width / 2), samplePt(sB, 0, -width / 2));
+      addEdge(samplePt(sA, 0, width / 2), samplePt(sB, 0, width / 2));
+      // Bottom left & right rails
+      addEdge(samplePt(sA, -T, -width / 2), samplePt(sB, -T, -width / 2));
+      addEdge(samplePt(sA, -T, width / 2), samplePt(sB, -T, width / 2));
+    }
+    // 4 vertical corner posts
+    addEdge(samplePt(-len / 2, 0, -width / 2), samplePt(-len / 2, -T, -width / 2));
+    addEdge(samplePt(-len / 2, 0, width / 2), samplePt(-len / 2, -T, width / 2));
+    addEdge(samplePt(len / 2, 0, -width / 2), samplePt(len / 2, -T, -width / 2));
+    addEdge(samplePt(len / 2, 0, width / 2), samplePt(len / 2, -T, width / 2));
+    // Bottom transverse end edges
+    addEdge(samplePt(-len / 2, -T, -width / 2), samplePt(-len / 2, -T, width / 2));
+    addEdge(samplePt(len / 2, -T, -width / 2), samplePt(len / 2, -T, width / 2));
+
+    const edges = new TH.BufferGeometry();
+    edges.setAttribute('position', new TH.Float32BufferAttribute(edgePositions, 3));
+    return { geo, edges };
+  }
+
   function loadMap(seedStr) {
     G.currentSeed = seedStr;
     clearWorld();
@@ -346,6 +484,8 @@ export function initWorld(G) {
         meshObj.add(new TH.Mesh(baseGeo, mMat.mat));
         meshObj.add(new TH.LineSegments(edgeGeo, mMat.edgeMat));
         G.worldGroup.add(meshObj);
+      } else if (kind === 'ramp') {
+        // Ramp visual mesh is generated smoothly via map.ramps below
       } else {
         if (!geoBatches[kind]) geoBatches[kind] = [];
         if (!edgeBatches[kind]) edgeBatches[kind] = [];
@@ -356,7 +496,17 @@ export function initWorld(G) {
       const q = new TH.Quaternion().setFromRotationMatrix(m);
       const ax = [new V3(1, 0, 0).applyQuaternion(q), new V3(0, 1, 0).applyQuaternion(q), new V3(0, 0, 1).applyQuaternion(q)];
       const rad = Math.hypot(sx, sy, sz) / 2 + 3;
-      G.obbs.push({ id: `slab_${slabIdx}`, slabIdx: slabIdx++, c: new V3(...rec.c), he: [sx / 2, sy / 2, sz / 2], ax, rad, kind, boundary: rec.boundary, mesh: meshObj });
+      G.obbs.push({ id: `slab_${slabIdx}`, slabIdx: slabIdx++, c: new V3(...rec.c), he: [sx / 2, sy / 2, sz / 2], ax, rad, kind, boundary: rec.boundary, noPortal: rec.noPortal, mesh: meshObj, ramp: rec.ramp });
+    }
+
+    if (map.ramps) {
+      for (const r of map.ramps) {
+        const { geo, edges } = createCurvedRampGeo(r, TH);
+        if (!geoBatches['ramp']) geoBatches['ramp'] = [];
+        if (!edgeBatches['ramp']) edgeBatches['ramp'] = [];
+        geoBatches['ramp'].push(geo);
+        edgeBatches['ramp'].push(edges);
+      }
     }
 
     for (const kind in geoBatches) {

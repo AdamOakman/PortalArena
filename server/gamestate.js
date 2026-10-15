@@ -153,6 +153,7 @@ function buildObbs(map) {
   return map.slabs.map(s => {
     const mesh = new TH.Mesh(new TH.BoxGeometry(s.s[0], s.s[1], s.s[2]));
     mesh.position.set(...s.c);
+    mesh.rotation.order = 'YZX';
     if (s.ry) mesh.rotation.y = s.ry;
     if (s.rz) mesh.rotation.z = s.rz;
     mesh.updateMatrixWorld(true);
@@ -170,7 +171,9 @@ function buildObbs(map) {
       he: [s.s[0]/2, s.s[1]/2, s.s[2]/2],
       rad: Math.hypot(s.s[0]/2, s.s[1]/2, s.s[2]/2),
       kind: s.kind,
-      boundary: s.boundary
+      boundary: s.boundary,
+      noPortal: s.noPortal,
+      ramp: s.ramp
     };
   });
 }

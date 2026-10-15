@@ -183,7 +183,7 @@ function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, curren
 
   const hit = raycastWall(eyePos, dir, 35, obbs_);
   if (!hit) return null;
-  if (hit.obb.destroyed || hit.obb.noPortal) return null;
+  if (hit.obb.destroyed || hit.obb.noPortal || hit.obb.kind === 'ramp') return null;
 
   const { point, normal, obb, hitAxis, hitSign } = hit;
 

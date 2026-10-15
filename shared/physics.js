@@ -50,6 +50,162 @@ export function initPhysics(TH, CFG, PORT) {
     return [pos.y + CFG.R, pos.y + h * 0.5, pos.y + h - CFG.R];
   }
 
+  function smootherstep(u) {
+    return u * u * u * (u * (u * 6 - 15) + 10);
+  }
+
+  function smootherstepDeriv(u) {
+    return 30 * u * u * (1 - u) * (1 - u);
+  }
+
+  function findUForSmootherstep(target) {
+    if (target <= 0) return 0;
+    if (target >= 1) return 1;
+    let lo = 0, hi = 1;
+    for (let it = 0; it < 5; it++) {
+      const mid = (lo + hi) * 0.5;
+      const sm = mid * mid * mid * (mid * (mid * 6 - 15) + 10);
+      if (sm < target) lo = mid;
+      else hi = mid;
+    }
+    return (lo + hi) * 0.5;
+  }
+
+  function collidePlayerWithRamp(pl, obb, events) {
+    const ramp = obb.ramp;
+    if (!ramp) return;
+    const { cx, cz, dir, len, rise, width, y0 } = ramp;
+    const T = ramp.T || 0.3;
+
+    let fwdX = 1, fwdZ = 0, rightX = 0, rightZ = 1;
+    if (dir === 1) { fwdX = 0; fwdZ = 1; rightX = -1; rightZ = 0; }
+    else if (dir === 2) { fwdX = -1; fwdZ = 0; rightX = 0; rightZ = -1; }
+    else if (dir === 3) { fwdX = 0; fwdZ = -1; rightX = 1; rightZ = 0; }
+
+    const p = pl.pos;
+    const dx = p.x - cx;
+    const dz = p.z - cz;
+    const s = dx * fwdX + dz * fwdZ;
+    const w = dx * rightX + dz * rightZ;
+
+    const hl = len * 0.5;
+    const hw = width * 0.5;
+    const R = CFG.R;
+    const h = playerHeight(pl.crouchT);
+
+    // Broadphase check
+    if (s < -hl - R || s > hl + R || Math.abs(w) > hw + R) return;
+
+    // Side collision (player is off the left or right edge of the ramp)
+    if (Math.abs(w) > hw) {
+      const sC = Math.max(-hl, Math.min(hl, s));
+      const u = (sC + hl) / len;
+      const yTop = y0 + rise * smootherstep(u);
+      const yBot = yTop - T;
+      if (p.y < yTop && p.y + h > yBot) {
+        const signW = Math.sign(w) || 1;
+        const nx = rightX * signW;
+        const nz = rightZ * signW;
+        const depth = hw + R - Math.abs(w);
+        if (depth > 0) {
+          p.x += nx * (depth + 0.0005);
+          p.z += nz * (depth + 0.0005);
+          const vn = pl.vel.x * nx + pl.vel.z * nz;
+          if (vn < 0) {
+            pl.vel.x -= nx * vn;
+            pl.vel.z -= nz * vn;
+          }
+        }
+      }
+      return;
+    }
+
+    // Longitudinal bounds check
+    if (s < -hl || s > hl) return;
+
+    const u = (s + hl) / len;
+    const yTop = y0 + rise * smootherstep(u);
+    const yBot = yTop - T;
+
+    const dyDs = (rise / len) * smootherstepDeriv(u);
+    const theta = Math.atan2(dyDs, 1);
+    const sinTheta = Math.sin(theta);
+    const cosTheta = Math.cos(theta);
+
+    // Top surface normal (pointing up and back along the ramp)
+    const nxTop = -fwdX * sinTheta;
+    const nyTop = cosTheta;
+    const nzTop = -fwdZ * sinTheta;
+
+    // Case 1: Player is on top of the ramp (walking / landing)
+    if (p.y >= yBot - 0.15) {
+      const penY = yTop - p.y;
+      if (penY > -0.01) {
+        const depth = penY * nyTop;
+        p.x += nxTop * (depth + 0.0005);
+        p.y += nyTop * (depth + 0.0005);
+        p.z += nzTop * (depth + 0.0005);
+        if (p.y < yTop) p.y = yTop + 0.0005;
+
+        const vn = pl.vel.x * nxTop + pl.vel.y * nyTop + pl.vel.z * nzTop;
+        if (vn < 0) {
+          pl.vel.x -= nxTop * vn;
+          pl.vel.y -= nyTop * vn;
+          pl.vel.z -= nzTop * vn;
+        }
+
+        if (!pl.grounded && vn < -6 && events && events.onLand) events.onLand(Math.min(1, -vn / 24));
+        pl.grounded = true;
+        pl.groundNormal.set(nxTop, nyTop, nzTop);
+      } else if (penY >= -0.15 && pl.grounded) {
+        p.y = yTop + 0.0005;
+        pl.groundNormal.set(nxTop, nyTop, nzTop);
+      }
+      return;
+    }
+
+    // Case 2: Player is UNDERNEATH the ramp
+    const yHead = p.y + h;
+    if (yHead > yBot) {
+      if (pl.vel.y > 0) {
+        pl.vel.y = 0;
+      }
+
+      // Enforce crouch if standing head would intersect ceiling and player can fit crouched
+      const maxAllowedH = yBot - p.y;
+      if (maxAllowedH < CFG.H && maxAllowedH >= CFG.CROUCH_H) {
+        const minRequiredCrouchT = (CFG.H - maxAllowedH) / (CFG.H - CFG.CROUCH_H);
+        if ((pl.crouchT || 0) < minRequiredCrouchT) {
+          pl.crouchT = minRequiredCrouchT;
+        }
+      }
+
+      // Recalculate effective height with crouch
+      const effH = playerHeight(pl.crouchT);
+      const targetS = (p.y + effH + T - y0) / rise;
+      const uFit = findUForSmootherstep(targetS);
+      const sFit = uFit * len - hl;
+
+      // Stop horizontal movement into low-clearance wedge without pushing grounded player into the floor
+      if (s < sFit + R) {
+        const deltaS = (sFit + R) - s;
+        if (deltaS > 0) {
+          p.x += fwdX * (deltaS + 0.0005);
+          p.z += fwdZ * (deltaS + 0.0005);
+          const vfwd = pl.vel.x * fwdX + pl.vel.z * fwdZ;
+          if (vfwd < 0) {
+            pl.vel.x -= fwdX * vfwd;
+            pl.vel.z -= fwdZ * vfwd;
+          }
+        }
+      }
+
+      if (!pl.grounded && p.y > yBot - effH) {
+        p.y = yBot - effH - 0.0005;
+      }
+    }
+  }
+
   function collide(pl, obbs, portals, grabCubes, grabbedCube, events) {
     pl.grounded = false;
     const p = pl.pos;
@@ -59,6 +215,10 @@ export function initPhysics(TH, CFG, PORT) {
     const weaponLen = CFG.WEAPON_LEN || 1.35;
 
     for (const obb of obbs) {
+      if (obb.kind === 'ramp') {
+        collidePlayerWithRamp(pl, obb, events);
+        continue;
+      }
       const maxR = obb.rad + weaponLen;
       if ((p.x - obb.c.x) ** 2 + (p.y - obb.c.y) ** 2 + (p.z - obb.c.z) ** 2 > maxR * maxR) continue;
       for (let si = 0; si < 3; si++) {
@@ -74,7 +234,7 @@ export function initPhysics(TH, CFG, PORT) {
           for (let k = 0; k < 3; k++) { const over = Math.abs(lc[k]) - obb.he[k]; if (over > best) { best = over; kBest = k; } }
           n = obb.ax[kBest].clone().multiplyScalar(Math.sign(lc[kBest]) || 1);
           let rMargin = CFG.R;
-          if (n.y <= 0.1) {
+          if (obb.kind === 'wall' && n.y <= 0.1) {
             const hLen = Math.hypot(n.x, n.z);
             if (hLen > 0.001) {
               const facing = -(fwdX * (n.x / hLen) + fwdZ * (n.z / hLen)) * pitchCos;
@@ -91,7 +251,7 @@ export function initPhysics(TH, CFG, PORT) {
           if (dist < 1e-7) continue;
           const candidateN = dvec.clone().divideScalar(dist);
           let rMargin = CFG.R;
-          if (candidateN.y <= 0.1) {
+          if (obb.kind === 'wall' && candidateN.y <= 0.1) {
             const hLen = Math.hypot(candidateN.x, candidateN.z);
             if (hLen > 0.001) {
               const facing = -(fwdX * (candidateN.x / hLen) + fwdZ * (candidateN.z / hLen)) * pitchCos;
@@ -242,7 +402,7 @@ export function initPhysics(TH, CFG, PORT) {
     if (events && events.onTeleport) events.onTeleport();
   }
 
-  function physStep(pl, keys, autohop, dt, obbs, portals, grabCubes, grabbedCube, tpState, events) {
+  function physStep(pl, keys, autohop, dt, obbs, portals, grabCubes, grabbedCube, tpState, events, otherPlayers) {
     if (pl.grounded) pl.groundT = tpState.nowT;
     // Yaw change since the previous step; gates air-strafing (the mouse must
     // be turning with the held strafe key).
@@ -327,6 +487,9 @@ export function initPhysics(TH, CFG, PORT) {
     const prevCamPos = new V3(pl.pos.x, pl.pos.y + curH - 0.12, pl.pos.z);
     pl.pos.addScaledVector(pl.vel, dt);
     collide(pl, obbs, portals, grabCubes, grabbedCube, events);
+    if (otherPlayers) {
+      collidePlayerWithPlayers(pl, otherPlayers);
+    }
     
     teleportCheck(pl, prevCamPos, dt, portals[0], portals[1], tpState.R_AB[0], tpState.R_BA[0], tpState, events);
     if (portals.length > 2) {
@@ -517,12 +680,176 @@ export function initPhysics(TH, CFG, PORT) {
     return teleported;
   }
 
+  const _otherPlayersList = [];
+  function collidePlayerWithPlayers(pl, otherPlayers) {
+    if (!otherPlayers || pl.isDead) return;
+    _otherPlayersList.length = 0;
+    if (Array.isArray(otherPlayers)) {
+      for (let i = 0; i < otherPlayers.length; i++) _otherPlayersList.push(otherPlayers[i]);
+    } else {
+      for (const k in otherPlayers) _otherPlayersList.push(otherPlayers[k]);
+    }
+    if (_otherPlayersList.length === 0) return;
+
+    const D = CFG.R * 2;
+    const D2 = D * D;
+    const h = playerHeight(pl.crouchT);
+    const myY0 = pl.pos.y;
+    const myY1 = pl.pos.y + h;
+
+    for (let i = 0; i < _otherPlayersList.length; i++) {
+      const other = _otherPlayersList[i];
+      if (!other || other === pl || other.isDead) continue;
+      const ox = Array.isArray(other.pos) ? other.pos[0] : other.pos.x;
+      const oy = Array.isArray(other.pos) ? other.pos[1] : other.pos.y;
+      const oz = Array.isArray(other.pos) ? other.pos[2] : other.pos.z;
+      const otherH = playerHeight(other.crouchT);
+      const otherY0 = oy;
+      const otherY1 = oy + otherH;
+
+      // Vertical overlap check
+      if (myY0 >= otherY1 || otherY0 >= myY1) {
+        // Landing on top of another player's head:
+        if (myY0 >= otherY1 - 0.25 && myY0 <= otherY1 + 0.15) {
+          const dx = pl.pos.x - ox, dz = pl.pos.z - oz;
+          if (dx * dx + dz * dz < D2) {
+            pl.pos.y = otherY1 + 0.001;
+            if (pl.vel.y < 0) pl.vel.y = 0;
+            pl.grounded = true;
+            pl.groundNormal.set(0, 1, 0);
+          }
+        }
+        continue;
+      }
+
+      // Horizontal capsule collision
+      const dx = pl.pos.x - ox;
+      const dz = pl.pos.z - oz;
+      const distSq = dx * dx + dz * dz;
+      if (distSq < D2) {
+        const dist = Math.sqrt(distSq);
+        const nx = dist > 1e-5 ? dx / dist : 1;
+        const nz = dist > 1e-5 ? dz / dist : 0;
+        const depth = D - dist;
+
+        pl.pos.x += nx * (depth + 0.001);
+        pl.pos.z += nz * (depth + 0.001);
+
+        const vn = pl.vel.x * nx + pl.vel.z * nz;
+        if (vn < 0) {
+          pl.vel.x -= nx * vn;
+          pl.vel.z -= nz * vn;
+        }
+      }
+    }
+  }
+
+  const _resolveList = [];
+  function resolvePlayerCollisions(players) {
+    if (!players) return;
+    _resolveList.length = 0;
+    if (Array.isArray(players)) {
+      for (let i = 0; i < players.length; i++) _resolveList.push(players[i]);
+    } else {
+      for (const k in players) _resolveList.push(players[k]);
+    }
+    const len = _resolveList.length;
+    if (len < 2) return;
+    const D = CFG.R * 2;
+    const D2 = D * D;
+
+    for (let i = 0; i < len; i++) {
+      const pA = _resolveList[i];
+      if (!pA || pA.isDead) continue;
+      const pAx = Array.isArray(pA.pos) ? pA.pos[0] : pA.pos.x;
+      const pAy = Array.isArray(pA.pos) ? pA.pos[1] : pA.pos.y;
+      const pAz = Array.isArray(pA.pos) ? pA.pos[2] : pA.pos.z;
+      const hA = playerHeight(pA.crouchT);
+      const yA0 = pAy, yA1 = pAy + hA;
+
+      for (let j = i + 1; j < len; j++) {
+        const pB = _resolveList[j];
+        if (!pB || pB.isDead) continue;
+        const pBx = Array.isArray(pB.pos) ? pB.pos[0] : pB.pos.x;
+        const pBy = Array.isArray(pB.pos) ? pB.pos[1] : pB.pos.y;
+        const pBz = Array.isArray(pB.pos) ? pB.pos[2] : pB.pos.z;
+        const hB = playerHeight(pB.crouchT);
+        const yB0 = pBy, yB1 = pBy + hB;
+
+        // Vertical overlap check
+        if (yA0 >= yB1 || yB0 >= yA1) {
+          const dx = pAx - pBx, dz = pAz - pBz;
+          if (dx * dx + dz * dz < D2) {
+            if (yA0 >= yB1 - 0.25 && yA0 <= yB1 + 0.15) {
+              if (Array.isArray(pA.pos)) pA.pos[1] = yB1 + 0.001; else pA.pos.y = yB1 + 0.001;
+              if (pA.vel) {
+                if (Array.isArray(pA.vel)) { if (pA.vel[1] < 0) pA.vel[1] = 0; }
+                else if (pA.vel.y < 0) pA.vel.y = 0;
+              }
+              pA.grounded = true;
+              if (pA.groundNormal) pA.groundNormal.set(0, 1, 0);
+            } else if (yB0 >= yA1 - 0.25 && yB0 <= yA1 + 0.15) {
+              if (Array.isArray(pB.pos)) pB.pos[1] = yA1 + 0.001; else pB.pos.y = yA1 + 0.001;
+              if (pB.vel) {
+                if (Array.isArray(pB.vel)) { if (pB.vel[1] < 0) pB.vel[1] = 0; }
+                else if (pB.vel.y < 0) pB.vel.y = 0;
+              }
+              pB.grounded = true;
+              if (pB.groundNormal) pB.groundNormal.set(0, 1, 0);
+            }
+          }
+          continue;
+        }
+
+        // Horizontal capsule collision
+        const dx = pAx - pBx;
+        const dz = pAz - pBz;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < D2) {
+          const dist = Math.sqrt(distSq);
+          const nx = dist > 1e-5 ? dx / dist : 1;
+          const nz = dist > 1e-5 ? dz / dist : 0;
+          const depth = D - dist;
+
+          const push = (depth + 0.001) * 0.5;
+          if (Array.isArray(pA.pos)) { pA.pos[0] += nx * push; pA.pos[2] += nz * push; }
+          else { pA.pos.x += nx * push; pA.pos.z += nz * push; }
+
+          if (Array.isArray(pB.pos)) { pB.pos[0] -= nx * push; pB.pos[2] -= nz * push; }
+          else { pB.pos.x -= nx * push; pB.pos.z -= nz * push; }
+
+          const vAx = pA.vel ? (Array.isArray(pA.vel) ? pA.vel[0] : pA.vel.x) : 0;
+          const vAz = pA.vel ? (Array.isArray(pA.vel) ? pA.vel[2] : pA.vel.z) : 0;
+          const vBx = pB.vel ? (Array.isArray(pB.vel) ? pB.vel[0] : pB.vel.x) : 0;
+          const vBz = pB.vel ? (Array.isArray(pB.vel) ? pB.vel[2] : pB.vel.z) : 0;
+
+          const rvx = vAx - vBx;
+          const rvz = vAz - vBz;
+          const vn = rvx * nx + rvz * nz;
+          if (vn < 0) {
+            const j = vn * 0.5;
+            if (pA.vel) {
+              if (Array.isArray(pA.vel)) { pA.vel[0] -= nx * j; pA.vel[2] -= nz * j; }
+              else { pA.vel.x -= nx * j; pA.vel.z -= nz * j; }
+            }
+            if (pB.vel) {
+              if (Array.isArray(pB.vel)) { pB.vel[0] += nx * j; pB.vel[2] += nz * j; }
+              else { pB.vel.x += nx * j; pB.vel.z += nz * j; }
+            }
+          }
+        }
+      }
+    }
+  }
+
   return {
     physStep,
     collideCube,
     resolveCubeCollisions,
     raycast,
-    teleportCube
+    teleportCube,
+    collidePlayerWithPlayers,
+    resolvePlayerCollisions
   };
 }
 

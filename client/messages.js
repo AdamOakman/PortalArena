@@ -173,9 +173,15 @@ export function onMessage(G, data) {
         P.c.fromArray(sp.c); P.n.fromArray(sp.n); P.r.fromArray(sp.r); P.u.fromArray(sp.u);
         let onBadWall = false;
         for (const obb of G.obbs) {
-          if ((obb.destroyed || obb.noPortal) && P.c.distanceTo(obb.c) < obb.rad + 0.5) {
-            onBadWall = true;
-            break;
+          if (obb.destroyed) {
+            const dx = P.c.x - obb.c.x, dy = P.c.y - obb.c.y, dz = P.c.z - obb.c.z;
+            const l0 = Math.abs(dx * obb.ax[0].x + dy * obb.ax[0].y + dz * obb.ax[0].z);
+            const l1 = Math.abs(dx * obb.ax[1].x + dy * obb.ax[1].y + dz * obb.ax[1].z);
+            const l2 = Math.abs(dx * obb.ax[2].x + dy * obb.ax[2].y + dz * obb.ax[2].z);
+            if (l0 <= obb.he[0] + 0.1 && l1 <= obb.he[1] + 0.1 && l2 <= obb.he[2] + 0.1) {
+              onBadWall = true;
+              break;
+            }
           }
         }
         if (onBadWall) {
@@ -200,9 +206,15 @@ export function onMessage(G, data) {
     const pC = new V3(...data.c);
     let onBadWall = false;
     for (const obb of G.obbs) {
-      if ((obb.destroyed || obb.noPortal) && pC.distanceTo(obb.c) < obb.rad + 0.5) {
-        onBadWall = true;
-        break;
+      if (obb.destroyed) {
+        const dx = pC.x - obb.c.x, dy = pC.y - obb.c.y, dz = pC.z - obb.c.z;
+        const l0 = Math.abs(dx * obb.ax[0].x + dy * obb.ax[0].y + dz * obb.ax[0].z);
+        const l1 = Math.abs(dx * obb.ax[1].x + dy * obb.ax[1].y + dz * obb.ax[1].z);
+        const l2 = Math.abs(dx * obb.ax[2].x + dy * obb.ax[2].y + dz * obb.ax[2].z);
+        if (l0 <= obb.he[0] + 0.1 && l1 <= obb.he[1] + 0.1 && l2 <= obb.he[2] + 0.1) {
+          onBadWall = true;
+          break;
+        }
       }
     }
     if (!onBadWall) {

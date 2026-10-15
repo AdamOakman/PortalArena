@@ -580,7 +580,9 @@ export function initLoop(G) {
 
        G.quads[i].scale.setScalar(scl);
        G.frames[i].scale.set((PORT.hw + 0.05) * scl, (PORT.hh + 0.05) * scl, 1);
-       G.glowLights[i].intensity = 5.0 * scl;
+       const pulse = 1.0 + 0.12 * Math.sin(G.nowT * 2.8 + i * 1.7) + 0.06 * Math.cos(G.nowT * 5.3 + i * 2.3);
+       G.glowLights[i].intensity = 13.0 * scl * pulse;
+       G.glowLights[i].color.setHex(P.color);
 
        for (let j = 0; j < 100; j++) {
           if (sp.life[j] <= 0) {
