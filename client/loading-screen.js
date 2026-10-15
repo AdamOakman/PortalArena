@@ -299,7 +299,7 @@ export class LoadingScreen {
       const mat = new TH.ShaderMaterial({
         uniforms: { uColor: { value: new TH.Color(color) } },
         transparent: true, blending: TH.AdditiveBlending, depthWrite: false,
-        vertexShader: `attribute float life; varying float vLife; void main() { vLife = life; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_PointSize = life * 12.0; }`,
+        vertexShader: `attribute float life; varying float vLife; void main() { vLife = life; vec4 mvPosition = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mvPosition; gl_PointSize = clamp((life * 80.0) / max(0.1, -mvPosition.z), 1.0, 100.0); }`,
         fragmentShader: `uniform vec3 uColor; varying float vLife; void main() { vec2 p = gl_PointCoord - 0.5; float d = length(p); if (d > 0.5) discard; gl_FragColor = vec4(uColor * (1.0 - d*2.0), vLife); }`
       });
       const mesh = new TH.Points(geo, mat);

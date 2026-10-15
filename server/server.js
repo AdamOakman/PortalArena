@@ -610,6 +610,94 @@ let botSummaryAutoRestart = 0;
 let lastPhysicsTime = performance.now();
 let physicsAccumulator = 0;
 
+function handleBotRocket(pid, rocketPos, rocketVel, targetHit) {
+  if (match.phase === 'countdown') return;
+  const fireMsg = JSON.stringify({
+    type: 'fire_rocket',
+    playerId: pid,
+    pos: rocketPos.toArray(),
+    vel: rocketVel.toArray()
+  });
+  wss.clients.forEach(c => { if (c.readyState === 1) c.send(fireMsg); });
+
+  const hitPt = targetHit && targetHit.point ? targetHit.point : rocketPos.clone().addScaledVector(rocketVel.clone().normalize(), 20);
+  const hitDist = rocketPos.distanceTo(hitPt);
+  const flightMs = Math.max(30, Math.min(1500, (hitDist / 70) * 1000));
+
+  setTimeout(() => {
+    if (match.phase === 'countdown') return;
+    const explMsg = JSON.stringify({
+      type: 'rocket_explosion',
+      pos: hitPt.toArray()
+    });
+    wss.clients.forEach(c => { if (c.readyState === 1) c.send(explMsg); });
+
+    for (const plId in gameState.players) {
+      const pl = gameState.players[plId];
+      if (!pl.isDead) {
+        const pCenter = pl.pos.clone();
+        pCenter.y += CFG.H / 2;
+        const dvec = new TH.Vector3().subVectors(pCenter, hitPt);
+        const dist = dvec.length();
+        if (dist < 12) {
+          if (dvec.y < 0.2) dvec.y = 0.2;
+          dvec.normalize();
+          const force = (12 - dist) * 2.25;
+          pl.vel.add(dvec.multiplyScalar(force));
+          pl.grounded = false;
+        }
+      }
+    }
+
+    if (targetHit && targetHit.obb && targetHit.obb.kind === 'wall' && !targetHit.obb.boundary) {
+      const result = serverDestroyWall(targetHit.obb.id, targetHit.obb.c.toArray(), hitPt.toArray());
+      if (result) {
+        updatePair();
+        const dwMsg = {
+          type: 'destroy_wall',
+          wallId: targetHit.obb.id,
+          wallCenter: targetHit.obb.c.toArray(),
+          point: hitPt.toArray(),
+          normal: targetHit.normal ? targetHit.normal.toArray() : [0, 1, 0]
+        };
+        gameState.destroyedWalls.push(dwMsg);
+        for (const pi of result.cancelledPortals) {
+          const cancelMsg = JSON.stringify({ type: 'portal_remove', pi });
+          wss.clients.forEach(c => { if (c.readyState === 1) c.send(cancelMsg); });
+        }
+        const fwdMsg = JSON.stringify(dwMsg);
+        wss.clients.forEach(c => { if (c.readyState === 1) c.send(fwdMsg); });
+      }
+    }
+  }, flightMs);
+}
+
+function handleBotInstagib(pid, pts, hitPlayerId, scorch) {
+  if (match.phase === 'countdown') return;
+  const fp = gameState.players[pid];
+  if (fp && match.phase === 'active') {
+    fp.shots = (fp.shots || 0) + 1;
+    if (hitPlayerId && gameState.players[hitPlayerId]) {
+      fp.hits = (fp.hits || 0) + 1;
+    }
+  }
+
+  if (hitPlayerId && gameState.players[hitPlayerId]?.isBot) {
+    handlePlayerDeath(hitPlayerId, pid, 'instagib', pts.length > 2);
+  }
+
+  const ibMsg = JSON.stringify({
+    type: 'fire_instagib',
+    playerId: pid,
+    pts: pts.map(p => p.toArray()),
+    hitPlayerId: hitPlayerId || null,
+    scorch: scorch || null
+  });
+  wss.clients.forEach(c => {
+    if (c.readyState === 1) c.send(ibMsg);
+  });
+}
+
 function stepPhysics(dt) {
   tpState.nowT = Date.now() / 1000;
 
@@ -620,31 +708,42 @@ function stepPhysics(dt) {
     let autohop = pl.autohop || false;
 
     if (pl.isBot) {
+      if (pl.crouchT > 0) {
+        pl.crouchT = Math.max(0, pl.crouchT - dt * 8);
+      }
       if (!pl.isDead && match.phase !== 'countdown') {
-        lastKeys = tickBot(pid, pl, tpState.nowT, gameState.portals, PORT, (pIdx, surface, eyePos) => {
-          updatePair();
-          const P = gameState.portals[pIdx];
-          const placeMsg = JSON.stringify({
-            type: 'portal_place',
-            pi: pIdx,
-            c: P.c.toArray(),
-            n: P.n.toArray(),
-            r: P.r.toArray(),
-            u: P.u.toArray()
-          });
-          const beamMsg = JSON.stringify({
-            type: 'fire_beam',
-            playerId: pid,
-            pi: pIdx,
-            start: eyePos.toArray(),
-            end: surface.c.toArray()
-          });
-          wss.clients.forEach(c => {
-            if (c.readyState === 1) {
-              c.send(placeMsg);
-              c.send(beamMsg);
-            }
-          });
+        lastKeys = tickBot(pid, pl, tpState.nowT, gameState.portals, PORT, {
+          onPortalPlaced: (pIdx, surface, eyePos) => {
+            updatePair();
+            const P = gameState.portals[pIdx];
+            const placeMsg = JSON.stringify({
+              type: 'portal_place',
+              pi: pIdx,
+              c: P.c.toArray(),
+              n: P.n.toArray(),
+              r: P.r.toArray(),
+              u: P.u.toArray()
+            });
+            const beamMsg = JSON.stringify({
+              type: 'fire_beam',
+              playerId: pid,
+              pi: pIdx,
+              start: eyePos.toArray(),
+              end: surface.c.toArray()
+            });
+            wss.clients.forEach(c => {
+              if (c.readyState === 1) {
+                c.send(placeMsg);
+                c.send(beamMsg);
+              }
+            });
+          },
+          onFireRocket: (rocketPos, rocketVel, targetHit) => {
+            handleBotRocket(pid, rocketPos, rocketVel, targetHit);
+          },
+          onFireInstagib: (pts, hitPlayerId, scorch) => {
+            handleBotInstagib(pid, pts, hitPlayerId, scorch);
+          }
         });
         autohop = true;
       } else {

@@ -65,7 +65,6 @@ export function initHUD(document) {
     root: dom('hud'),
     speed: dom('speedval'), 
     fill: dom('barfill'), 
-    hint: dom('hint'), 
     matchtimer: dom('matchtimer'),
     nameA: dom('nameA'),
     nameB: dom('nameB'),
@@ -78,7 +77,6 @@ export function initHUD(document) {
     statsboard: dom('statsboard'),
     statsbody: dom('statsbody')
   };
-  let lastHintMsg = '';
 
   // Seat map from the server match snapshot: seat 0 = left, seat 1 = right
   function seats(match) {
@@ -125,7 +123,7 @@ export function initHUD(document) {
   }
 
   function updateHUD(state) {
-    const { pl, CFG, currentSeed, hit, msg, match, localReady, localIndex, statsOpen, localPid, started, isSpectator, spectatorSpeed, spectatorMode, followPerspective, isTargetDead } = state;
+    const { pl, CFG, currentSeed, hit, match, localReady, localIndex, statsOpen, localPid, started, isSpectator, spectatorSpeed, spectatorMode, followPerspective, isTargetDead } = state;
 
     // The whole HUD stays hidden in the main menu (orbit preview)
     hud.root.classList.toggle('hidden', !started);
@@ -180,13 +178,6 @@ export function initHUD(document) {
         hud.readyA.textContent = ''; hud.readyA.classList.remove('on');
         hud.readyB.textContent = ''; hud.readyB.classList.remove('on');
       }
-    }
-    
-    // Hint
-    if (msg !== lastHintMsg) { 
-      hud.hint.textContent = msg; 
-      hud.hint.style.display = msg ? '' : 'none'; 
-      lastHintMsg = msg; 
     }
     
     // Aimring

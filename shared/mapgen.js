@@ -110,8 +110,18 @@ export function generateMap(seedStr) {
           else if (side === 2) add((cur + b) / 2, h / 2, size, b - cur, h, 1.2, WALL);
           else add(-size, h / 2, (cur + b) / 2, 1.2, h, b - cur, WALL);
         }
-        decor.push({ t: 'arch', c: [side === 1 ? size : side === 3 ? -size : gc, 0, side === 0 ? -size : side === 2 ? size : gc], ry: side % 2 === 0 ? 0 : Math.PI / 2, s: h / 6.95 });
-        if (lit) decor.push({ t: 'torch', c: [side === 1 ? size : side === 3 ? -size : gc, 5.2, side === 0 ? -size : side === 2 ? size : gc] });
+        const gateX = side === 1 ? size : side === 3 ? -size : gc;
+        const gateZ = side === 0 ? -size : side === 2 ? size : gc;
+        const ry = side % 2 === 0 ? 0 : Math.PI / 2;
+        decor.push({ t: 'arch', c: [gateX, 0, gateZ], ry, h, w: gapW, s: 1 });
+        if (lit) {
+          const ox = (gapW / 2 + 1.0) * (side % 2 === 0 ? 1 : 0);
+          const oz = (gapW / 2 + 1.0) * (side % 2 !== 0 ? 1 : 0);
+          decor.push({ t: 'torch', c: [gateX + ox, 0, gateZ + oz] });
+          decor.push({ t: 'torch', c: [gateX - ox, 0, gateZ - oz] });
+        }
+        // Reserve corridor around gate so scattered cover never blocks passage
+        reserveRect(gateX, gateZ, side % 2 === 0 ? gapW + 3 : 8, side % 2 === 0 ? 8 : gapW + 3);
         cur = gc + gapW / 2;
       }
       if (size - cur > 2.5) {
@@ -124,8 +134,8 @@ export function generateMap(seedStr) {
         side % 2 === 0 ? size * 2 : 1.2, side % 2 === 0 ? 1.2 : size * 2);
     }
   }
-  ring(32, 8.2, 3, rr(4, 6), true);
-  ring(16, 5, 2, rr(4, 5));
+  ring(32, 8.2, 3, rr(6.5, 8.5), true);
+  ring(16, 5, 2, rr(6.0, 7.5));
   for (const [bx, bz] of [[32, 0], [-32, 0], [0, 32], [0, -32]])
     decor.push({ t: 'brazier', c: [bx, 0, bz] });                        // ring-1 midpoints
 
@@ -308,19 +318,65 @@ export function generateMap(seedStr) {
     spawns.push({ x: hx, y: 17.75, z: hz, yaw: Math.atan2(-hx, -hz) });
 
   // ------------------------------------------------------------- gothic decor
+  // Torch occlusion and boundary validation to prevent invisible or embedded torches
+  const isTorchBlocked = (x, y, z, checkH = 2.4) => {
+    // Check against all non-floor slabs
+    for (const sl of slabs) {
+      if (sl.kind === 'plat' && sl.c[1] <= 0) continue;
+      const hx = sl.s[0] / 2 + 0.45;
+      const hy = sl.s[1] / 2;
+      const hz = sl.s[2] / 2 + 0.45;
+      if (Math.abs(x - sl.c[0]) < hx && Math.abs(z - sl.c[2]) < hz) {
+        const topY = sl.c[1] + hy;
+        const botY = sl.c[1] - hy;
+        if (y + checkH > botY && y < topY + 0.1) return true;
+      }
+    }
+    // Check against ramps
+    for (const rm of ramps) {
+      const hw = rm.width / 2 + 0.5;
+      const hl = rm.len / 2 + 0.5;
+      const isX = (rm.dir === 0 || rm.dir === 2);
+      const hx = isX ? hl : hw;
+      const hz = isX ? hw : hl;
+      if (Math.abs(x - rm.cx) < hx && Math.abs(z - rm.cz) < hz) {
+        const topY = rm.y0 + rm.rise + 0.5;
+        if (y < topY) return true;
+      }
+    }
+    // Check against corner towers (14x14 at ±HALF, ±HALF)
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      if (Math.abs(x - sx * HALF) < 8.5 && Math.abs(z - sz * HALF) < 8.5) return true;
+    }
+    // Check against lava pools
+    for (const pool of lava) {
+      const dx = x - pool.x, dz = z - pool.z;
+      if (dx * dx + dz * dz < (pool.r + 1.2) * (pool.r + 1.2)) return true;
+    }
+    return false;
+  };
+
+  const addTorch = (x, y, z) => {
+    if (!isTorchBlocked(x, y, z)) {
+      decor.push({ t: 'torch', c: [x, y, z] });
+      return true;
+    }
+    return false;
+  };
+
   // torches: boundary walls + ring corners
   for (let side = 0; side < 4; side++) {
-    for (let i = 0; i < 10; i++) {
-      const p = -HALF + 6 + i * 10 + rr(-2, 2);
-      if (side === 0) decor.push({ t: 'torch', c: [p, 0, -HALF + 0.7] });
-      else if (side === 1) decor.push({ t: 'torch', c: [HALF - 0.7, 0, p] });
-      else if (side === 2) decor.push({ t: 'torch', c: [p, 0, HALF - 0.7] });
-      else decor.push({ t: 'torch', c: [-HALF + 0.7, 0, p] });
+    for (let p = -HALF + 8; p <= HALF - 8; p += 6) {
+      const po = p + rr(-0.5, 0.5);
+      if (side === 0) addTorch(po, 0, -HALF + 1.1);
+      else if (side === 1) addTorch(HALF - 1.1, 0, po);
+      else if (side === 2) addTorch(po, 0, HALF - 1.1);
+      else addTorch(-HALF + 1.1, 0, po);
     }
   }
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    decor.push({ t: 'torch', c: [sx * 33, 0, sz * 33] });
-    decor.push({ t: 'torch', c: [sx * 17, 0, sz * 17] });
+    addTorch(sx * 33.5, 0, sz * 33.5);
+    addTorch(sx * 17.5, 0, sz * 17.5);
   }
   // banners on the boundary
   for (let side = 0; side < 4; side++) {
@@ -378,7 +434,12 @@ export function generateMap(seedStr) {
     rm.width *= MAP_SCALE;
     rm.y0 *= MAP_SCALE;
   }
-  for (const d of decor) { d.c = sc3(d.c); d.s = (d.s || 1) * MAP_SCALE; }
+  for (const d of decor) {
+    d.c = sc3(d.c);
+    d.s = (d.s || 1) * MAP_SCALE;
+    if (d.h !== undefined) d.h *= MAP_SCALE;
+    if (d.w !== undefined) d.w *= MAP_SCALE;
+  }
   for (const l of lava) { l.x *= MAP_SCALE; l.z *= MAP_SCALE; l.r *= MAP_SCALE; l.y *= MAP_SCALE; }
   for (const sp of spawns) { sp.x *= MAP_SCALE; sp.z *= MAP_SCALE; sp.y *= MAP_SCALE; }
   return { seed: seedStr, slabs, ramps, spawns, lava, decor, grabCubes: [], hints: [] };

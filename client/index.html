@@ -48,9 +48,6 @@
   #barfill{ height:100%; width:0%; border-radius:1px;
     background:linear-gradient(90deg,#7a2414,#ff7a22); box-shadow:0 0 12px rgba(255,122,34,.7); transition:width .05s linear; }
   #barfill.hot{ background:linear-gradient(90deg,#ff7a22,#ffd27f); box-shadow:0 0 14px #ffb34d; }
-  #hint{ position:absolute; left:50%; bottom:34px; transform:translateX(-50%); max-width:760px;
-    text-align:center; font-size:14px; color:#d8cdb8; text-shadow:0 0 12px rgba(0,0,0,.9);
-    background:rgba(24,11,8,.55); padding:6px 14px; border-radius:2px; border:1px solid rgba(255,122,34,.22); }
   #infoline{ position:absolute; right:22px; bottom:26px; text-align:right; font-size:11px; color:#7a6a58; line-height:1.7; }
   #infoline b{ color:#cfc4ae; }
   #eventlog{ position:absolute; right:24px; top:24px; text-align:right; font-size:13px; color:#cfc4ae; text-shadow:0 0 10px rgba(0,0,0,0.8); pointer-events:none; }
@@ -184,7 +181,6 @@
     <div id="speedval">0<span>u/s</span></div>
     <div id="bar"><div id="barfill"></div></div>
   </div>
-  <div id="hint" style="display:none"></div>
   <div id="infoline">seed <b id="seedinfo">–</b> · fov <b id="fovinf">115</b> · sound <b id="muteinf">on</b><br>
     [ ] fov · F fullscreen · R ready · N new universe · TAB stats · M mute · J join</div>
   <div id="countdown" class="hidden"></div>

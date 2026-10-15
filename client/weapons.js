@@ -122,14 +122,15 @@ export function initWeapons(G) {
     G.animObjects.push({ type: 'scorch', obj: m, slot, life: SCORCH_LIFE });
   }
 
-  // Gib pool: death meshes share one geometry + one material; only reset on spawn.
-  const _gibMat = new TH.MeshStandardMaterial({ color: 0xaa0000, transparent: true });
+  // Gib pool: death meshes share one geometry; each slot has its own material so
+  // fading/coloring one death effect never makes other gibs invisible.
   const _gibScratch = new V3();
   G._gibPool = makePool(80, () => {
-    const mesh = new TH.Mesh(_gibGeo, _gibMat);
+    const mat = new TH.MeshStandardMaterial({ color: 0xaa0000, transparent: true, opacity: 1.0 });
+    const mesh = new TH.Mesh(_gibGeo, mat);
     mesh.visible = false;
     G.scene.add(mesh);
-    return { busy: false, mesh, vel: new V3() };
+    return { busy: false, mesh, mat, vel: new V3() };
   });
 
   function spawnBeam(colorHex, start, end) {
@@ -219,6 +220,7 @@ export function initWeapons(G) {
   function _releaseSmoke(s) { s.active = false; s.mesh.visible = false; }
   G._acquireSmoke = _acquireSmoke;
   G._releaseSmoke = _releaseSmoke;
+  G._smokePool = _smokePool;
 
   function fireRocket() {
     if (G.countdownActive || (G.match && G.match.phase === 'countdown')) return;
@@ -411,14 +413,14 @@ export function initWeapons(G) {
   function spawnDeathAnimation(pos, color) {
     const gibColor = color || 0xaa0000;
     AudioSys.tone(200, 500, 0.5, 'square', 0.1);
-    // All gibs share one pooled material — set its color/opacity for this death
-    _gibMat.color.setHex(gibColor);
-    _gibMat.opacity = 1.0;
     let spawned = 0;
     while (spawned < 20) {
        const slot = G._gibPool.acquire();
        if (!slot) break; // pool exhausted — stop here
        slot.mesh.visible = true;
+       slot.mat.color.setHex(gibColor);
+       slot.mat.opacity = 1.0;
+       slot.mesh.scale.setScalar(1.0);
        slot.mesh.position.copy(pos).add(_gibScratch.set((Math.random()-0.5)*0.6, Math.random()*1.5, (Math.random()-0.5)*0.6));
        slot.vel.set((Math.random()-0.5)*10, Math.random()*6+2, (Math.random()-0.5)*10);
        G.animObjects.push({ type: 'gib', obj: slot.mesh, vel: slot.vel, slot, life: 3.0 });
