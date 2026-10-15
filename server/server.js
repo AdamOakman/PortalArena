@@ -387,9 +387,21 @@ wss.on('connection', (ws) => {
       if (checkPortalOverlap(candidateC, candidateN, candidateR, candidateU, gameState.portals, data.pi, PORT)) {
         return;
       }
-      for (const obb of obbs) {
-        if ((obb.destroyed || obb.noPortal) && candidateC.distanceTo(obb.c) < obb.rad + 0.5) {
+      if (data.wallId) {
+        const hitObb = obbs.find(o => o.id === data.wallId);
+        if (hitObb && (hitObb.noPortal || hitObb.destroyed || hitObb.kind === 'ramp')) {
           return;
+        }
+      }
+      for (const obb of obbs) {
+        if (obb.destroyed) {
+          const dx = candidateC.x - obb.c.x, dy = candidateC.y - obb.c.y, dz = candidateC.z - obb.c.z;
+          const l0 = Math.abs(dx * obb.ax[0].x + dy * obb.ax[0].y + dz * obb.ax[0].z);
+          const l1 = Math.abs(dx * obb.ax[1].x + dy * obb.ax[1].y + dz * obb.ax[1].z);
+          const l2 = Math.abs(dx * obb.ax[2].x + dy * obb.ax[2].y + dz * obb.ax[2].z);
+          if (l0 <= obb.he[0] + 0.1 && l1 <= obb.he[1] + 0.1 && l2 <= obb.he[2] + 0.1) {
+            return;
+          }
         }
       }
       const P = gameState.portals[data.pi];
@@ -672,7 +684,8 @@ function stepPhysics(dt) {
       gameState.grabCubes, 
       null, 
       tpState, 
-      events
+      events,
+      gameState.players
     );
 
     // Bot death check (void / lava)
@@ -694,6 +707,8 @@ function stepPhysics(dt) {
       }
     }
   }
+
+  physics.resolvePlayerCollisions(gameState.players);
 
   for (const c of gameState.grabCubes) {
       let isGrabbed = false;

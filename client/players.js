@@ -29,7 +29,7 @@ export function initPlayers(G) {
       onJump: () => { AudioSys.tone(340, 520, 0.06, 'triangle', 0.04); },
       onTeleport: () => { _tpFlash.classList.remove('fadeflash'); void _tpFlash.offsetWidth; _tpFlash.classList.add('fadeflash'); }
     };
-    G.physics.physStep(G.pl, k, G.autohop, dt, G.obbs, G.portals, G.grabCubes, G.grabbedCube, tpState, events);
+    G.physics.physStep(G.pl, k, G.autohop, dt, G.obbs, G.portals, G.grabCubes, G.grabbedCube, tpState, events, G.remotePlayers);
     tpGracePortal = tpState.tpGracePortal;
     tpGraceT = tpState.tpGraceT;
     if (G.pl.pos.y < -40.5) die(null, false, 'void');

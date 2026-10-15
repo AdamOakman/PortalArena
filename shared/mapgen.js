@@ -44,12 +44,16 @@ export function generateMap(seedStr) {
   const pick = arr => arr[Math.floor(rng() * arr.length)];
 
   const slabs = [];
+  const ramps = [];
   const decor = [];
   const lava = [];
   const spawns = [];
-  const add = (cx, cy, cz, sx, sy, sz, kind, ry = 0, rz = 0, boundary = false) => {
+
+  const add = (cx, cy, cz, sx, sy, sz, kind, ry = 0, rz = 0, boundary = false, noPortal = false, rampData = null) => {
     const rec = { c: [cx, cy, cz], s: [sx, sy, sz], kind, ry, rz };
     if (boundary) rec.boundary = true; // indestructible by rockets
+    if (noPortal) rec.noPortal = true;
+    if (rampData) rec.ramp = rampData;
     slabs.push(rec);
   };
 
@@ -126,24 +130,34 @@ export function generateMap(seedStr) {
     decor.push({ t: 'brazier', c: [bx, 0, bz] });                        // ring-1 midpoints
 
   // ------------------------------------------------------------- ramps / steps
-  // dir: 0 = rises toward +x, 1 = +z, 2 = -x, 3 = -z. Slope kept <= 0.25.
+  // dir: 0 = rises toward +x, 1 = +z, 2 = -x, 3 = -z.
   // y0: height of the LOW end of the ramp (default 0 = floor).
+  // A single flush collision slab provides seamless walking without internal ghost edges,
+  // connects flush at (s = -len/2, y = y0) and (s = +len/2, y = y0 + rise).
+  // Ramps are non-portalable (noPortal: true) so portals are only placed on flat surfaces and walls.
   function ramp(cx, cz, dir, len, rise, width, y0 = 0) {
-     const totalRise = rise + 0.25;                     // low end sinks 0.25 in, high end flush at y0+rise
-     const pitch = Math.atan2(totalRise, len);
-     const sl = len / Math.cos(pitch) + 0.4;
-     const cy = y0 + rise / 2 - 0.125;
-    const ry = dir === 0 ? 0 : dir === 1 ? -Math.PI / 2 : dir === 2 ? Math.PI : Math.PI / 2;
-    add(cx, cy, cz, sl, 0.6, width, RAMP, ry, pitch);
+    ramps.push({ cx, cz, dir, len, rise, width, y0 });
+    const pitch = Math.atan2(rise, len);
+    const sl = Math.hypot(len, rise);
+    const T = 0.6; // slab thickness
+    const sC = (T / 2) * Math.sin(pitch);
+    const yC = (y0 + rise / 2) - (T / 2) * Math.cos(pitch);
+    let xC = cx, zC = cz, ry = 0;
+    if (dir === 0) { xC = cx + sC; ry = 0; }
+    else if (dir === 1) { zC = cz + sC; ry = -Math.PI / 2; }
+    else if (dir === 2) { xC = cx - sC; ry = Math.PI; }
+    else if (dir === 3) { zC = cz - sC; ry = Math.PI / 2; }
+    const rampData = { cx, cz, dir, len, rise, width, y0, T };
+    add(xC, yC, zC, sl, T, width, RAMP, ry, pitch, false, true, rampData);
   }
 
   // ------------------------------------------------------------- central keep
   const K = 7.5; // base half-size
   add(0, 1, 0, K * 2, 2, K * 2, PLAT);                       // base, top y=2
-   ramp(0, -(K + 3.5), 1, 9, 2.0, 6);                   // 4 ramps, all rising toward the keep
-   ramp(0, K + 3.5, 3, 9, 2.0, 6);
-   ramp(K + 3.5, 0, 2, 9, 2.0, 6);
-   ramp(-(K + 3.5), 0, 0, 9, 2.0, 6);
+  ramp(0, -(K + 4.0), 1, 8.0, 2.0, 6);                   // 4 ramps, all rising toward the keep flush
+  ramp(0, K + 4.0, 3, 8.0, 2.0, 6);
+  ramp(K + 4.0, 0, 2, 8.0, 2.0, 6);
+  ramp(-(K + 4.0), 0, 0, 8.0, 2.0, 6);
   add(0, 3.1, 0, 12, 2.2, 12, PLAT);                          // level 2, top y=4.2
   add(0, 2.4, -5.5, 5, 0.8, 3, PLAT);                         // steps N (2.0->2.8->3.8->4.2)
   add(0, 3.4, -3.5, 5, 0.8, 3, PLAT);
@@ -163,7 +177,7 @@ export function generateMap(seedStr) {
     decor.push({ t: 'skull', c: [sx * 1.5, 4.2, -3], ry: rng() * 6.28, s: rr(0.9, 1.2) });
 
   // --------------------------------------- keep spire: long ramp to a high platform
-   ramp(16, 0, 0, 21, 5, 5, 4.2);                       // from level 2, over the ring-2 wall
+  ramp(15.5, 0, 0, 19, 5, 6, 4.2);                       // from level 2, over the ring-2 wall to spire platform (flush)
   add(30, 8.7, 0, 10, 1, 10, PLAT);                           // floating platform, top 9.2
   add(28, 9.7, 3.5, 4, 1, 3, PLAT);                           // steps 9.2->10.2->11.2
   add(28, 10.7, 2, 4, 1, 3, PLAT);
@@ -174,15 +188,15 @@ export function generateMap(seedStr) {
   decor.push({ t: 'torch', c: [33, 12.2, -3] });
 
   // ------------------------------------------------------------- boundary vantages
-  // Each side: long floor ramp (40m, slope 0.25) to a mid platform (9.8)
-  // stuck to the boundary wall, then a second ramp (32m) to a high
+  // Each side: long floor ramp (40m) to a mid platform (9.8)
+  // stuck to the boundary wall, then a second ramp to a high
   // platform (17.7). Bidirectional: walk back down the ramps.
   function vantage(side) {
     // side 0 = north (z -50), 1 = east (x +50), 2 = south (z +50), 3 = west (x -50)
     if (side === 0) {
-       ramp(-17.1, -44.5, 0, 40.2, 9.8, 11, 0);                // floor -> 9.8, x -37..3 (flush, z -50..-39, =mid width)
+      ramp(-17.1, -44.45, 0, 40.2, 9.8, 10.9, 0);                // floor -> 9.8, x -37.2..3 (flush, z -49.9..-39, =mid width)
       add(10, 9.3, -44.5, 14, 1, 11, PLAT);                     // mid, top 9.8 (z -50..-39)
-       ramp(-14, -47.25, 2, 37.5, 8, 5.5, 9.8);             // mid -> 17.7, x -33.4..5.4 (extended to shifted high, half width)
+      ramp(-13, -46.95, 2, 36, 7.9, 5.9, 9.8);                      // mid -> 17.7, x -31..5 (flush with high plat, half width)
       add(-37, 17.2, -45, 12, 1, 10, PLAT);                   // high, top 17.7 (x -43..-31 touches NW column, z -50..-40 flush wall)
       reserveRect(-6, -44, 46, 14);
       reserveRect(10, -44, 18, 12);
@@ -190,9 +204,9 @@ export function generateMap(seedStr) {
       decor.push({ t: 'torch', c: [10, 9.8, -44] });
       decor.push({ t: 'brazier', c: [-33, 17.7, -44] });
     } else if (side === 1) {
-       ramp(44.5, -17.1, 1, 40.2, 9.8, 11, 0);                 // floor -> 9.8, z -37..3 (flush, x 39..50, =mid width)
+      ramp(44.45, -17.1, 1, 40.2, 9.8, 10.9, 0);                 // floor -> 9.8, z -37.2..3 (flush, x 39..49.9, =mid width)
       add(44.5, 9.3, 10, 11, 1, 14, PLAT);                      // mid, top 9.8 (x 39..50)
-       ramp(47.25, -14, 3, 37.5, 8, 5.5, 9.8);               // mid -> 17.7, z -33.4..5.4 (extended to shifted high, half width)
+      ramp(46.95, -13, 3, 36, 7.9, 5.9, 9.8);                      // mid -> 17.7, z -31..5 (flush with high plat, half width)
       add(45, 17.2, -37, 10, 1, 12, PLAT);                    // high, top 17.7 (z -43..-31 touches NE column, x 40..50 flush wall)
       reserveRect(44, -6.67, 14, 46);
       reserveRect(44, 10, 14, 18);
@@ -200,9 +214,9 @@ export function generateMap(seedStr) {
       decor.push({ t: 'torch', c: [44, 9.8, 10] });
       decor.push({ t: 'brazier', c: [44, 17.7, -33] });
     } else if (side === 2) {
-       ramp(17.1, 44.5, 2, 40.2, 9.8, 11, 0);                  // floor -> 9.8, x 37..-3 (flush, z 39..50, =mid width)
+      ramp(17.1, 44.45, 2, 40.2, 9.8, 10.9, 0);                  // floor -> 9.8, x 37.2..-3 (flush, z 39..49.9, =mid width)
       add(-10, 9.3, 44.5, 14, 1, 11, PLAT);                     // mid, top 9.8 (z 39..50)
-       ramp(-22.8, 47.25, 2, 33, 8, 5.5, 9.8);               // mid -> 17.7, x -40..-5.6 (repositioned to shifted high, half width)
+      ramp(-18, 46.95, 2, 26, 7.9, 5.9, 9.8);                       // mid -> 17.7, x -31..-5 (flush with high plat, half width)
       add(-37, 17.2, 45, 12, 1, 10, PLAT);                   // high, top 17.7 (x -43..-31 touches SW column, z 40..50 flush wall)
       reserveRect(6, 44, 46, 14);
       reserveRect(-10, 44, 18, 12);
@@ -210,9 +224,9 @@ export function generateMap(seedStr) {
       decor.push({ t: 'torch', c: [-10, 9.8, 44] });
       decor.push({ t: 'brazier', c: [-33, 17.7, 44] });
     } else {
-       ramp(-44.5, 17.1, 3, 40.2, 9.8, 11, 0);                 // floor -> 9.8, z 37..-3 (flush, x -50..-39, =mid width)
+      ramp(-44.45, 17.1, 3, 40.2, 9.8, 10.9, 0);                 // floor -> 9.8, z 37.2..-3 (flush, x -49.9..-39, =mid width)
       add(-44.5, 9.3, -10, 11, 1, 14, PLAT);                    // mid, top 9.8 (x -50..-39)
-       ramp(-47.25, 9, 1, 47.5, 8, 5.5, 9.8);                // mid -> 17.7, z -15.3..33.3 (extended to shifted high, half width)
+      ramp(-46.95, 13, 1, 36, 7.9, 5.9, 9.8);                      // mid -> 17.7, z -5..31 (flush with high plat, half width)
       add(-45, 17.2, 37, 10, 1, 12, PLAT);                    // high, top 17.7 (z 31..43 touches SW column, x -50..-40 flush wall)
       reserveRect(-44, 6.67, 14, 46);
       reserveRect(-44, -10, 14, 18);
@@ -226,13 +240,13 @@ export function generateMap(seedStr) {
   // ------------------------------------------------------------- corner outposts
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     const cx = sx * 24, cz = sz * 24;
-     add(cx, 0.75, cz, 12, 1.5, 12, PLAT);                    // base, top 1.5
-       ramp(cx - sx * 5.5, cz, sx < 0 ? 2 : 0, 7, 1.5, 5); // ramp facing arena center
-     add(cx - sx * 3, 2.1, cz, 4, 1.0, 4, PLAT);              // step 1.5->2.6
-     add(cx, 2.5, cz, 7, 1.8, 7, PLAT);                       // top, 3.4
-     add(cx, 4.15, cz, 1.5, 1.5, 1.5, WALL);                  // crate
-     reserveRect(cx, cz, 14, 14);
-     decor.push({ t: 'brazier', c: [cx, 3.4, cz] });          // outpost bowl
+    add(cx, 0.75, cz, 12, 1.5, 12, PLAT);                    // base, top 1.5
+    ramp(cx - sx * 10.5, cz, sx < 0 ? 2 : 0, 9, 1.5, 6); // ramp facing arena center, flush with base
+    add(cx - sx * 3, 2.1, cz, 4, 1.0, 4, PLAT);              // step 1.5->2.6
+    add(cx, 2.5, cz, 7, 1.8, 7, PLAT);                       // top, 3.4
+    add(cx, 4.15, cz, 1.5, 1.5, 1.5, WALL);                  // crate
+    reserveRect(cx, cz, 14, 14);
+    decor.push({ t: 'brazier', c: [cx, 3.4, cz] });          // outpost bowl
   }
 
   // ------------------------------------------------------------- lava pools
@@ -343,9 +357,29 @@ export function generateMap(seedStr) {
   // (ry, rz, yaw) are untouched.
   const MAP_SCALE = 0.5;
   const sc3 = v => [v[0] * MAP_SCALE, v[1] * MAP_SCALE, v[2] * MAP_SCALE];
-  for (const sl of slabs) { sl.c = sc3(sl.c); sl.s = sc3(sl.s); }
+  for (const sl of slabs) {
+    sl.c = sc3(sl.c);
+    sl.s = sc3(sl.s);
+    if (sl.ramp) {
+      sl.ramp.cx *= MAP_SCALE;
+      sl.ramp.cz *= MAP_SCALE;
+      sl.ramp.len *= MAP_SCALE;
+      sl.ramp.rise *= MAP_SCALE;
+      sl.ramp.width *= MAP_SCALE;
+      sl.ramp.y0 *= MAP_SCALE;
+      sl.ramp.T *= MAP_SCALE;
+    }
+  }
+  for (const rm of ramps) {
+    rm.cx *= MAP_SCALE;
+    rm.cz *= MAP_SCALE;
+    rm.len *= MAP_SCALE;
+    rm.rise *= MAP_SCALE;
+    rm.width *= MAP_SCALE;
+    rm.y0 *= MAP_SCALE;
+  }
   for (const d of decor) { d.c = sc3(d.c); d.s = (d.s || 1) * MAP_SCALE; }
   for (const l of lava) { l.x *= MAP_SCALE; l.z *= MAP_SCALE; l.r *= MAP_SCALE; l.y *= MAP_SCALE; }
   for (const sp of spawns) { sp.x *= MAP_SCALE; sp.z *= MAP_SCALE; sp.y *= MAP_SCALE; }
-  return { seed: seedStr, slabs, spawns, lava, decor, grabCubes: [], hints: [] };
+  return { seed: seedStr, slabs, ramps, spawns, lava, decor, grabCubes: [], hints: [] };
 }

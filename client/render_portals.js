@@ -182,8 +182,9 @@ export function initPortalRendering(ctx) {
       _pvM.setPosition(P.c);
       q.quaternion.setFromRotationMatrix(_pvM); q.position.copy(P.c);
       f.quaternion.copy(q.quaternion); f.position.copy(P.c);
-      lt.position.copy(P.c).addScaledVector(P.n, 0.5);
-      lt.intensity = 5.0;
+      lt.position.copy(P.c).addScaledVector(P.n, 0.35);
+      lt.color.setHex(P.color);
+      if (lt.intensity === 0) lt.intensity = 13.0;
       sparkles[i].mesh.visible = true;
       sparkles[i].mesh.quaternion.copy(q.quaternion); sparkles[i].mesh.position.copy(P.c);
     }
