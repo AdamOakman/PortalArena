@@ -30,7 +30,12 @@ export function initWorld(G) {
     G.obbs = [];
     if (G.animObjects) {
       for (const a of G.animObjects) {
-        if (a.obj && a.obj.parent) a.obj.parent.remove(a.obj);
+        // Pooled objects remain attached to the scene, non-pooled ephemeral objects are removed
+        if (a.slot) {
+          if (a.obj) a.obj.visible = false;
+        } else if (a.obj && a.obj.parent) {
+          a.obj.parent.remove(a.obj);
+        }
       }
       G.animObjects = [];
     }
@@ -54,6 +59,7 @@ export function initWorld(G) {
     if (G._gibPool) { G._gibPool.releaseAll(); for (const g of G._gibPool.items) g.mesh.visible = false; }
     if (G._ibPool) { G._ibPool.releaseAll(); for (const b of G._ibPool.items) b.group.visible = false; }
     if (G._scorchPool) { G._scorchPool.releaseAll(); for (const s of G._scorchPool.items) s.mesh.visible = false; }
+    if (G._smokePool) { for (const s of G._smokePool) { s.active = false; s.mesh.visible = false; } }
   }
 
   function mergeBufferGeometries(geometries, useNormalsAndUVs) {
@@ -116,19 +122,15 @@ export function initWorld(G) {
       arr.push(g);
     };
 
-    let torchLights = 0;
     for (const d of map.decor) {
       const [x, y, z] = d.c, s = d.s || 1;
       if (d.t === 'torch') {
         put(ironG, new TH.BoxGeometry(0.18 * s, 1.7 * s, 0.18 * s), x, y + 0.85 * s, z);
         const f = new TH.ConeGeometry(0.24 * s, 0.7 * s, 6); f.translate(0, 0.35 * s, 0);
         put(flameG, f, x, y + 1.7 * s, z);
-        if (torchLights < 24 && Math.random() < 0.5) {
-          const L = new TH.PointLight(0xff6a2a, 14, 22, 2);
-          L.position.set(x, y + 2.2 * s, z); group.add(L);
-          G.animObjects.push({ obj: L, type: 'torchlight', phase: Math.random() * 10 });
-          torchLights++;
-        }
+        const L = new TH.PointLight(0xff6a2a, 14, 22, 2);
+        L.position.set(x, y + 2.2 * s, z); group.add(L);
+        G.animObjects.push({ obj: L, type: 'torchlight', phase: Math.random() * 10 });
       } else if (d.t === 'brazier') {
         const bowl = new TH.CylinderGeometry(1.4 * s, 0.9 * s, 1.0 * s, 8); bowl.translate(0, 0.5 * s, 0);
         put(stoneG, bowl, x, y, z);
@@ -140,16 +142,20 @@ export function initWorld(G) {
         L.position.set(x, y + 2 * s, z); group.add(L);
       } else if (d.t === 'arch') {
         const ry = d.ry || 0;
-        const w = 5.5 * s;
-        // Doorpost offsets must be rotated with the arch, otherwise
-        // east/west gates (ry = PI/2) place the posts inside/outside
-        // the wall instead of flanking the passage.
+        const s = d.s || 1;
+        const wallH = d.h !== undefined ? d.h : (4.9 * s);
+        const w = d.w !== undefined ? d.w : (5.5 * s);
+        const postW = 0.8 * s;
+        const postD = 1.2 * s;
+        const lintelH = 0.7 * s;
         const ox = (w / 2) * Math.cos(ry), oz = (w / 2) * Math.sin(ry);
-        put(stoneG, new TH.BoxGeometry(0.6 * s, 4.6 * s, 0.6 * s), x + ox, y + 2.3 * s, z + oz, ry);
-        put(stoneG, new TH.BoxGeometry(0.6 * s, 4.6 * s, 0.6 * s), x - ox, y + 2.3 * s, z - oz, ry);
-        put(stoneG, new TH.BoxGeometry(w + 1.2 * s, 0.55 * s, 0.6 * s), x, y + 4.9 * s, z, ry);
-        const fin = new TH.ConeGeometry(1.0 * s, 1.8 * s, 4); fin.rotateY(Math.PI / 4); fin.translate(0, 0.9 * s, 0);
-        put(stoneG, fin, x, y + 5.15 * s, z, ry);
+        // Posts reach full wall height so they visually match the surrounding wall
+        put(stoneG, new TH.BoxGeometry(postW, wallH, postD), x + ox, y + wallH / 2, z + oz, ry);
+        put(stoneG, new TH.BoxGeometry(postW, wallH, postD), x - ox, y + wallH / 2, z - oz, ry);
+        // Lintel sits at the top of the wall flush with the wall height
+        put(stoneG, new TH.BoxGeometry(w + postW, lintelH, postD), x, y + wallH - lintelH / 2, z, ry);
+        const fin = new TH.ConeGeometry(0.9 * s, 1.6 * s, 4); fin.rotateY(Math.PI / 4); fin.translate(0, 0.8 * s, 0);
+        put(stoneG, fin, x, y + wallH, z, ry);
       } else if (d.t === 'banner') {
         const arr = ((Math.round(x * 7 + z * 13) % 2) + 2) % 2 ? bannerPG : bannerRG;
         put(arr, new TH.PlaneGeometry(1.1 * s, 3.0 * s), x, y, z, d.ry || 0);

@@ -723,32 +723,11 @@ export function initLoop(G) {
       }
     }
 
-    let msg = '';
     let specSpeed = 0;
-    if (G.isSpectator) {
-      if (G.spectatorMode === 'freefly') {
-        msg = 'FREE FLY — [LMB] Follow Player · [WASD] Fly · [SPACE/C] Up/Down · [J] Join Game';
-      } else {
-        const targetPl = (G.match && G.match.players[G.spectateTargetPid]) || (G.remotePlayers[G.spectateTargetPid]);
-        const tName = targetPl ? targetPl.name : 'Player';
-        const modeLabel = G.followPerspective === 'pov' ? '1st Person' : '3rd Person';
-        msg = `SPECTATING ${tName} (${modeLabel}) — [LMB] Next Player · [RMB] 1st/3rd Person · [J] Join Game`;
-        if (G.remotePlayers[G.spectateTargetPid] && G.remotePlayers[G.spectateTargetPid].vel) {
-          const v = G.remotePlayers[G.spectateTargetPid].vel;
-          specSpeed = Math.hypot(v[0], v[2]);
-        }
-      }
-    } else if (G.match && G.match.phase === 'warmup') {
-      msg = G.localReady ? 'READY — WAITING FOR OPPONENT' : 'PRESS R TO READY UP';
-    } else if (G.match && G.match.phase === 'waiting' && Object.keys(G.match.players).length < 2) {
-      msg = 'WAITING FOR OPPONENT — PRESS R WHEN READY';
-    }
-    if (!msg) {
-      for (const h of G.hintZones) {
-         if (G.pl.pos.x >= h.min.x && G.pl.pos.x <= h.max.x && G.pl.pos.y >= h.min.y && G.pl.pos.y <= h.max.y && G.pl.pos.z >= h.min.z && G.pl.pos.z <= h.max.z) {
-            msg = h.msg;
-            break;
-         }
+    if (G.isSpectator && G.spectatorMode !== 'freefly') {
+      if (G.remotePlayers[G.spectateTargetPid] && G.remotePlayers[G.spectateTargetPid].vel) {
+        const v = G.remotePlayers[G.spectateTargetPid].vel;
+        specSpeed = Math.hypot(v[0], v[2]);
       }
     }
     G.camera.updateMatrixWorld(true);
@@ -761,7 +740,6 @@ export function initLoop(G) {
       CFG,
       currentSeed: G.currentSeed,
       hit,
-      msg: !G.isConnected ? "RECONNECTING..." : msg,
       match: G.match,
       localReady: G.localReady,
       localIndex: G.localPlayerIndex,

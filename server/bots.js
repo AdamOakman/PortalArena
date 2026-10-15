@@ -15,16 +15,18 @@
 
 import * as TH from 'three';
 import { CFG, TICK_RATE } from '../shared/constants.js';
-import { mapData, obbs } from './gamestate.js';
+import { mapData, obbs, gameState } from './gamestate.js';
 
 // ------------------------------------------------------------------ constants
 
 const DT = 1 / TICK_RATE;
-const THINK_INTERVAL_MS = 400;               // how often to re-pick a goal
+const THINK_INTERVAL_MS = 350;               // how often to re-pick a goal
 const PORTAL_COOLDOWN_S = 7.0;               // minimum seconds between portal shots
 const PORTAL_CHANCE     = 0.35;              // probability to fire portals on a think tick
 const JUMP_COOLDOWN_S   = 0.35;              // minimum gap between jumps
-
+const ROCKET_COOLDOWN_S = 8.0;               // cooldown between bot rocket shots
+const INSTAGIB_COOLDOWN_S = 6.0;             // cooldown between bot instagib shots
+const INSTAGIB_HIT_CHANCE = 0.05;            // 5% hit chance for bot instagib shots
 
 // ------------------------------------------------------------------ per-bot state
 
@@ -37,14 +39,24 @@ function ensureState(pid) {
       lastThinkT: 0,
       lastPortalT: -999,
       lastJumpT: -999,
+      lastRocketT: -999,
+      lastRocketJumpT: -999,
+      rocketJumpPhase: 'none',
+      rocketJumpT: 0,
+      lastInstagibT: -999,
+      lastWeaponSwapT: 0,
+      weaponHoldUntilT: 0,
       portalPhase: 'none',     // 'none'|'aim_blue'|'aim_orange'|'walk_thru'
       walkThruT: 0,
       stuckT: 0,               // time we've been moving very slowly
       prevPos: null,
+      lastTickPos: null,
       avoidUntilT: 0,
       avoidYaw: 0,
       aimOrangeYaw: 0,
       orangeAimT: 0,
+      unstuckUntilT: 0,
+      strafeDir: null,
     });
   }
   return botState.get(pid);
@@ -231,41 +243,173 @@ function findPortalSurface(pos, yaw, obbs_, portals, PORT_, currentPi) {
   return null;
 }
 
+// ------------------------------------------------------------------ destructible wall & opponent targeting
+
+function findDestructibleWall(eyePos, fwdDir, maxDist = 20) {
+  let best = null;
+  let bestScore = -1e9;
+  for (const obb of obbs) {
+    if (obb.kind !== 'wall' || obb.boundary || obb.destroyed) continue;
+    const uIdx = obb.he[0] >= obb.he[2] ? 0 : 2;
+    const tIdx = uIdx === 0 ? 2 : 0;
+    if (obb.he[tIdx] > 2.5) continue; // must be thin destructible wall
+
+    const toCenter = obb.c.clone().sub(eyePos);
+    const dist = toCenter.length();
+    if (dist > maxDist || dist < 2.0) continue;
+
+    const dir = toCenter.clone().normalize();
+    const hit = raycastWall(eyePos, dir, dist + 1.0, obbs);
+    if (!hit || hit.obb !== obb) continue;
+
+    const dot = fwdDir.dot(dir);
+    const score = dot * 10 - dist * 0.4;
+    if (score > bestScore) {
+      bestScore = score;
+      best = { obb, point: hit.point, normal: hit.normal, dir, dist };
+    }
+  }
+  return best;
+}
+
+function findOpponent(pid, eyePos, maxDist = 45) {
+  let best = null;
+  let bestDist = maxDist;
+  for (const id in gameState.players) {
+    if (id === pid) continue;
+    const pl = gameState.players[id];
+    if (!pl || pl.isDead) continue;
+    const oppPos = pl.pos.clone();
+    oppPos.y += CFG.H * 0.6;
+    const toOpp = oppPos.clone().sub(eyePos);
+    const dist = toOpp.length();
+    if (dist < bestDist) {
+      const dir = toOpp.clone().normalize();
+      const hit = raycastWall(eyePos, dir, dist, obbs);
+      const lineOfSight = !hit || hit.distance >= dist - 0.5;
+      if (lineOfSight) {
+        bestDist = dist;
+        best = { id, player: pl, pos: oppPos, dir, dist };
+      }
+    }
+  }
+  return best;
+}
+
 // ------------------------------------------------------------------ main tick
 
 /**
  * Called once per physics tick for every bot player.
  * Mutates pl.yaw, pl.pitch, and returns a keys object for physStep.
  */
-export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
+export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
+  const onPortalPlaced = typeof actions === 'function' ? actions : (actions && actions.onPortalPlaced);
+  const onFireRocket = actions && actions.onFireRocket;
+  const onFireInstagib = actions && actions.onFireInstagib;
+
   const st = ensureState(pid);
+
+  const eyePos = pl.pos.clone();
+  eyePos.y += CFG.H - 0.15;
+  const fwdDir = new TH.Vector3(-Math.sin(pl.yaw), 0, -Math.cos(pl.yaw));
+
+  // ---- weapon swapping & tactical usage
+  if (st.portalPhase !== 'none') {
+    pl.activeWeapon = 1;
+  } else if (nowT >= st.weaponHoldUntilT) {
+    const destWall = findDestructibleWall(eyePos, fwdDir, 16.0);
+    const opp = findOpponent(pid, eyePos, 35.0);
+
+    if (destWall && nowT - st.lastRocketT > ROCKET_COOLDOWN_S && Math.random() < 0.45) {
+      pl.activeWeapon = 2; // Swap to rocket launcher to blow up wall!
+      st.weaponHoldUntilT = nowT + 2.0;
+    } else if (opp && nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && Math.random() < 0.45) {
+      pl.activeWeapon = 3; // Swap to instagib to take a shot!
+      st.weaponHoldUntilT = nowT + 1.8;
+    } else if (nowT - st.lastWeaponSwapT > 5.0) {
+      st.lastWeaponSwapT = nowT;
+      const r = Math.random();
+      if (r < 0.5) pl.activeWeapon = 1;
+      else if (r < 0.75) pl.activeWeapon = 2;
+      else pl.activeWeapon = 3;
+      st.weaponHoldUntilT = nowT + 3.0 + Math.random() * 3.0;
+    }
+  }
+
+  // ---- tactical weapon firing & rocket jump
+  const distToTarget = st.targetPos ? Math.hypot(st.targetPos.x - pl.pos.x, st.targetPos.z - pl.pos.z) : 0;
+  const heightDiffToTarget = st.targetPos ? (st.targetPos.y - pl.pos.y) : 0;
+  if (
+    pl.activeWeapon === 2 &&
+    st.rocketJumpPhase === 'none' &&
+    pl.grounded &&
+    nowT - st.lastRocketJumpT > 10.0 &&
+    (distToTarget > 5.0 || heightDiffToTarget > 1.0) &&
+    Math.random() < 0.2
+  ) {
+    st.rocketJumpPhase = 'aim_down';
+    st.rocketJumpT = nowT;
+    st.lastRocketJumpT = nowT;
+    st.weaponHoldUntilT = nowT + 3.0;
+  } else if (pl.activeWeapon === 2 && nowT - st.lastRocketT > ROCKET_COOLDOWN_S && onFireRocket && st.rocketJumpPhase === 'none') {
+    const destWall = findDestructibleWall(eyePos, fwdDir, 18.0);
+    if (destWall) {
+      st.lastRocketT = nowT;
+      pl.pitch = Math.asin(Math.max(-0.99, Math.min(0.99, destWall.dir.y)));
+      onFireRocket(eyePos, destWall.dir.clone().multiplyScalar(70), destWall);
+      st.weaponHoldUntilT = nowT + 1.5;
+    }
+  } else if (pl.activeWeapon === 3 && nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && onFireInstagib) {
+    const opp = findOpponent(pid, eyePos, 38.0);
+    if (opp) {
+      st.lastInstagibT = nowT;
+      pl.yaw = Math.atan2(-opp.dir.x, -opp.dir.z);
+      pl.pitch = Math.asin(Math.max(-0.99, Math.min(0.99, opp.dir.y)));
+
+      // 5% CHANCE TO HIT OPPONENT
+      const willHit = Math.random() < INSTAGIB_HIT_CHANCE;
+      if (willHit) {
+        const pts = [eyePos.clone(), opp.pos.clone()];
+        onFireInstagib(pts, opp.id, null);
+      } else {
+        // 95% intentional near-miss that scorches surrounding environment
+        const right = new TH.Vector3(-Math.cos(pl.yaw), 0, Math.sin(pl.yaw));
+        const up = new TH.Vector3(0, 1, 0);
+        const randAng = Math.random() * Math.PI * 2;
+        const offsetMag = 0.08 + Math.random() * 0.12;
+        const missDir = opp.dir.clone()
+          .addScaledVector(right, Math.cos(randAng) * offsetMag)
+          .addScaledVector(up, Math.sin(randAng) * offsetMag)
+          .normalize();
+        const hit = raycastWall(eyePos, missDir, 80, obbs);
+        const endPt = hit ? hit.point : eyePos.clone().addScaledVector(missDir, 50);
+        const scorch = hit ? { pos: endPt.toArray(), n: hit.normal.toArray() } : null;
+        const pts = [eyePos.clone(), endPt];
+        onFireInstagib(pts, null, scorch);
+      }
+      st.weaponHoldUntilT = nowT + 1.5;
+    }
+  }
 
   // ---- think: re-pick goal every THINK_INTERVAL_MS
   if (nowT - st.lastThinkT > THINK_INTERVAL_MS / 1000) {
     st.lastThinkT = nowT;
 
-    // Detect stuck (not moving much)
-    if (st.prevPos) {
-      const d = pl.pos.distanceTo(st.prevPos);
-      if (d < 0.25) st.stuckT += THINK_INTERVAL_MS / 1000;
-      else st.stuckT = 0;
-    }
-    st.prevPos = pl.pos.clone();
-
-    // Pick a new target occasionally, or if stuck, or reached target
     const needNewTarget = !st.targetPos
       || pl.pos.distanceTo(st.targetPos) < 1.5
-      || st.stuckT > 2.0;
+      || st.stuckT > 1.8;
 
     if (needNewTarget) {
       st.targetPos = pickBotTarget();
       st.stuckT = 0;
       st.avoidUntilT = 0;
+      st.unstuckUntilT = 0;
     }
 
-    // Attempt portal shot occasionally
+    // Attempt portal shot occasionally (only when portal gun active)
     if (
       st.portalPhase === 'none' &&
+      pl.activeWeapon === 1 &&
       nowT - st.lastPortalT > PORTAL_COOLDOWN_S &&
       Math.random() < PORTAL_CHANCE
     ) {
@@ -283,48 +427,80 @@ export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
 
   let desiredYaw = Math.atan2(-dx, -dz);
 
-  // ---- wall detection & smart obstacle avoidance
+  // ---- multi-whisker wall detection & smart obstacle avoidance
   const waistPos = new TH.Vector3(pl.pos.x, pl.pos.y + 0.65, pl.pos.z);
-  const fwdDir = new TH.Vector3(-Math.sin(pl.yaw), 0, -Math.cos(pl.yaw));
-  const wallHit = raycastWall(waistPos, fwdDir, 2.0, obbs);
+  const kneePos = new TH.Vector3(pl.pos.x, pl.pos.y + 0.25, pl.pos.z);
+  const curFwd = new TH.Vector3(-Math.sin(pl.yaw), 0, -Math.cos(pl.yaw));
+  const curRight = new TH.Vector3(-Math.cos(pl.yaw), 0, Math.sin(pl.yaw));
+
+  const leftWaist = waistPos.clone().addScaledVector(curRight, -0.32);
+  const rightWaist = waistPos.clone().addScaledVector(curRight, 0.32);
+
+  const hitCenter = raycastWall(waistPos, curFwd, 2.2, obbs);
+  const hitLeft = raycastWall(leftWaist, curFwd, 1.8, obbs);
+  const hitRight = raycastWall(rightWaist, curFwd, 1.8, obbs);
+  const hitLow = raycastWall(kneePos, curFwd, 1.6, obbs);
+
+  let closestHit = hitCenter;
+  for (const h of [hitLeft, hitRight, hitLow]) {
+    if (h && (!closestHit || h.distance < closestHit.distance)) {
+      closestHit = h;
+    }
+  }
 
   let isTallWall = false;
   let canStepOver = false;
 
-  if (wallHit) {
-    const maxY = wallHit.obb.c.y
-      + Math.abs(wallHit.obb.ax[0].y * wallHit.obb.he[0])
-      + Math.abs(wallHit.obb.ax[1].y * wallHit.obb.he[1])
-      + Math.abs(wallHit.obb.ax[2].y * wallHit.obb.he[2]);
+  if (closestHit) {
+    const maxY = closestHit.obb.c.y
+      + Math.abs(closestHit.obb.ax[0].y * closestHit.obb.he[0])
+      + Math.abs(closestHit.obb.ax[1].y * closestHit.obb.he[1])
+      + Math.abs(closestHit.obb.ax[2].y * closestHit.obb.he[2]);
     const stepHeight = maxY - pl.pos.y;
-    isTallWall = stepHeight > 1.4;
-    canStepOver = stepHeight > 0.4 && stepHeight <= 1.4;
+    isTallWall = stepHeight > 1.35;
+    canStepOver = stepHeight > 0.35 && stepHeight <= 1.35;
 
     if (isTallWall) {
-      const nx = wallHit.normal.x, nz = wallHit.normal.z;
-      const nLen = Math.hypot(nx, nz);
-      if (nLen > 0.05) {
-        const hnx = nx / nLen, hnz = nz / nLen;
-        const tLeft = new TH.Vector3(-hnz, 0, hnx);
-        const tRight = new TH.Vector3(hnz, 0, -hnx);
+      const toTarget = new TH.Vector3(dx, 0, dz).normalize();
+      const testAngles = [
+        0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.3, -2.3, Math.PI
+      ];
+      let bestAngleYaw = null;
+      let bestScore = -1e9;
 
-        // Check lateral clearance along both tangents
-        const leftHit = raycastWall(waistPos, tLeft, 1.4, obbs);
-        const rightHit = raycastWall(waistPos, tRight, 1.4, obbs);
+      for (const ang of testAngles) {
+        const testYaw = pl.yaw + ang;
+        const testDir = new TH.Vector3(-Math.sin(testYaw), 0, -Math.cos(testYaw));
+        const lTest = waistPos.clone().addScaledVector(new TH.Vector3(-Math.cos(testYaw), 0, Math.sin(testYaw)), -0.28);
+        const rTest = waistPos.clone().addScaledVector(new TH.Vector3(-Math.cos(testYaw), 0, Math.sin(testYaw)), 0.28);
 
-        const toTarget = new TH.Vector3(dx, 0, dz).normalize();
-        const dotLeft = tLeft.dot(toTarget);
-        const dotRight = tRight.dot(toTarget);
+        const chH = raycastWall(waistPos, testDir, 2.0, obbs);
+        const lH = raycastWall(lTest, testDir, 1.6, obbs);
+        const rH = raycastWall(rTest, testDir, 1.6, obbs);
 
-        let chosenTangent;
-        if (leftHit && !rightHit) chosenTangent = tRight;
-        else if (rightHit && !leftHit) chosenTangent = tLeft;
-        else chosenTangent = (dotLeft >= dotRight) ? tLeft : tRight;
+        if (!chH && !lH && !rH && hasGroundAhead(pl.pos, testYaw, obbs)) {
+          const dot = testDir.dot(toTarget);
+          const score = dot - Math.abs(ang) * 0.15;
+          if (score > bestScore) {
+            bestScore = score;
+            bestAngleYaw = testYaw;
+          }
+        }
+      }
 
-        // Steer slightly away from the wall face so we slide cleanly around it
-        const steer = chosenTangent.clone().multiplyScalar(0.85).addScaledVector(new TH.Vector3(hnx, 0, hnz), 0.35).normalize();
-        st.avoidYaw = Math.atan2(-steer.x, -steer.z);
-        st.avoidUntilT = nowT + 0.75;
+      if (bestAngleYaw !== null) {
+        st.avoidYaw = bestAngleYaw;
+        st.avoidUntilT = nowT + 0.65;
+      } else if (closestHit.normal) {
+        const nx = closestHit.normal.x, nz = closestHit.normal.z;
+        const nLen = Math.hypot(nx, nz);
+        if (nLen > 0.05) {
+          const tLeft = new TH.Vector3(-nz / nLen, 0, nx / nLen);
+          const tRight = new TH.Vector3(nz / nLen, 0, -nx / nLen);
+          const chosen = (tLeft.dot(toTarget) >= tRight.dot(toTarget)) ? tLeft : tRight;
+          st.avoidYaw = Math.atan2(-chosen.x, -chosen.z);
+          st.avoidUntilT = nowT + 0.65;
+        }
       }
     }
   }
@@ -341,7 +517,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
   while (dyaw > Math.PI) dyaw -= Math.PI * 2;
   while (dyaw < -Math.PI) dyaw += Math.PI * 2;
 
-  const maxTurn = 4.5 * DT;
+  const maxTurn = 4.8 * DT;
   if (Math.abs(dyaw) > maxTurn) {
     pl.yaw += Math.sign(dyaw) * maxTurn;
   } else {
@@ -350,12 +526,66 @@ export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
   while (pl.yaw > Math.PI) pl.yaw -= Math.PI * 2;
   while (pl.yaw < -Math.PI) pl.yaw += Math.PI * 2;
 
-  // Smooth pitch toward target
+  // Smooth pitch toward target (smooth camera motion preserved during rocket jump)
   const heightDiff = st.targetPos.y - pl.pos.y;
-  const desiredPitch = Math.max(-0.4, Math.min(0.4, heightDiff * 0.08));
-  pl.pitch += (desiredPitch - pl.pitch) * Math.min(1, 8.0 * DT);
+  let desiredPitch = Math.max(-0.4, Math.min(0.4, heightDiff * 0.08));
 
-  // ---- movement keys: only sprint forward when facing travel direction (except when aiming orange)
+  if (st.rocketJumpPhase === 'aim_down') {
+    desiredPitch = -1.35;
+    pl.pitch += (desiredPitch - pl.pitch) * Math.min(1, 14.0 * DT);
+
+    if (pl.pitch <= -1.15 || nowT - st.rocketJumpT > 0.22) {
+      pl.jumpBuf = nowT;
+      const rjPos = pl.pos.clone();
+      rjPos.y += 0.35;
+      const rjDir = new TH.Vector3(-Math.sin(pl.yaw) * 0.15, -0.98, -Math.cos(pl.yaw) * 0.15).normalize();
+      const rjHit = { point: pl.pos.clone(), normal: new TH.Vector3(0, 1, 0) };
+      if (onFireRocket) {
+        onFireRocket(rjPos, rjDir.multiplyScalar(70), rjHit);
+      }
+      st.lastRocketT = nowT;
+      st.rocketJumpPhase = 'recover';
+      st.rocketJumpT = nowT;
+    }
+  } else if (st.rocketJumpPhase === 'recover') {
+    pl.pitch += (desiredPitch - pl.pitch) * Math.min(1, 8.0 * DT);
+    if (nowT - st.rocketJumpT > 0.4) {
+      st.rocketJumpPhase = 'none';
+    }
+  } else {
+    pl.pitch += (desiredPitch - pl.pitch) * Math.min(1, 8.0 * DT);
+  }
+
+  // ---- stuck tracking & active unstuck
+  if (st.lastTickPos) {
+    const dMoved = pl.pos.distanceTo(st.lastTickPos);
+    if (dist > 0.8 && dMoved < 0.02) {
+      st.stuckT += DT;
+    } else if (dMoved > 0.06) {
+      st.stuckT = Math.max(0, st.stuckT - DT * 2.5);
+    }
+  }
+  st.lastTickPos = pl.pos.clone();
+
+  // If blocked for > 0.35s:
+  if (st.stuckT > 0.35) {
+    if (canStepOver) {
+      pl.jumpBuf = nowT;
+    } else if (isTallWall) {
+      const destWall = findDestructibleWall(eyePos, curFwd, 6.0);
+      if (destWall && nowT - st.lastRocketT > 5.0 && onFireRocket) {
+        pl.activeWeapon = 2;
+        st.lastRocketT = nowT;
+        st.weaponHoldUntilT = nowT + 1.5;
+        onFireRocket(eyePos, destWall.dir.clone().multiplyScalar(70), destWall);
+      }
+      if (nowT > st.unstuckUntilT) {
+        st.unstuckUntilT = nowT + 0.5;
+        st.strafeDir = Math.random() < 0.5 ? 'KeyA' : 'KeyD';
+      }
+    }
+  }
+
   let keys = {
     KeyW: st.portalPhase !== 'aim_orange' && Math.abs(dyaw) < 1.1 && dist > 0.6,
     KeyA: false,
@@ -364,6 +594,29 @@ export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
     Space: false,
     ShiftLeft: false
   };
+
+  if (st.rocketJumpPhase === 'aim_down' || st.rocketJumpPhase === 'recover') {
+    keys.KeyW = true;
+    if (st.rocketJumpPhase === 'aim_down' && (pl.pitch <= -1.15 || nowT - st.rocketJumpT > 0.2)) {
+      keys.Space = true;
+    }
+  }
+
+  // If in unstuck maneuver: back up and strafe
+  if (nowT < st.unstuckUntilT) {
+    keys.KeyW = false;
+    keys.KeyS = true;
+    if (st.strafeDir) keys[st.strafeDir] = true;
+  }
+
+  // If stuck for over 1.2s: pick new target and reverse
+  if (st.stuckT > 1.2) {
+    st.targetPos = pickBotTarget();
+    st.avoidYaw = pl.yaw + Math.PI;
+    st.avoidUntilT = nowT + 0.8;
+    st.stuckT = 0;
+    st.unstuckUntilT = 0;
+  }
 
   // ---- portal logic
   const botPortalBase = getBotPortalBase(pl);
@@ -383,7 +636,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
       if (onPortalPlaced) onPortalPlaced(botPortalBase, surface, surface.eyePos);
 
       st.portalPhase = 'aim_orange';
-      // Rotate aim angle by 90-140 degrees so orange is placed on a different wall
       const turnDir = Math.random() < 0.5 ? 1 : -1;
       st.aimOrangeYaw = pl.yaw + turnDir * (Math.PI * 0.55 + Math.random() * 0.4);
       while (st.aimOrangeYaw > Math.PI) st.aimOrangeYaw -= Math.PI * 2;
@@ -414,7 +666,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
         st.lastPortalT = nowT;
         st.walkThruT = nowT;
       } else if (nowT - st.orangeAimT > 2.2) {
-        // Could not find valid non-overlapping surface — abort orange
         st.portalPhase = 'none';
         st.lastPortalT = nowT + 3.0;
       }
@@ -425,13 +676,11 @@ export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
 
     if (bluePortal.placed) {
       st.targetPos = bluePortal.c.clone();
-      // Jump if approaching an elevated portal
       if (pl.pos.distanceTo(bluePortal.c) < 2.5 && bluePortal.c.y > pl.pos.y + 0.3) {
         pl.jumpBuf = nowT;
       }
     }
 
-    // Check if we emerged from orange portal, reached blue, or gave up
     const passedThrough = orangePortal.placed && pl.pos.distanceTo(orangePortal.c) < 2.5 && (nowT - st.walkThruT > 0.25);
     const reachedBlue = bluePortal.placed && pl.pos.distanceTo(bluePortal.c) < 0.9;
     const timedOut = nowT - st.walkThruT > 6.0;
@@ -444,7 +693,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
   }
 
   // ---- jump decision:
-  // NEVER jump against a tall wall! Only jump for low steps, reachable ledges, or gaps
   const jumpForLedge = heightDiff > 0.4 && heightDiff < 1.6 && dist < 3.5;
   const shouldJump = pl.grounded && !isTallWall && (
     canStepOver ||
@@ -457,7 +705,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, onPortalPlaced) {
     st.lastJumpT = nowT;
   }
 
-  // Don't move forward when very close and not walking through a portal
   if (dist < 0.5 && st.portalPhase !== 'walk_thru') {
     keys.KeyW = false;
   }
@@ -482,11 +729,23 @@ export function resetBotState(pid) {
   if (st) {
     st.targetPos = null;
     st.portalPhase = 'none';
+    st.rocketJumpPhase = 'none';
     st.lastPortalT = Date.now() / 1000;
+    st.lastRocketT = -999;
+    st.lastRocketJumpT = -999;
+    st.lastInstagibT = -999;
+    st.lastWeaponSwapT = 0;
+    st.weaponHoldUntilT = 0;
     st.stuckT = 0;
     st.prevPos = null;
+    st.lastTickPos = null;
     st.avoidUntilT = 0;
     st.avoidYaw = 0;
+    st.unstuckUntilT = 0;
+    st.strafeDir = null;
+  }
+  if (gameState.players[pid]) {
+    gameState.players[pid].crouchT = 0;
   }
 }
 
