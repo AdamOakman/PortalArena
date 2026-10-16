@@ -1,6 +1,6 @@
 import * as TH from 'three';
 import { generateMap } from '../shared/mapgen.js';
-import { WARMUP_TIME, ROUND_TIME } from '../shared/constants.js';
+import { WARMUP_TIME, ROUND_TIME, PORT } from '../shared/constants.js';
 
 export let seedStr = String(Math.floor(Math.random() * 1e9));
 export let mapData = generateMap(seedStr);
@@ -80,6 +80,7 @@ export function beginWarmup() {
   match.winner = null;
   match.ready = {};
   for (const id in gameState.players) { gameState.players[id].shots = 0; gameState.players[id].hits = 0; }
+  resetMapState();
 }
 
 export function startCountdown() {
@@ -103,6 +104,7 @@ export function beginRound() {
     const p = gameState.players[id];
     p.isDead = false;
   }
+  resetDestructibleWalls();
 }
 
 export function matchToWaiting() {
@@ -110,6 +112,7 @@ export function matchToWaiting() {
   match.deadlineMs = 0;
   match.scores = {};
   match.winner = null;
+  resetMapState();
 }
 
 export function matchInfo() {
@@ -280,10 +283,16 @@ export function serverDestroyWall(wallId, wallCenter, point) {
   return { cancelledPortals, obbId: obb.id };
 }
 
-export function resetMapState() {
-  obbs = buildObbs(mapData);
+export function resetDestructibleWalls() {
+  const fresh = buildObbs(mapData);
+  obbs.length = 0;
+  obbs.push(...fresh);
   gameState.destroyedWalls = [];
   gameState.destroyedWallObbs = [];
+}
+
+export function resetMapState() {
+  resetDestructibleWalls();
   
   for (const p of gameState.portals) {
     p.placed = false;
@@ -320,8 +329,8 @@ export function updateMap(newSeed) {
 }
 
 export function isPortalOnDestroyedWall(c, n, r, u, PORT_) {
-  const hw = PORT_ ? PORT_.hw : 0.6;
-  const hh = PORT_ ? PORT_.hh : 1.2;
+  const hw = PORT_ ? PORT_.hw : (PORT ? PORT.hw : 1.4375);
+  const hh = PORT_ ? PORT_.hh : (PORT ? PORT.hh : 2.0);
 
   // 1. Check against full OBBs of all destroyed walls
   if (gameState.destroyedWallObbs) {
@@ -341,8 +350,9 @@ export function isPortalOnDestroyedWall(c, n, r, u, PORT_) {
     }
   }
 
-  // 2. Check against all destroyed fragments / noPortal in obbs
+  // 2. Check against all destroyed fragments in obbs (excluding indestructible ramps)
   for (const obb of obbs) {
+    if (obb.kind === 'ramp') continue;
     if (obb.destroyed || obb.noPortal) {
       const d = c.clone().sub(obb.c);
       const u0 = Math.abs(d.dot(obb.ax[0]));

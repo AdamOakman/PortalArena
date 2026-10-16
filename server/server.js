@@ -2,13 +2,13 @@ import { WebSocketServer } from 'ws';
 import * as TH from 'three';
 import { CFG, PORT, TICK_RATE, MAX_PLAYERS, MAX_SPECTATORS } from '../shared/constants.js';
 import { initPhysics } from '../shared/physics.js';
-import { tickBot, removeBot, cleanupBotPortals, resetBotState, getBotPortalBase, checkPortalOverlap } from './bots.js';
+import { tickBot, removeBot, cleanupBotPortals, resetBotState, getBotPortalBase } from './bots.js';
 
 const wss = new WebSocketServer({ port: 3001 });
 const physics = initPhysics(TH, CFG, PORT);
 
 const SERVER_PASSWORD = "secret";
-import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, startCountdown, beginRound, matchToWaiting, matchInfo, pickSpawn, placeAtSpawn, serverDestroyWall, resetMapState, isPortalOnDestroyedWall } from './gamestate.js';
+import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, startCountdown, beginRound, matchToWaiting, matchInfo, pickSpawn, placeAtSpawn, serverDestroyWall, resetMapState, resetDestructibleWalls, isPortalOnDestroyedWall } from './gamestate.js';
 
 // ------------------------------------------------------------------ bot management
 const BOT_COUNT = 2; // how many bots to fill the server with when empty
@@ -93,6 +93,7 @@ function fillWithBots() {
   }
   if (Object.keys(gameState.players).length >= 2 && match.phase === 'waiting') {
     beginWarmup();
+    broadcastResetWalls();
   }
 }
 
@@ -178,9 +179,15 @@ function handlePlayerDeath(victimId, killerId = null, cause = null, viaPortal = 
 
       if (pl.isBot) {
         resetBotState(victimId);
-      } else if (pl.ws && pl.ws.readyState === 1) {
-        pl.ws.send(JSON.stringify({ type: 'respawn', pos: pl.pos.toArray() }));
       }
+      const respawnMsg = JSON.stringify({
+        type: 'respawn',
+        playerId: victimId,
+        pos: pl.pos.toArray()
+      });
+      wss.clients.forEach(c => {
+        if (c.readyState === 1) c.send(respawnMsg);
+      });
     }
   }, 3000);
 }
@@ -269,6 +276,7 @@ wss.on('connection', (ws) => {
           wss.clients.forEach(c => { if (c.readyState === 1) c.send(pMsg); });
         }
         beginWarmup();
+        broadcastResetWalls();
         for (const pid in gameState.players) {
           const p = gameState.players[pid];
           if (p.isBot) {
@@ -296,6 +304,7 @@ wss.on('connection', (ws) => {
         }
       } else if (Object.keys(gameState.players).length >= 2 && match.phase !== 'warmup' && match.phase !== 'active') {
         beginWarmup();
+        broadcastResetWalls();
       }
 
       const finalSpawn = gameState.players[playerId].pos.toArray();
@@ -305,6 +314,7 @@ wss.on('connection', (ws) => {
         playerIndex,
         spawn: finalSpawn,
         match: matchInfo(),
+        seed: seedStr,
         destroyedWalls: gameState.destroyedWalls
       }));
 
@@ -343,8 +353,14 @@ wss.on('connection', (ws) => {
       delete gameState.players[playerId];
       delete match.ready[playerId];
 
-      if (match.phase === 'active' || match.phase === 'summary') matchToWaiting();
-      else if (match.phase === 'warmup') { match.phase = 'waiting'; match.deadlineMs = 0; }
+      if (match.phase === 'active' || match.phase === 'summary') {
+        matchToWaiting();
+        broadcastResetWalls();
+      } else if (match.phase === 'warmup') {
+        match.phase = 'waiting';
+        match.deadlineMs = 0;
+        broadcastResetWalls();
+      }
 
       gameState.spectators[playerId] = { id: playerId, name: pName, ws, ping: pl.ping || 0 };
       fillWithBots();
@@ -352,7 +368,9 @@ wss.on('connection', (ws) => {
       ws.send(JSON.stringify({
         type: 'spectate_success',
         playerId,
-        match: matchInfo()
+        match: matchInfo(),
+        seed: seedStr,
+        destroyedWalls: gameState.destroyedWalls
       }));
 
       const evtMsg = JSON.stringify({ type: 'player_connected', name: pName + ' (spectating)' });
@@ -400,36 +418,27 @@ wss.on('connection', (ws) => {
       const candidateN = new TH.Vector3().fromArray(data.n);
       const candidateR = new TH.Vector3().fromArray(data.r);
       const candidateU = new TH.Vector3().fromArray(data.u);
-      if (checkPortalOverlap(candidateC, candidateN, candidateR, candidateU, gameState.portals, data.pi, PORT)) {
+      const hitObb = data.wallId ? obbs.find(o => o.id === data.wallId) : null;
+      if (hitObb && (hitObb.noPortal || hitObb.destroyed || hitObb.kind === 'ramp')) {
+        const cancelMsg = JSON.stringify({ type: 'portal_remove', pi: data.pi });
+        ws.send(cancelMsg);
         return;
       }
-      if (mapData.lava) {
-        for (const L of mapData.lava) {
-          const dx = candidateC.x - L.x, dz = candidateC.z - L.z;
-          const minSafeDist = L.r + PORT.hw + 0.3;
-          if (dx * dx + dz * dz < minSafeDist * minSafeDist && candidateC.y <= (L.y || 0.1) + PORT.hh + 0.3) {
-            return;
-          }
-        }
-      }
-      if (data.wallId) {
-        const hitObb = obbs.find(o => o.id === data.wallId);
-        if (hitObb && (hitObb.noPortal || hitObb.destroyed || hitObb.kind === 'ramp')) {
+      if (physics.isPortalPlacementBlocked(
+        candidateC, candidateN, candidateR, candidateU, hitObb, data.pi,
+        obbs, gameState.portals, mapData.lava, gameState.destroyedWallObbs, gameState.destroyedWalls
+      )) {
+        const fixed = physics.findClosestValidPortalPos(
+          candidateC, candidateN, candidateR, candidateU, hitObb, data.pi,
+          obbs, gameState.portals, mapData.lava, gameState.destroyedWallObbs, gameState.destroyedWalls
+        );
+        if (fixed) {
+          candidateC.copy(fixed.c);
+          data.c = candidateC.toArray();
+        } else {
+          const cancelMsg = JSON.stringify({ type: 'portal_remove', pi: data.pi });
+          ws.send(cancelMsg);
           return;
-        }
-      }
-      if (isPortalOnDestroyedWall(candidateC, candidateN, candidateR, candidateU, PORT)) {
-        return;
-      }
-      for (const obb of obbs) {
-        if (obb.destroyed) {
-          const dx = candidateC.x - obb.c.x, dy = candidateC.y - obb.c.y, dz = candidateC.z - obb.c.z;
-          const l0 = Math.abs(dx * obb.ax[0].x + dy * obb.ax[0].y + dz * obb.ax[0].z);
-          const l1 = Math.abs(dx * obb.ax[1].x + dy * obb.ax[1].y + dz * obb.ax[1].z);
-          const l2 = Math.abs(dx * obb.ax[2].x + dy * obb.ax[2].y + dz * obb.ax[2].z);
-          if (l0 <= obb.he[0] + 0.1 && l1 <= obb.he[1] + 0.1 && l2 <= obb.he[2] + 0.1) {
-            return;
-          }
         }
       }
       const P = gameState.portals[data.pi];
@@ -539,8 +548,13 @@ wss.on('connection', (ws) => {
       updateMap(data.seed);
       updatePair();
       // New map (re)starts the duel cycle
-      if (Object.keys(gameState.players).length === 2) beginWarmup();
-      else matchToWaiting();
+      if (Object.keys(gameState.players).length === 2) {
+        beginWarmup();
+        broadcastResetWalls();
+      } else {
+        matchToWaiting();
+        broadcastResetWalls();
+      }
       wss.clients.forEach(c => {
         if (c.readyState === 1) {
           c.send(JSON.stringify({ type: 'map_change', seed: data.seed }));
@@ -555,8 +569,14 @@ wss.on('connection', (ws) => {
        delete gameState.players[playerId];
        delete match.ready[playerId];
        // A mid-round disconnect voids the round (scores reset, warmup restarts on next join).
-       if (match.phase === 'active' || match.phase === 'summary' || match.phase === 'countdown') matchToWaiting();
-      else if (match.phase === 'warmup') { match.phase = 'waiting'; match.deadlineMs = 0; }
+       if (match.phase === 'active' || match.phase === 'summary' || match.phase === 'countdown') {
+         matchToWaiting();
+         broadcastResetWalls();
+       } else if (match.phase === 'warmup') {
+         match.phase = 'waiting';
+         match.deadlineMs = 0;
+         broadcastResetWalls();
+       }
        const evtMsg = JSON.stringify({ type: 'player_disconnected', name: pName });
        wss.clients.forEach(client => {
           if (client.readyState === 1) client.send(evtMsg);
@@ -602,6 +622,19 @@ const DT = 1 / TICK_RATE;
 // Provide a dummy R_AB / R_BA for teleport check (we'll implement real matrices later)
 const tpState = { nowT: 0, tpGracePortal: null, tpGraceT: -1, R_AB, R_BA };
 
+function broadcastResetWalls() {
+  resetDestructibleWalls();
+  updatePair();
+  const msg = JSON.stringify({
+    type: 'reset_walls',
+    seed: seedStr,
+    destroyedWalls: []
+  });
+  wss.clients.forEach(c => {
+    if (c.readyState === 1) c.send(msg);
+  });
+}
+
 function triggerCountdown() {
   startCountdown();
   updatePair();
@@ -623,6 +656,16 @@ function triggerCountdown() {
       }));
     }
   }
+  for (const sid in gameState.spectators) {
+    const spec = gameState.spectators[sid];
+    if (spec.ws && spec.ws.readyState === 1) {
+      spec.ws.send(JSON.stringify({
+        type: 'map_change',
+        seed: seedStr
+      }));
+    }
+  }
+  broadcastResetWalls();
   const startMsg = JSON.stringify({ type: 'countdown_start' });
   wss.clients.forEach(c => {
     if (c.readyState === 1) c.send(startMsg);
@@ -644,6 +687,7 @@ function endRound() {
   match.winner = winner;
   match.phase = 'summary';
   match.deadlineMs = 0;
+  broadcastResetWalls();
   const msg = JSON.stringify({ type: 'round_over', match: matchInfo() });
   wss.clients.forEach(c => {
     if (c.readyState === 1) c.send(msg);
@@ -904,13 +948,17 @@ function stepPhysics(dt) {
 
 setInterval(() => {
   if (match.phase === 'warmup' && Date.now() >= match.deadlineMs) triggerCountdown();
-  else if (match.phase === 'countdown' && Date.now() >= match.deadlineMs) beginRound();
+  else if (match.phase === 'countdown' && Date.now() >= match.deadlineMs) {
+    beginRound();
+    broadcastResetWalls();
+  }
   else if (match.phase === 'active' && Date.now() >= match.deadlineMs) endRound();
   else if (match.phase === 'summary' && countHumans() === 0) {
     if (!botSummaryAutoRestart) botSummaryAutoRestart = Date.now() + 6000;
     else if (Date.now() >= botSummaryAutoRestart) {
       botSummaryAutoRestart = 0;
       beginWarmup();
+      broadcastResetWalls();
     }
   } else {
     botSummaryAutoRestart = 0;
@@ -939,12 +987,14 @@ setInterval(() => {
       placed: P.placed,
       c: P.c.toArray(), n: P.n.toArray(), r: P.r.toArray(), u: P.u.toArray()
     })),
-    match: matchInfo()
+    match: matchInfo(),
+    destroyedWallCount: gameState.destroyedWalls.length
   };
   
   for (const pid in gameState.players) {
     const p = gameState.players[pid];
     stateUpdate.players[pid] = {
+      name: p.name,
       pos: p.pos.toArray(),
       vel: p.vel.toArray(),
       yaw: p.yaw,
@@ -953,6 +1003,7 @@ setInterval(() => {
       crouchT: p.crouchT || 0,
       isDead: !!p.isDead,
       playerIndex: p.playerIndex,
+      isBot: !!p.isBot,
       viewOffset: p.viewOffset ? [p.viewOffset.x, p.viewOffset.y, p.viewOffset.z, p.viewOffset.w] : null
     };
   }

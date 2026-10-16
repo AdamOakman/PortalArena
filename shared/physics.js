@@ -921,6 +921,390 @@ export function initPhysics(TH, CFG, PORT) {
     }
   }
 
+  function isPortalCoveredByRamp(c, n, r, u, hw, hh, ramp) {
+    const { cx, cz, dir, len, rise, width, y0 } = ramp;
+    const T = ramp.T || 0.3;
+
+    let fwdX = 1, fwdZ = 0, rightX = 0, rightZ = 1;
+    if (dir === 1) { fwdX = 0; fwdZ = 1; rightX = -1; rightZ = 0; }
+    else if (dir === 2) { fwdX = -1; fwdZ = 0; rightX = 0; rightZ = -1; }
+    else if (dir === 3) { fwdX = 0; fwdZ = -1; rightX = 1; rightZ = 0; }
+
+    const hl = len * 0.5;
+    const hwRamp = width * 0.5;
+
+    // Portal center in ramp's 2D horizontal frame
+    const dx = c.x - cx;
+    const dz = c.z - cz;
+    const sc = dx * fwdX + dz * fwdZ;
+    const wc = dx * rightX + dz * rightZ;
+
+    // Portal extents in ramp's frame
+    const extS = hw * Math.abs(r.x * fwdX + r.z * fwdZ) + hh * Math.abs(u.x * fwdX + u.z * fwdZ);
+    const extW = hw * Math.abs(r.x * rightX + r.z * rightZ) + hh * Math.abs(u.x * rightX + u.z * rightZ);
+    const extY = hw * Math.abs(r.y) + hh * Math.abs(u.y);
+
+    const margin = 0.04;
+
+    // 1. Horizontal bounding box check in ramp's local (s, w) space
+    if (sc + extS < -hl + margin || sc - extS > hl - margin) return false;
+    if (Math.abs(wc) > hwRamp + extW - margin) return false;
+
+    // 2. Vertical bounding box check
+    const portalMinY = c.y - extY;
+    const portalMaxY = c.y + extY;
+    if (portalMaxY < y0 - 0.1 || portalMinY > y0 + rise + 0.1) return false;
+
+    // 3. Curved surface profile check
+    const sNear = Math.max(-hl, Math.min(hl, sc));
+    const sMin = Math.max(-hl, Math.min(hl, sc - extS));
+    const sMax = Math.max(-hl, Math.min(hl, sc + extS));
+
+    const uNear = (sNear + hl) / len;
+    const uMin = (sMin + hl) / len;
+    const uMax = (sMax + hl) / len;
+
+    const yTopNear = y0 + rise * smootherstep(uNear);
+    const yTopMin = y0 + rise * smootherstep(uMin);
+    const yTopMax = y0 + rise * smootherstep(uMax);
+
+    const maxYTop = Math.max(yTopNear, yTopMin, yTopMax);
+    const minYTop = Math.min(yTopNear, yTopMin, yTopMax);
+    const minYBot = (minYTop - y0 < 1.8) ? y0 : (minYTop - T);
+
+    if (portalMinY > maxYTop - margin) return false;
+    if (portalMaxY < minYBot + margin) return false;
+
+    // 4. Face-specific checks:
+    // Portal on FLOOR (n.y > 0.8)
+    if (n.y > 0.8) {
+      if (minYBot - y0 < 2.0 && portalMinY < maxYTop + 0.1) {
+        return true;
+      }
+      return false;
+    }
+
+    // Portal on CEILING (n.y < -0.8)
+    if (n.y < -0.8) {
+      if (portalMaxY > minYBot - 0.1) return true;
+      return false;
+    }
+
+    // Portal on WALL (|n.y| < 0.2)
+    if (Math.abs(n.y) < 0.2) {
+      const dn = (cx - c.x) * n.x + (cz - c.z) * n.z;
+      const hen = hl * Math.abs(fwdX * n.x + fwdZ * n.z) + hwRamp * Math.abs(rightX * n.x + rightZ * n.z);
+      if (dn + hen <= 0.02 || dn - hen >= 0.4) {
+        return false;
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  function isPortalPlacementBlocked(c, n, r, u, hitObb, pi, obbs, portals, lava, destroyedWallObbs, destroyedWalls) {
+    const hw = PORT.hw;
+    const hh = PORT.hh;
+
+    // 1. Check face boundaries if hitObb is provided
+    if (hitObb) {
+      if (hitObb.noPortal || hitObb.destroyed || hitObb.kind === 'ramp') {
+        return true;
+      }
+      for (let k = 0; k < 3; k++) {
+        const ax = hitObb.ax[k];
+        if (Math.abs(n.dot(ax)) > 0.99) continue; // Face normal axis
+        const ext = hw * Math.abs(r.dot(ax)) + hh * Math.abs(u.dot(ax));
+        const limit = hitObb.he[k] - ext - 0.02;
+        if (limit < 0) return true; // Face too small for portal
+        const proj = (c.x - hitObb.c.x) * ax.x + (c.y - hitObb.c.y) * ax.y + (c.z - hitObb.c.z) * ax.z;
+        if (proj > limit + 0.01 || proj < -limit - 0.01) return true;
+      }
+    }
+
+    // 2. Check obstacles covering the portal (other OBBs in front of or intersecting the surface)
+    if (obbs) {
+      for (let i = 0; i < obbs.length; i++) {
+        const obb = obbs[i];
+        if (hitObb && (obb === hitObb || (obb.id && obb.id === hitObb.id))) continue;
+
+        if (obb.kind === 'ramp' && obb.ramp) {
+          if (isPortalCoveredByRamp(c, n, r, u, hw, hh, obb.ramp)) {
+            return true;
+          }
+          continue;
+        }
+
+        const dx = c.x - obb.c.x;
+        const dy = c.y - obb.c.y;
+        const dz = c.z - obb.c.z;
+
+        // Obstacle distance along face normal n (n points outward from surface into room)
+        const dn = (obb.c.x - c.x) * n.x + (obb.c.y - c.y) * n.y + (obb.c.z - c.z) * n.z;
+        const hen = obb.he[0] * Math.abs(obb.ax[0].dot(n)) +
+                    obb.he[1] * Math.abs(obb.ax[1].dot(n)) +
+                    obb.he[2] * Math.abs(obb.ax[2].dot(n));
+
+        // If the obstacle is completely behind the surface face, it cannot cover the portal
+        if (dn + hen <= 0.02) continue;
+        // If the obstacle is floating far out in front of the wall (> 0.4m from surface), it does not cover the wall surface
+        if (dn - hen >= 0.4) continue;
+
+        // Check overlap along obb's 3 axes
+        let separated = false;
+        for (let j = 0; j < 3; j++) {
+          const ax = obb.ax[j];
+          const projD = Math.abs(dx * ax.x + dy * ax.y + dz * ax.z);
+          const extJ = hw * Math.abs(r.dot(ax)) + hh * Math.abs(u.dot(ax)) + 0.05 * Math.abs(n.dot(ax));
+          if (projD > obb.he[j] + extJ - 0.02) {
+            separated = true;
+            break;
+          }
+        }
+        if (separated) continue;
+
+        // Check overlap along portal's tangent axes r and u
+        const projR = Math.abs(dx * r.x + dy * r.y + dz * r.z);
+        const extR = obb.he[0] * Math.abs(obb.ax[0].dot(r)) +
+                     obb.he[1] * Math.abs(obb.ax[1].dot(r)) +
+                     obb.he[2] * Math.abs(obb.ax[2].dot(r));
+        if (projR > hw + extR - 0.02) continue;
+
+        const projU = Math.abs(dx * u.x + dy * u.y + dz * u.z);
+        const extU = obb.he[0] * Math.abs(obb.ax[0].dot(u)) +
+                     obb.he[1] * Math.abs(obb.ax[1].dot(u)) +
+                     obb.he[2] * Math.abs(obb.ax[2].dot(u));
+        if (projU > hh + extU - 0.02) continue;
+
+        return true;
+      }
+    }
+
+    // 3. Check destroyed wall OBBs
+    if (destroyedWallObbs) {
+      for (let i = 0; i < destroyedWallObbs.length; i++) {
+        const dob = destroyedWallObbs[i];
+        const dx = c.x - dob.c.x, dy = c.y - dob.c.y, dz = c.z - dob.c.z;
+        const u0 = Math.abs(dx * dob.ax[0].x + dy * dob.ax[0].y + dz * dob.ax[0].z);
+        const u1 = Math.abs(dx * dob.ax[1].x + dy * dob.ax[1].y + dz * dob.ax[1].z);
+        const u2 = Math.abs(dx * dob.ax[2].x + dy * dob.ax[2].y + dz * dob.ax[2].z);
+        const ext0 = hw * Math.abs(r.dot(dob.ax[0])) + hh * Math.abs(u.dot(dob.ax[0]));
+        const ext1 = hw * Math.abs(r.dot(dob.ax[1])) + hh * Math.abs(u.dot(dob.ax[1]));
+        const ext2 = hw * Math.abs(r.dot(dob.ax[2])) + hh * Math.abs(u.dot(dob.ax[2]));
+        if (u0 <= dob.he[0] + ext0 + 0.2 &&
+            u1 <= dob.he[1] + ext1 + 0.2 &&
+            u2 <= dob.he[2] + ext2 + 0.2) {
+          return true;
+        }
+      }
+    }
+
+    // 4. Check destroyed wall blast centers
+    if (destroyedWalls) {
+      for (let i = 0; i < destroyedWalls.length; i++) {
+        const dw = destroyedWalls[i];
+        if (dw.point) {
+          const px = dw.point.x !== undefined ? dw.point.x : dw.point[0];
+          const py = dw.point.y !== undefined ? dw.point.y : dw.point[1];
+          const pz = dw.point.z !== undefined ? dw.point.z : dw.point[2];
+          const dSq = (c.x - px) * (c.x - px) + (c.y - py) * (c.y - py) + (c.z - pz) * (c.z - pz);
+          if (dSq < 5.4 * 5.4) return true;
+        }
+        if (dw.wallCenter) {
+          const wx = dw.wallCenter.x !== undefined ? dw.wallCenter.x : dw.wallCenter[0];
+          const wy = dw.wallCenter.y !== undefined ? dw.wallCenter.y : dw.wallCenter[1];
+          const wz = dw.wallCenter.z !== undefined ? dw.wallCenter.z : dw.wallCenter[2];
+          const dSq = (c.x - wx) * (c.x - wx) + (c.y - wy) * (c.y - wy) + (c.z - wz) * (c.z - wz);
+          if (dSq < 4.5 * 4.5) return true;
+        }
+      }
+    }
+
+    // 5. Check lava pools
+    if (lava) {
+      for (let i = 0; i < lava.length; i++) {
+        const L = lava[i];
+        const dx = c.x - L.x, dz = c.z - L.z;
+        const minSafeDist = L.r + hw + 0.3;
+        if (dx * dx + dz * dz < minSafeDist * minSafeDist && c.y <= (L.y || 0.1) + hh + 0.3) {
+          return true;
+        }
+      }
+    }
+
+    // 6. Check overlap with other placed portals
+    if (portals) {
+      for (let i = 0; i < portals.length; i++) {
+        if (i === pi) continue;
+        const Q = portals[i];
+        if (!Q || !Q.placed) continue;
+
+        const dotN = Math.abs(n.dot(Q.n));
+        const qcx = Q.c.x !== undefined ? Q.c.x : Q.c[0];
+        const qcy = Q.c.y !== undefined ? Q.c.y : Q.c[1];
+        const qcz = Q.c.z !== undefined ? Q.c.z : Q.c[2];
+        const dx = c.x - qcx, dy = c.y - qcy, dz = c.z - qcz;
+
+        if (dotN > 0.98) {
+          const planeDist = Math.abs(dx * n.x + dy * n.y + dz * n.z);
+          if (planeDist < 0.2) {
+            const du = Math.abs(dx * r.x + dy * r.y + dz * r.z);
+            const dv = Math.abs(dx * u.x + dy * u.y + dz * u.z);
+            if (du < hw * 2 + 0.4 && dv < hh * 2 + 0.4) {
+              return true;
+            }
+          }
+        }
+
+        const distSq = dx * dx + dy * dy + dz * dz;
+        const maxExt = Math.max(hw, hh) * 1.5;
+        if (distSq < maxExt * maxExt) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  function findClosestValidPortalPos(hitPoint, n, r, u, hitObb, pi, obbs, portals, lava, destroyedWallObbs, destroyedWalls) {
+    if (!hitObb || hitObb.noPortal || hitObb.destroyed || hitObb.kind === 'ramp') {
+      return null;
+    }
+
+    const hw = PORT.hw;
+    const hh = PORT.hh;
+    const R_MAX = PORT.hh; // Portal radius (2.0m)
+
+    // Compute normal axis of hitObb
+    let normalAxis = -1;
+    let normalSign = 1;
+    for (let k = 0; k < 3; k++) {
+      const dot = n.dot(hitObb.ax[k]);
+      if (Math.abs(dot) > 0.99) {
+        normalAxis = k;
+        normalSign = Math.sign(dot);
+        break;
+      }
+    }
+    if (normalAxis === -1) return null;
+
+    const limits = [0, 0, 0];
+    for (let k = 0; k < 3; k++) {
+      if (k === normalAxis) continue;
+      const ax = hitObb.ax[k];
+      const ext = hw * Math.abs(r.dot(ax)) + hh * Math.abs(u.dot(ax));
+      limits[k] = hitObb.he[k] - ext - 0.02;
+      if (limits[k] < 0) return null; // Face physically too small
+    }
+
+    // Project hitPoint onto the face plane
+    const dvec = new V3().subVectors(hitPoint, hitObb.c);
+    const dNormal = hitObb.he[normalAxis] * normalSign;
+    const dproj = [0, 0, 0];
+    for (let k = 0; k < 3; k++) {
+      if (k === normalAxis) {
+        dproj[k] = dNormal;
+      } else {
+        dproj[k] = dvec.dot(hitObb.ax[k]);
+      }
+    }
+
+    const cOrig = new V3().copy(hitObb.c);
+    for (let k = 0; k < 3; k++) {
+      cOrig.addScaledVector(hitObb.ax[k], dproj[k]);
+    }
+    cOrig.addScaledVector(n, 0.02);
+
+    // Face-clamped point
+    const cClamped = new V3().copy(hitObb.c);
+    for (let k = 0; k < 3; k++) {
+      if (k === normalAxis) {
+        cClamped.addScaledVector(hitObb.ax[k], dNormal);
+      } else {
+        const clamped = Math.max(-limits[k], Math.min(limits[k], dproj[k]));
+        cClamped.addScaledVector(hitObb.ax[k], clamped);
+      }
+    }
+    cClamped.addScaledVector(n, 0.02);
+
+    // 1. Check if cOrig is within bounds and not blocked
+    const origInBounds = (
+      Math.abs(dproj[(normalAxis + 1) % 3]) <= limits[(normalAxis + 1) % 3] + 0.001 &&
+      Math.abs(dproj[(normalAxis + 2) % 3]) <= limits[(normalAxis + 2) % 3] + 0.001
+    );
+
+    if (origInBounds && !isPortalPlacementBlocked(cOrig, n, r, u, hitObb, pi, obbs, portals, lava, destroyedWallObbs, destroyedWalls)) {
+      return { c: cOrig, autoFixed: false };
+    }
+
+    // 2. Check if cClamped is within R_MAX and not blocked
+    const clampDist = cClamped.distanceTo(cOrig);
+    if (clampDist <= R_MAX && !isPortalPlacementBlocked(cClamped, n, r, u, hitObb, pi, obbs, portals, lava, destroyedWallObbs, destroyedWalls)) {
+      return { c: cClamped, autoFixed: clampDist > 0.01 };
+    }
+
+    // 3. Search for the closest valid placement on the flat surface to cOrig
+    let bestCandidate = null;
+    let bestDistSq = R_MAX * R_MAX;
+
+    const NUM_ANGLES = 32;
+    const DIST_STEP = 0.1;
+    const MAX_STEPS = Math.ceil(R_MAX / DIST_STEP);
+
+    const testPos = new V3();
+    const dirVec = new V3();
+
+    for (let step = 1; step <= MAX_STEPS; step++) {
+      const d = Math.min(step * DIST_STEP, R_MAX);
+      if (d * d > bestDistSq + 0.01) break;
+
+      for (let a = 0; a < NUM_ANGLES; a++) {
+        const angle = (a * 2 * Math.PI) / NUM_ANGLES;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+
+        dirVec.copy(r).multiplyScalar(d * cosA).addScaledVector(u, d * sinA);
+        testPos.addVectors(cClamped, dirVec);
+
+        const distToOrigSq = testPos.distanceToSquared(cOrig);
+        if (distToOrigSq > bestDistSq) continue;
+
+        if (!isPortalPlacementBlocked(testPos, n, r, u, hitObb, pi, obbs, portals, lava, destroyedWallObbs, destroyedWalls)) {
+          // Refine along dirVec with binary search
+          let low = Math.max(0, d - DIST_STEP);
+          let high = d;
+          let refinedPos = testPos.clone();
+          const unitDir = dirVec.clone().normalize();
+
+          for (let b = 0; b < 3; b++) {
+            const mid = (low + high) * 0.5;
+            const midPos = new V3().addVectors(cClamped, unitDir.clone().multiplyScalar(mid));
+            if (!isPortalPlacementBlocked(midPos, n, r, u, hitObb, pi, obbs, portals, lava, destroyedWallObbs, destroyedWalls)) {
+              high = mid;
+              refinedPos.copy(midPos);
+            } else {
+              low = mid;
+            }
+          }
+
+          const refinedDistSq = refinedPos.distanceToSquared(cOrig);
+          if (refinedDistSq < bestDistSq) {
+            bestDistSq = refinedDistSq;
+            bestCandidate = refinedPos.clone();
+          }
+        }
+      }
+    }
+
+    if (bestCandidate && Math.sqrt(bestDistSq) <= R_MAX + 0.001) {
+      return { c: bestCandidate, autoFixed: true };
+    }
+
+    return null;
+  }
+
   return {
     physStep,
     collideCube,
@@ -928,7 +1312,9 @@ export function initPhysics(TH, CFG, PORT) {
     raycast,
     teleportCube,
     collidePlayerWithPlayers,
-    resolvePlayerCollisions
+    resolvePlayerCollisions,
+    isPortalPlacementBlocked,
+    findClosestValidPortalPos
   };
 }
 

@@ -222,6 +222,93 @@ export function initWeapons(G) {
   G._releaseSmoke = _releaseSmoke;
   G._smokePool = _smokePool;
 
+  function traceCrosshairSightline(startPos, startDir, maxDist = 140) {
+    const curPos = startPos.clone();
+    const curDir = startDir.clone();
+    let remaining = maxDist;
+    let totalVirtualDist = 0;
+    let firstPortalIdx = -1;
+
+    for (let iter = 0; iter < 4; iter++) {
+      const hit = G.raycast ? G.raycast(curPos, curDir, remaining) : null;
+      let bestT = hit ? hit.distance : remaining;
+      let hitPortal = -1;
+
+      // Check portals
+      for (let i = 0; i < G.portals.length; i++) {
+        const P = G.portals[i];
+        const Q = G.portals[i ^ 1];
+        if (!P || !P.placed || P.closing || !Q || !Q.placed || Q.closing) continue;
+        const denom = curDir.dot(P.n);
+        if (denom >= -0.001) continue; // Ray must face towards the front of the portal
+        const pt = P.c.clone().sub(curPos).dot(P.n) / denom;
+        if (pt > 0.01 && pt < bestT + 0.05) {
+          const hitPt = curPos.clone().addScaledVector(curDir, pt);
+          const d = hitPt.clone().sub(P.c);
+          const du = Math.abs(d.dot(P.r));
+          const dv = Math.abs(d.dot(P.u));
+          if (du < PORT.hw && dv < PORT.hh) {
+            bestT = pt;
+            hitPortal = i;
+          }
+        }
+      }
+
+      // Check remote players
+      let hitPlayerT = bestT;
+      for (const pid in G.remotePlayers) {
+        const rp = G.remotePlayers[pid];
+        if (!rp || rp.isDead) continue;
+        const box = new TH.Box3();
+        const rpPos = new TH.Vector3().fromArray(rp.pos);
+        box.min.copy(rpPos).add(new TH.Vector3(-0.45, 0, -0.45));
+        box.max.copy(rpPos).add(new TH.Vector3(0.45, CFG.H, 0.45));
+        const ray = new TH.Ray(curPos, curDir);
+        const pt = ray.intersectBox(box, new TH.Vector3());
+        if (pt) {
+          const d = curPos.distanceTo(pt);
+          if (d < hitPlayerT) {
+            hitPlayerT = d;
+            hitPortal = -1;
+          }
+        }
+      }
+
+      if (hitPlayerT < bestT) {
+        totalVirtualDist += hitPlayerT;
+        break;
+      }
+
+      if (hitPortal !== -1) {
+        if (iter === 0) {
+          firstPortalIdx = hitPortal;
+        }
+        totalVirtualDist += bestT;
+        remaining -= bestT;
+        if (remaining <= 0.1) break;
+
+        const P = G.portals[hitPortal];
+        const pairIdx = Math.floor(hitPortal / 2);
+        const R = (hitPortal % 2 === 0) ? G.R_AB[pairIdx] : G.R_BA[pairIdx];
+        const Q = G.portals[hitPortal ^ 1];
+        const hitPt = curPos.clone().addScaledVector(curDir, bestT);
+        const rel = hitPt.clone().sub(P.c).applyMatrix4(R);
+        curPos.copy(Q.c).add(rel).addScaledVector(Q.n, 0.02);
+        curDir.applyMatrix4(R).normalize();
+        continue;
+      }
+
+      totalVirtualDist += bestT;
+      break;
+    }
+
+    return {
+      firstPortalIdx,
+      totalVirtualDist,
+      targetPtVirtual: startPos.clone().addScaledVector(startDir, totalVirtualDist)
+    };
+  }
+
   function fireRocket() {
     if (G.countdownActive || (G.match && G.match.phase === 'countdown')) return;
     const t = performance.now() / 1000;
@@ -231,8 +318,49 @@ export function initWeapons(G) {
 
     AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1);
     G.camera.updateMatrixWorld(true);
-    const pos = G.camera.getWorldPosition(new TH.Vector3());
-    const dir = new TH.Vector3(0, 0, -1).applyQuaternion(G.camera.quaternion).normalize();
+    G.rocketGun.updateMatrixWorld(true);
+
+    const muzzlePos = new TH.Vector3(0, 0, -0.6).applyMatrix4(G.rocketGun.matrixWorld);
+    const camPos = G.camera.getWorldPosition(new TH.Vector3());
+    const aimDir = new TH.Vector3(0, 0, -1).applyQuaternion(G.camera.quaternion).normalize();
+
+    const trace = traceCrosshairSightline(camPos, aimDir, 140);
+    const targetPtVirtual = trace.targetPtVirtual;
+
+    let spawnPos = muzzlePos.clone();
+    let rocketDir;
+
+    if (trace.firstPortalIdx !== -1) {
+      rocketDir = targetPtVirtual.clone().sub(spawnPos).normalize();
+      const P = G.portals[trace.firstPortalIdx];
+      const denomR = rocketDir.dot(P.n);
+      if (denomR < -0.001) {
+        const tR = P.c.clone().sub(spawnPos).dot(P.n) / denomR;
+        if (tR > 0) {
+          const entryPt = spawnPos.clone().addScaledVector(rocketDir, tR);
+          const d = entryPt.clone().sub(P.c);
+          const du = Math.abs(d.dot(P.r));
+          const dv = Math.abs(d.dot(P.u));
+          const maxU = PORT.hw - 0.1;
+          const maxV = PORT.hh - 0.1;
+          if (du > maxU || dv > maxV) {
+            const maxRatio = Math.max(du / maxU, dv / maxV);
+            const lerpFactor = Math.min(1.0, (maxRatio - 1.0) / maxRatio + 0.15);
+            spawnPos.lerp(camPos, lerpFactor);
+            rocketDir = targetPtVirtual.clone().sub(spawnPos).normalize();
+          }
+        }
+      }
+    } else {
+      if (trace.totalVirtualDist < 1.5) {
+        rocketDir = aimDir.clone();
+      } else {
+        rocketDir = targetPtVirtual.clone().sub(spawnPos).normalize();
+        if (rocketDir.dot(aimDir) < 0.2) rocketDir = aimDir.clone();
+      }
+    }
+
+    const vel = rocketDir.clone().multiplyScalar(70);
 
     const rMesh = new TH.Group();
     const bGeo = new TH.CylinderGeometry(0.06, 0.06, 0.4, 8);
@@ -244,15 +372,12 @@ export function initWeapons(G) {
     tip.position.y = 0.3;
     rMesh.add(body, tip);
 
-    rMesh.rotation.order = 'YXZ';
-    rMesh.quaternion.copy(G.camera.quaternion);
-    rMesh.rotateX(Math.PI / 2);
-    rMesh.position.copy(pos);
+    rMesh.quaternion.setFromUnitVectors(new TH.Vector3(0, 1, 0), rocketDir);
+    rMesh.position.copy(spawnPos);
     G.scene.add(rMesh);
 
-    const vel = dir.clone().multiplyScalar(70);
-    G.rockets.push({ pos: pos.clone(), vel, mesh: rMesh, life: 5, isLocal: true, shooterId: G.localPlayerId });
-    G.Network.send({ type: 'fire_rocket', pos: pos.toArray(), vel: vel.toArray() });
+    G.rockets.push({ pos: spawnPos.clone(), vel, mesh: rMesh, life: 5, isLocal: true, shooterId: G.localPlayerId });
+    G.Network.send({ type: 'fire_rocket', pos: spawnPos.toArray(), vel: vel.toArray() });
   }
 
   /* ------------------------------------------------------ instagib */

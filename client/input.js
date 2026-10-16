@@ -208,7 +208,12 @@ export function initInput(G) {
   G.dom('btnfs').addEventListener('click', toggleFullscreen);
 
   G.dom('ipinput').placeholder = defaultServer();
+  ['click', 'keydown', 'pointerdown'].forEach(evt => {
+    window.addEventListener(evt, () => AudioSys.ensure(), { passive: true });
+  });
+
   G.dom('btnstart').addEventListener('click', () => {
+    AudioSys.ensure();
     const ipInput = document.getElementById('ipinput');
     const passInput = document.getElementById('passinput');
     const ip = (ipInput && ipInput.value.trim()) ? ipInput.value.trim() : defaultServer();
@@ -218,10 +223,19 @@ export function initInput(G) {
 
     G.lastIp = actualIp; G.lastPass = pass;
     G.lastName = (nameInput && nameInput.value.trim()) ? nameInput.value.trim() : 'Guest';
-    G.Network.connect(actualIp, pass, G.lastName);
-
+    if (G.startConnection) {
+      G.startConnection(actualIp, pass, G.lastName);
+    } else {
+      G.Network.connect(actualIp, pass, G.lastName);
+    }
   });
-  G.dom('btnresume').addEventListener('click', requestLock);
+  const cancelBtn = document.getElementById('connect-overlay-cancel');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      if (G.onConnectionTimeout) G.onConnectionTimeout('Connection cancelled');
+    });
+  }
+  G.dom('btnresume').addEventListener('click', () => { AudioSys.ensure(); requestLock(); });
   const switchBtn = G.dom('btnswitchmode');
   if (switchBtn) {
     switchBtn.addEventListener('click', () => {

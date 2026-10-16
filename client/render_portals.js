@@ -117,12 +117,38 @@ export function initPortalRendering(ctx) {
     } else { parkClip(); }
 
     const exitIdx = qIdx;
-    const oldFrameVis = frames[exitIdx].visible;
-    const oldSparkVis = sparkles[exitIdx].mesh.visible;
-    const oldQuadVis = quads[exitIdx].visible;
-    frames[exitIdx].visible = false;
-    sparkles[exitIdx].mesh.visible = false;
-    quads[exitIdx].visible = false;
+    const oldVis = [];
+    skyGroup.position.setFromMatrixPosition(_camMatrix);
+    const vcamPos = skyGroup.position;
+    for (let j = 0; j < 4; j++) {
+      oldVis[j] = {
+        frame: frames[j].visible,
+        spark: sparkles[j].mesh.visible,
+        quad: quads[j].visible,
+        light: glowLights[j].intensity
+      };
+      if (j === exitIdx) {
+        frames[j].visible = false;
+        sparkles[j].mesh.visible = false;
+        quads[j].visible = false;
+        glowLights[j].intensity = 0;
+      } else {
+        const pj = portals[j];
+        if (isLive(pj)) {
+          const vdot = (vcamPos.x - pj.c.x) * pj.n.x + (vcamPos.y - pj.c.y) * pj.n.y + (vcamPos.z - pj.c.z) * pj.n.z;
+          const vFacing = vdot > 0.05;
+          frames[j].visible = vFacing;
+          sparkles[j].mesh.visible = vFacing;
+          quads[j].visible = vFacing && (texs[j] !== null);
+          glowLights[j].intensity = vFacing ? 13.0 : 0;
+        } else {
+          frames[j].visible = false;
+          sparkles[j].mesh.visible = false;
+          quads[j].visible = false;
+          glowLights[j].intensity = 0;
+        }
+      }
+    }
 
     for (let j = 0; j < 4; j++) {
       if (quadMats[j]) quadMats[j].uniforms.uTex.value = texs[j];
@@ -137,12 +163,14 @@ export function initPortalRendering(ctx) {
       if (quadMats[j]) quadMats[j].uniforms.uEncode.value = 0;
     }
 
-    skyGroup.position.setFromMatrixPosition(_camMatrix);
     renderer.render(scene, vcam);
 
-    frames[exitIdx].visible = oldFrameVis;
-    sparkles[exitIdx].mesh.visible = oldSparkVis;
-    quads[exitIdx].visible = oldQuadVis;
+    for (let j = 0; j < 4; j++) {
+      frames[j].visible = oldVis[j].frame;
+      sparkles[j].mesh.visible = oldVis[j].spark;
+      quads[j].visible = oldVis[j].quad;
+      glowLights[j].intensity = oldVis[j].light;
+    }
 
     return rt.texture;
   }
@@ -162,31 +190,41 @@ export function initPortalRendering(ctx) {
         // canvas pass follows: default framebuffer has no hardware conversion,
         // so the quad must do the final linear→sRGB encode itself
         quadMats[i].uniforms.uEncode.value = 1;
-        quads[i].visible = isLive(portals[i]);
+        const P = portals[i];
+        const dot = (camera.position.x - P.c.x) * P.n.x + (camera.position.y - P.c.y) * P.n.y + (camera.position.z - P.c.z) * P.n.z;
+        quads[i].visible = isLive(P) && (dot > 0.05) && (texs[i] !== null);
       }
     }
   }
 
   function placePortalVisuals() {
+    const camPos = camera.position;
     for (let i = 0; i < 4; i++) {
       const P = portals[i];
-      if (!P.placed && !P.closing) {
+      if (!isLive(P)) {
         quads[i].visible = false; frames[i].visible = false;
         glowLights[i].intensity = 0; sparkles[i].mesh.visible = false;
         continue;
       }
-      frames[i].visible = true;
+      const dot = (camPos.x - P.c.x) * P.n.x + (camPos.y - P.c.y) * P.n.y + (camPos.z - P.c.z) * P.n.z;
+      const isFacing = dot > 0.05;
+
+      frames[i].visible = isFacing;
+      sparkles[i].mesh.visible = isFacing;
       const q = quads[i], f = frames[i], lt = glowLights[i];
       // Reuse _pvM — no new M4() per frame
       _pvM.makeBasis(P.r, P.u, P.n);
       _pvM.setPosition(P.c);
       q.quaternion.setFromRotationMatrix(_pvM); q.position.copy(P.c);
-      f.quaternion.copy(q.quaternion); f.position.copy(P.c);
+      f.quaternion.copy(q.quaternion); f.position.copy(P.c).addScaledVector(P.n, 0.02);
       lt.position.copy(P.c).addScaledVector(P.n, 0.35);
       lt.color.setHex(P.color);
-      if (lt.intensity === 0) lt.intensity = 13.0;
-      sparkles[i].mesh.visible = true;
-      sparkles[i].mesh.quaternion.copy(q.quaternion); sparkles[i].mesh.position.copy(P.c);
+      if (isFacing) {
+        if (lt.intensity === 0) lt.intensity = 13.0;
+      } else {
+        lt.intensity = 0;
+      }
+      sparkles[i].mesh.quaternion.copy(q.quaternion); sparkles[i].mesh.position.copy(P.c).addScaledVector(P.n, 0.02);
     }
   }
 

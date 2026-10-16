@@ -152,6 +152,9 @@ export function initLoop(G) {
   }
 
   let last = performance.now();
+  let fpsFrames = 0;
+  let lastFpsUpdate = performance.now();
+  let fpsValEl = null;
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && G.rockets) {
@@ -171,6 +174,18 @@ export function initLoop(G) {
     const elapsed = (now - last) / 1000;
     let dt = Math.min(0.05, elapsed);
     last = now;
+
+    fpsFrames++;
+    if (now - lastFpsUpdate >= 250) {
+      if (!fpsValEl && typeof document !== 'undefined') {
+        fpsValEl = document.getElementById('fpsval');
+      }
+      if (fpsValEl) {
+        fpsValEl.textContent = Math.round((fpsFrames * 1000) / (now - lastFpsUpdate));
+      }
+      fpsFrames = 0;
+      lastFpsUpdate = now;
+    }
 
     if (elapsed > 0.25 && G.rockets) {
       for (let i = G.rockets.length - 1; i >= 0; i--) {
@@ -252,12 +267,36 @@ export function initLoop(G) {
             if (rp.isDead) {
               if (!rp.deathCamPos) {
                 const deadPos = new V3(rp.pos[0], rp.pos[1], rp.pos[2]);
-                const offset = new V3(0, 2, 4).applyAxisAngle(new V3(0, 1, 0), rp.yaw || 0);
-                const backDir = offset.clone().normalize();
-                const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length()) : null;
-                const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
-                rp.deathCamPos = deadPos.clone().addScaledVector(backDir, camDist);
-                rp.deathCamTarget = deadPos.clone();
+                let shotOrigin = rp.lastShotOrigin || null;
+                const killerId = rp.lastKillerId;
+                if (!shotOrigin && killerId) {
+                  if (killerId === G.localPlayerId) {
+                    shotOrigin = new V3(G.pl.pos.x, G.pl.pos.y + 1.5, G.pl.pos.z);
+                  } else if (G.remotePlayers[killerId] && G.remotePlayers[killerId].pos) {
+                    const kp = G.remotePlayers[killerId];
+                    shotOrigin = new V3(kp.pos[0], kp.pos[1] + 1.5, kp.pos[2]);
+                  }
+                }
+                if (shotOrigin) {
+                  const eyePos = new V3(deadPos.x, deadPos.y + 1.5, deadPos.z);
+                  const toShot = new V3().subVectors(shotOrigin, eyePos);
+                  const shotDist = toShot.length();
+                  const shotDir = shotDist > 0.01 ? toShot.clone().normalize() : new V3(-Math.sin(rp.yaw || 0), 0, -Math.cos(rp.yaw || 0));
+                  const pullDist = 2.0;
+                  const backDir = shotDir.clone().negate();
+                  const rayHit = G.raycast ? G.raycast(eyePos, backDir, pullDist + 0.3) : null;
+                  const actualPull = rayHit ? Math.max(0.1, rayHit.distance - 0.3) : pullDist;
+                  rp.deathCamPos = eyePos.clone().addScaledVector(backDir, actualPull);
+                  rp.deathCamPos.y += Math.min(0.35, actualPull * 0.25);
+                  rp.deathCamTarget = shotOrigin.clone();
+                } else {
+                  const offset = new V3(0, 2, 4).applyAxisAngle(new V3(0, 1, 0), rp.yaw || 0);
+                  const backDir = offset.clone().normalize();
+                  const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length()) : null;
+                  const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
+                  rp.deathCamPos = deadPos.clone().addScaledVector(backDir, camDist);
+                  rp.deathCamTarget = deadPos.clone();
+                }
               }
               G.camera.position.lerp(rp.deathCamPos, Math.min(1, dt * 5));
               const lookMat = new TH.Matrix4().lookAt(G.camera.position, rp.deathCamTarget, new TH.Vector3(0, 1, 0));
@@ -362,9 +401,9 @@ export function initLoop(G) {
       G.instagibGun.scale.setScalar(1); G.instagibGun.position.z = -0.5; G.instagibGun.rotation.x = 0;
 
       const pM = G.playerModel.userData;
-      if (pM.mirrorGun) { pM.mirrorGun.scale.setScalar(1); pM.mirrorGun.position.z = -0.4; pM.mirrorGun.rotation.x = 0; }
-      if (pM.mirrorRocketGun) { pM.mirrorRocketGun.scale.setScalar(1); pM.mirrorRocketGun.position.z = -0.4; pM.mirrorRocketGun.rotation.x = 0; }
-      if (pM.mirrorInstagibGun) { pM.mirrorInstagibGun.scale.setScalar(1); pM.mirrorInstagibGun.position.z = -0.4; pM.mirrorInstagibGun.rotation.x = 0; }
+      if (pM.mirrorGun) { pM.mirrorGun.scale.setScalar(1); pM.mirrorGun.position.z = -0.5; pM.mirrorGun.rotation.x = 0; }
+      if (pM.mirrorRocketGun) { pM.mirrorRocketGun.scale.setScalar(1); pM.mirrorRocketGun.position.z = -0.5; pM.mirrorRocketGun.rotation.x = 0; }
+      if (pM.mirrorInstagibGun) { pM.mirrorInstagibGun.scale.setScalar(1); pM.mirrorInstagibGun.position.z = -0.5; pM.mirrorInstagibGun.rotation.x = 0; }
 
       const aw = G.activeWeapon || 1;
       const actHUD = aw === 1 ? G.gun : (aw === 2 ? G.rocketGun : G.instagibGun);
@@ -372,7 +411,7 @@ export function initLoop(G) {
 
       actHUD.scale.setScalar(scale); actHUD.position.z = lZ; actHUD.rotation.x = lRot;
       if (aw === 1 && G.gun.userData.core) G.gun.userData.core.material.emissiveIntensity = 2.2 + mt * 6;
-      if (actMir) { actMir.scale.setScalar(1 + mt * 0.12); actMir.position.z = -0.4 + mt * 0.15; actMir.rotation.x = mt * 0.3; }
+      if (actMir) { actMir.scale.setScalar(1 + mt * 0.12); actMir.position.z = -0.5 + mt * 0.15; actMir.rotation.x = mt * 0.3; }
     } else if (targetPl && !targetPl.isDead) {
       G.gun.scale.setScalar(1); G.gun.position.z = -0.5; G.gun.rotation.x = 0;
       G.rocketGun.scale.setScalar(1); G.rocketGun.position.z = -0.5; G.rocketGun.rotation.x = 0;
@@ -452,12 +491,15 @@ export function initLoop(G) {
                   const cz = r.pos.z + (nextPos.z - r.pos.z) * t;
                   const du = Math.abs((cx - P.c.x) * P.r.x + (cy - P.c.y) * P.r.y + (cz - P.c.z) * P.r.z);
                   const dv = Math.abs((cx - P.c.x) * P.u.x + (cy - P.c.y) * P.u.y + (cz - P.c.z) * P.u.z);
-                  if (du <= PORT.hw - 0.2 && dv <= PORT.hh - 0.2) {
+                  if (du <= PORT.hw && dv <= PORT.hh) {
                      const R = idx === 0 ? G.R_AB[pairIdx] : G.R_BA[pairIdx];
                      r.vel.applyMatrix4(R);
                      const rel = new V3(cx, cy, cz).sub(P.c).applyMatrix4(R);
                      r.pos.copy(Q.c).add(rel).addScaledVector(r.vel, dt * (1 - t));
-                     r.mesh.quaternion.setFromRotationMatrix(R).multiply(r.mesh.quaternion);
+                     const newDir = r.vel.clone().normalize();
+                     if (newDir.lengthSq() > 0.001) {
+                        r.mesh.quaternion.setFromUnitVectors(new TH.Vector3(0, 1, 0), newDir);
+                     }
                      teleported = true;
                      break;
                   }
@@ -590,8 +632,7 @@ export function initLoop(G) {
 
     for (let i = 0; i < 4; i++) {
        const P = G.portals[i];
-       const sp = G.sparkles[i];
-       if (!sp.mesh.visible) continue;
+       if (!P.placed && !P.closing) continue;
 
        let scl;
        if (P.closing) {
@@ -616,11 +657,20 @@ export function initLoop(G) {
            }
        }
 
+       const camPos = G.camera.position;
+       const dot = (camPos.x - P.c.x) * P.n.x + (camPos.y - P.c.y) * P.n.y + (camPos.z - P.c.z) * P.n.z;
+       const isFacing = dot > 0.05;
+
        G.quads[i].scale.setScalar(scl);
        G.frames[i].scale.set((PORT.hw + 0.05) * scl, (PORT.hh + 0.05) * scl, 1);
+       G.frames[i].visible = isFacing;
        const pulse = 1.0 + 0.12 * Math.sin(G.nowT * 2.8 + i * 1.7) + 0.06 * Math.cos(G.nowT * 5.3 + i * 2.3);
-       G.glowLights[i].intensity = 13.0 * scl * pulse;
+       G.glowLights[i].intensity = isFacing ? (13.0 * scl * pulse) : 0;
        G.glowLights[i].color.setHex(P.color);
+
+       const sp = G.sparkles[i];
+       sp.mesh.visible = isFacing;
+       if (!isFacing) continue;
 
        for (let j = 0; j < 100; j++) {
           if (sp.life[j] <= 0) {
@@ -785,8 +835,10 @@ export function initLoop(G) {
       isSpectator: G.isSpectator,
       spectatorSpeed: specSpeed,
       spectatorMode: G.spectatorMode,
+      spectateTargetPid: G.spectateTargetPid,
       followPerspective: G.followPerspective,
-      isTargetDead: !!(G.spectateTargetPid && G.remotePlayers[G.spectateTargetPid] && G.remotePlayers[G.spectateTargetPid].isDead)
+      isTargetDead: !!(G.spectateTargetPid && G.remotePlayers[G.spectateTargetPid] && G.remotePlayers[G.spectateTargetPid].isDead),
+      remotePlayers: G.remotePlayers
     });
     G.skyGroup.position.copy(G.camera.position);
     G.updateSky(G.nowT);

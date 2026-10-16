@@ -1,4 +1,5 @@
 import { generateMap } from '../shared/mapgen.js?v=2';
+import { PORT } from '../shared/constants.js';
 
 /* ============================================================================
    WORLD — map building (batched for performance) + destructible walls.
@@ -600,11 +601,48 @@ export function initWorld(G) {
     G.hintZones = map.hints.map(h => ({ min: new V3(...h.min), max: new V3(...h.max), msg: h.msg }));
     G.pl.pos.copy(G.spawnPts[0]); G.pl.vel.set(0, 0, 0); G.pl.cp.copy(G.spawnPts[0]);
     G.pl.yaw = Math.atan2(-G.spawnPts[0].x, -G.spawnPts[0].z); // face arena center
-    G.pl.pitch = 0; G.pl.viewOffset = null; G.pl.maxSpeed = 0; G.pl.grounded = false; G.pl.jumpBuf = -1;
-    G.won = false; G.localReady = false; G.lastInstagibTime = -999; G.lastRocketTime = -999;
-    G.winPanel.classList.add('hidden');
+    if (!G.match || G.match.phase !== 'summary' || G.isSpectator) {
+      G.won = false;
+      G.winPanel.classList.add('hidden');
+    }
+    G.localReady = false; G.lastInstagibTime = -999; G.lastRocketTime = -999;
     G.dom('seedinfo').textContent = seedStr;
     G.prewarmFX();
+  }
+
+  function resetWalls(seed) {
+    const seedToUse = seed || G.currentSeed;
+    if (!seedToUse) return;
+    const savePl = {
+      pos: G.pl.pos.clone(),
+      vel: G.pl.vel.clone(),
+      cp: G.pl.cp.clone(),
+      yaw: G.pl.yaw,
+      pitch: G.pl.pitch,
+      viewOffset: G.pl.viewOffset ? G.pl.viewOffset.clone() : null,
+      maxSpeed: G.pl.maxSpeed,
+      grounded: G.pl.grounded,
+      jumpBuf: G.pl.jumpBuf
+    };
+    const saveWon = G.won;
+    const saveReady = G.localReady;
+    loadMap(seedToUse);
+    if (!G.isSpectator && G.started) {
+      G.pl.pos.copy(savePl.pos);
+      G.pl.vel.copy(savePl.vel);
+      G.pl.cp.copy(savePl.cp);
+      G.pl.yaw = savePl.yaw;
+      G.pl.pitch = savePl.pitch;
+      G.pl.viewOffset = savePl.viewOffset;
+      G.pl.maxSpeed = savePl.maxSpeed;
+      G.pl.grounded = savePl.grounded;
+      G.pl.jumpBuf = savePl.jumpBuf;
+    }
+    G.won = saveWon;
+    G.localReady = saveReady;
+    if (saveWon && !G.isSpectator && G.match && G.match.phase === 'summary') {
+      if (G.winPanel) G.winPanel.classList.remove('hidden');
+    }
   }
 
   function newMap(s) {
@@ -614,7 +652,7 @@ export function initWorld(G) {
   }
 
   function isPortalOnDestroyedWall(c, n, r, u) {
-    const hw = 0.6, hh = 1.2;
+    const hw = PORT.hw, hh = PORT.hh;
 
     if (G.destroyedWallObbs) {
       for (const dob of G.destroyedWallObbs) {
@@ -635,6 +673,7 @@ export function initWorld(G) {
 
     if (G.obbs) {
       for (const obb of G.obbs) {
+        if (obb.kind === 'ramp') continue;
         if (obb.destroyed || obb.noPortal) {
           const d = c.clone().sub(obb.c);
           const u0 = Math.abs(d.dot(obb.ax[0]));
@@ -672,5 +711,6 @@ export function initWorld(G) {
   G.loadMap = loadMap;
   G.newMap = newMap;
   G.destroyWall = destroyWall;
+  G.resetWalls = resetWalls;
   G.isPortalOnDestroyedWall = isPortalOnDestroyedWall;
 }
