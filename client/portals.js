@@ -165,6 +165,10 @@ export function initPortals(G) {
 
     // Reconstruct c and offset slightly
     c.copy(hit.obb.c).add(dvec).addScaledVector(n, 0.02);
+    if (G.isPortalOnDestroyedWall && G.isPortalOnDestroyedWall(c, n, f.r, f.u)) {
+      AudioSys.tone(220, 120, 0.15, 'square', 0.06);
+      return false;
+    }
     /* no overlapping placement on the same face or intersecting nearby */
     for (let i = 0; i < G.portals.length; i++) {
       if (i === pi) continue;

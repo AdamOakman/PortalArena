@@ -102,7 +102,8 @@ export function initPhysics(TH, CFG, PORT) {
       const u = (sC + hl) / len;
       const yTop = y0 + rise * smootherstep(u);
       const yBot = yTop - T;
-      if (p.y < yTop && p.y + h > yBot) {
+      const sideBottomY = (yBot - y0 < 2.2) ? y0 : yBot;
+      if (p.y < yTop && p.y + h > sideBottomY) {
         const signW = Math.sign(w) || 1;
         const nx = rightX * signW;
         const nz = rightZ * signW;
@@ -141,14 +142,10 @@ export function initPhysics(TH, CFG, PORT) {
     if (p.y >= yBot - 0.15) {
       const penY = yTop - p.y;
       if (penY > -0.01) {
-        const depth = penY * nyTop;
-        p.x += nxTop * (depth + 0.0005);
-        p.y += nyTop * (depth + 0.0005);
-        p.z += nzTop * (depth + 0.0005);
-        if (p.y < yTop) p.y = yTop + 0.0005;
+        p.y = yTop + 0.0005;
 
         const vn = pl.vel.x * nxTop + pl.vel.y * nyTop + pl.vel.z * nzTop;
-        if (vn < 0) {
+        if (vn < 0 && pl.vel.y < 0) {
           pl.vel.x -= nxTop * vn;
           pl.vel.y -= nyTop * vn;
           pl.vel.z -= nzTop * vn;
@@ -173,8 +170,8 @@ export function initPhysics(TH, CFG, PORT) {
 
       // Enforce crouch if standing head would intersect ceiling and player can fit crouched
       const maxAllowedH = yBot - p.y;
-      if (maxAllowedH < CFG.H && maxAllowedH >= CFG.CROUCH_H) {
-        const minRequiredCrouchT = (CFG.H - maxAllowedH) / (CFG.H - CFG.CROUCH_H);
+      if (maxAllowedH < CFG.H - 0.05 && maxAllowedH >= CFG.CROUCH_H - 0.1) {
+        const minRequiredCrouchT = Math.min(1, Math.max(0, (CFG.H - maxAllowedH) / (CFG.H - CFG.CROUCH_H)));
         if ((pl.crouchT || 0) < minRequiredCrouchT) {
           pl.crouchT = minRequiredCrouchT;
         }
@@ -182,7 +179,8 @@ export function initPhysics(TH, CFG, PORT) {
 
       // Recalculate effective height with crouch
       const effH = playerHeight(pl.crouchT);
-      const targetS = (p.y + effH + T - y0) / rise;
+      const minSafeClearance = Math.max(effH, 1.8);
+      const targetS = (p.y + minSafeClearance + T - y0) / rise;
       const uFit = findUForSmootherstep(targetS);
       const sFit = uFit * len - hl;
 
@@ -342,31 +340,111 @@ export function initPhysics(TH, CFG, PORT) {
     }
   }
 
-  function teleportCheck(pl, prevCamPos, dt, p0, p1, R_AB, R_BA, tpState, events) {
-    
+  function teleportCheck(pl, prevPos, prevCamPos, dt, p0, p1, R_AB, R_BA, tpState, events) {
     if (!(p0.placed && p1.placed)) return;
-    const camPosNow = new V3(pl.pos.x, pl.pos.y + playerHeight(pl.crouchT) - 0.12, pl.pos.z);
+    const curH = playerHeight(pl.crouchT);
+    const camPosNow = new V3(pl.pos.x, pl.pos.y + curH - 0.12, pl.pos.z);
     for (let pi = 0; pi < 2; pi++) {
       const P = pi === 0 ? p0 : p1, Q = pi === 0 ? p1 : p0;
       if (tpState.tpGracePortal === P && tpState.nowT - tpState.tpGraceT < 0.12) continue;
-      
-      const a = (prevCamPos.x - P.c.x) * P.n.x + (prevCamPos.y - P.c.y) * P.n.y + (prevCamPos.z - P.c.z) * P.n.z;
-      const b = (camPosNow.x - P.c.x) * P.n.x + (camPosNow.y - P.c.y) * P.n.y + (camPosNow.z - P.c.z) * P.n.z;
-      
-      if ((a > 0) !== (b > 0)) {
-        const t = Math.max(0, Math.min(1, a / (a - b)));
+
+      const R = pi === 0 ? R_AB : R_BA;
+
+      // 1. Camera plane crossing (standard for wall portals or dives)
+      const a_cam = (prevCamPos.x - P.c.x) * P.n.x + (prevCamPos.y - P.c.y) * P.n.y + (prevCamPos.z - P.c.z) * P.n.z;
+      const b_cam = (camPosNow.x - P.c.x) * P.n.x + (camPosNow.y - P.c.y) * P.n.y + (camPosNow.z - P.c.z) * P.n.z;
+
+      if ((a_cam > 0) !== (b_cam > 0)) {
+        const t = Math.max(0, Math.min(1, a_cam / (a_cam - b_cam)));
         const cx = prevCamPos.x + (camPosNow.x - prevCamPos.x) * t;
         const cy = prevCamPos.y + (camPosNow.y - prevCamPos.y) * t;
         const cz = prevCamPos.z + (camPosNow.z - prevCamPos.z) * t;
-        
+
         const du = Math.abs((cx - P.c.x) * P.r.x + (cy - P.c.y) * P.r.y + (cz - P.c.z) * P.r.z);
         const dv = Math.abs((cx - P.c.x) * P.u.x + (cy - P.c.y) * P.u.y + (cz - P.c.z) * P.u.z);
         if (du <= PORT.hw - 0.05 && dv <= PORT.hh - 0.05) {
-          doTeleport(pl, pi === 0 ? R_AB : R_BA, P, Q, t, dt, tpState, events);
+          doTeleport(pl, R, P, Q, t, dt, tpState, events);
           return;
         }
       }
+
+      // 2. Feet / base entry (for floor or upward/downward angled portals)
+      if (Math.abs(P.n.y) > 0.4 && prevPos) {
+        const prevFeet = new V3(prevPos.x, prevPos.y + 0.15, prevPos.z);
+        const currFeet = new V3(pl.pos.x, pl.pos.y + 0.15, pl.pos.z);
+        const a_feet = (prevFeet.x - P.c.x) * P.n.x + (prevFeet.y - P.c.y) * P.n.y + (prevFeet.z - P.c.z) * P.n.z;
+        const b_feet = (currFeet.x - P.c.x) * P.n.x + (currFeet.y - P.c.y) * P.n.y + (currFeet.z - P.c.z) * P.n.z;
+
+        const feetCrossed = a_feet > 0 && b_feet <= 0;
+        const inShaft = pl.pos.y <= P.c.y + 0.1 && pl.pos.y >= P.c.y - 1.8 && pl.vel.y < 0;
+
+        if (feetCrossed || inShaft) {
+          const t = feetCrossed ? Math.max(0, Math.min(1, a_feet / (a_feet - b_feet))) : 0.5;
+          const cx = feetCrossed ? prevFeet.x + (currFeet.x - prevFeet.x) * t : pl.pos.x;
+          const cy = P.c.y;
+          const cz = feetCrossed ? prevFeet.z + (currFeet.z - prevFeet.z) * t : pl.pos.z;
+
+          const du = Math.abs((cx - P.c.x) * P.r.x + (cy - P.c.y) * P.r.y + (cz - P.c.z) * P.r.z);
+          const dv = Math.abs((cx - P.c.x) * P.u.x + (cy - P.c.y) * P.u.y + (cz - P.c.z) * P.u.z);
+          if (du <= PORT.hw && dv <= PORT.hh) {
+            doTeleportFromFeet(pl, R, P, Q, cx, cy, cz, dt, tpState, events);
+            return;
+          }
+        }
+      }
     }
+  }
+
+  function doTeleportFromFeet(pl, R, P, Q, cx, cy, cz, dt, tpState, events) {
+    pl.vel.applyMatrix4(R);
+
+    const offsetOnP = new V3(cx - P.c.x, cy - P.c.y, cz - P.c.z);
+    const relExit = offsetOnP.clone().applyMatrix4(R);
+
+    if (Math.abs(Q.n.y) < 0.4) {
+      // Exit portal is on a vertical wall: place player standing in front of Q at floor level
+      const bottomY = Q.c.y - PORT.hh;
+      pl.pos.set(Q.c.x, bottomY + 0.05, Q.c.z)
+        .addScaledVector(Q.r, relExit.dot(Q.r))
+        .addScaledVector(Q.n, CFG.R + 0.25);
+
+      // Ensure minimal outward fling speed so player clears the exit portal
+      const outSpeed = pl.vel.dot(Q.n);
+      if (outSpeed < 6.0) {
+        pl.vel.addScaledVector(Q.n, 6.0 - outSpeed);
+      }
+    } else {
+      // Exit portal is on floor/ceiling: place player exiting along Q.n
+      pl.pos.copy(Q.c).add(relExit).addScaledVector(Q.n, 0.2);
+      const outSpeed = pl.vel.dot(Q.n);
+      if (outSpeed < 6.0) {
+        pl.vel.addScaledVector(Q.n, 6.0 - outSpeed);
+      }
+    }
+
+    const baseQ = new TH.Quaternion().setFromEuler(new TH.Euler(pl.pitch, pl.yaw, 0, 'YXZ'));
+    if (pl.viewOffset) baseQ.multiply(pl.viewOffset);
+
+    const R_quat = new TH.Quaternion().setFromRotationMatrix(R);
+    const Q_new = R_quat.multiply(baseQ);
+
+    const playerUp = new V3(0, 1, 0).applyMatrix4(R);
+    if (playerUp.y > 0.99) {
+      const e = new TH.Euler().setFromQuaternion(Q_new, 'YXZ');
+      pl.pitch = e.x;
+      pl.yaw = e.y;
+      pl.viewOffset = null;
+    } else {
+      const fwd = new V3(0, 0, -1).applyQuaternion(Q_new);
+      pl.yaw = Math.atan2(-fwd.x, -fwd.z);
+      pl.pitch = 0;
+      const targetBaseQ = new TH.Quaternion().setFromEuler(new TH.Euler(pl.pitch, pl.yaw, 0, 'YXZ'));
+      pl.viewOffset = targetBaseQ.invert().multiply(Q_new);
+    }
+
+    tpState.tpGracePortal = Q;
+    tpState.tpGraceT = tpState.nowT;
+    if (events && events.onTeleport) events.onTeleport(pl, R, P, Q);
   }
 
   function doTeleport(pl, R, P, Q, t, dt, tpState, events) {
@@ -376,13 +454,13 @@ export function initPhysics(TH, CFG, PORT) {
     const camPos = new V3().addVectors(pl.pos, eyeOffset);
     const relCam = new V3().subVectors(camPos, P.c).applyMatrix4(R);
     pl.pos.copy(Q.c).add(relCam).sub(eyeOffset);
-    
+
     const baseQ = new TH.Quaternion().setFromEuler(new TH.Euler(pl.pitch, pl.yaw, 0, 'YXZ'));
     if (pl.viewOffset) baseQ.multiply(pl.viewOffset);
-    
+
     const R_quat = new TH.Quaternion().setFromRotationMatrix(R);
     const Q_new = R_quat.multiply(baseQ);
-    
+
     const playerUp = new V3(0, 1, 0).applyMatrix4(R);
     if (playerUp.y > 0.99) {
        const e = new TH.Euler().setFromQuaternion(Q_new, 'YXZ');
@@ -399,7 +477,7 @@ export function initPhysics(TH, CFG, PORT) {
 
     tpState.tpGracePortal = Q;
     tpState.tpGraceT = tpState.nowT;
-    if (events && events.onTeleport) events.onTeleport();
+    if (events && events.onTeleport) events.onTeleport(pl, R, P, Q);
   }
 
   function physStep(pl, keys, autohop, dt, obbs, portals, grabCubes, grabbedCube, tpState, events, otherPlayers) {
@@ -484,16 +562,17 @@ export function initPhysics(TH, CFG, PORT) {
     if (pl.vel.y < -60) pl.vel.y = -60;
 
     const curH = playerHeight(pl.crouchT);
+    const prevPos = pl.pos.clone();
     const prevCamPos = new V3(pl.pos.x, pl.pos.y + curH - 0.12, pl.pos.z);
     pl.pos.addScaledVector(pl.vel, dt);
     collide(pl, obbs, portals, grabCubes, grabbedCube, events);
     if (otherPlayers) {
       collidePlayerWithPlayers(pl, otherPlayers);
     }
-    
-    teleportCheck(pl, prevCamPos, dt, portals[0], portals[1], tpState.R_AB[0], tpState.R_BA[0], tpState, events);
+
+    teleportCheck(pl, prevPos, prevCamPos, dt, portals[0], portals[1], tpState.R_AB[0], tpState.R_BA[0], tpState, events);
     if (portals.length > 2) {
-      teleportCheck(pl, prevCamPos, dt, portals[2], portals[3], tpState.R_AB[1], tpState.R_BA[1], tpState, events);
+      teleportCheck(pl, prevPos, prevCamPos, dt, portals[2], portals[3], tpState.R_AB[1], tpState.R_BA[1], tpState, events);
     }
 
 

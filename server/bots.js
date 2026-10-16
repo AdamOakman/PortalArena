@@ -15,18 +15,18 @@
 
 import * as TH from 'three';
 import { CFG, TICK_RATE } from '../shared/constants.js';
-import { mapData, obbs, gameState } from './gamestate.js';
+import { mapData, obbs, gameState, isPortalOnDestroyedWall } from './gamestate.js';
 
 // ------------------------------------------------------------------ constants
 
 const DT = 1 / TICK_RATE;
 const THINK_INTERVAL_MS = 350;               // how often to re-pick a goal
-const PORTAL_COOLDOWN_S = 7.0;               // minimum seconds between portal shots
-const PORTAL_CHANCE     = 0.35;              // probability to fire portals on a think tick
+const PORTAL_COOLDOWN_S = 4.5;               // minimum seconds between portal shots
+const PORTAL_CHANCE     = 0.55;              // probability to fire portals on a think tick
 const JUMP_COOLDOWN_S   = 0.35;              // minimum gap between jumps
 const ROCKET_COOLDOWN_S = 8.0;               // cooldown between bot rocket shots
 const INSTAGIB_COOLDOWN_S = 6.0;             // cooldown between bot instagib shots
-const INSTAGIB_HIT_CHANCE = 0.05;            // 5% hit chance for bot instagib shots
+const INSTAGIB_HIT_CHANCE = 0.20;            // 20% hit chance for bot instagib shots
 
 // ------------------------------------------------------------------ per-bot state
 
@@ -57,6 +57,10 @@ function ensureState(pid) {
       orangeAimT: 0,
       unstuckUntilT: 0,
       strafeDir: null,
+      instagibTargetPid: null,
+      instagibAimStartT: 0,
+      lastUnstuckT: 0,
+      waypoints: [],
     });
   }
   return botState.get(pid);
@@ -64,16 +68,139 @@ function ensureState(pid) {
 
 // ------------------------------------------------------------------ helpers
 
-function pickBotTarget() {
-  const spawns = mapData.spawns;
-  const elevated = (mapData.slabs || []).filter(s => s.kind === 'plat' && s.c[1] > 0.5);
-  // Prefer elevated platforms 60% of the time so bots actively explore high vantage points
-  if (elevated.length > 0 && Math.random() < 0.6) {
-    const plat = elevated[Math.floor(Math.random() * elevated.length)];
-    return new TH.Vector3(plat.c[0], plat.c[1] + plat.s[1] * 0.5, plat.c[2]);
+function getRampEndpoints(rm) {
+  // dir: 0 = +x, 1 = +z, 2 = -x, 3 = -z
+  let fwdX = 1, fwdZ = 0;
+  if (rm.dir === 1) { fwdX = 0; fwdZ = 1; }
+  else if (rm.dir === 2) { fwdX = -1; fwdZ = 0; }
+  else if (rm.dir === 3) { fwdX = 0; fwdZ = -1; }
+
+  const hl = rm.len * 0.5;
+  const lowX = rm.cx - fwdX * hl;
+  const lowZ = rm.cz - fwdZ * hl;
+  const highX = rm.cx + fwdX * hl;
+  const highZ = rm.cz + fwdZ * hl;
+
+  return {
+    low: new TH.Vector3(lowX, rm.y0, lowZ),
+    high: new TH.Vector3(highX, rm.y0 + rm.rise, highZ),
+    fwd: new TH.Vector3(fwdX, 0, fwdZ)
+  };
+}
+
+export function getRampUnderState(pos) {
+  const ramps = mapData.ramps || [];
+  for (const rm of ramps) {
+    let fwdX = 1, fwdZ = 0, rightX = 0, rightZ = 1;
+    if (rm.dir === 1) { fwdX = 0; fwdZ = 1; rightX = -1; rightZ = 0; }
+    else if (rm.dir === 2) { fwdX = -1; fwdZ = 0; rightX = 0; rightZ = -1; }
+    else if (rm.dir === 3) { fwdX = 0; fwdZ = -1; rightX = 1; rightZ = 0; }
+
+    const dx = pos.x - rm.cx;
+    const dz = pos.z - rm.cz;
+    const s = dx * fwdX + dz * fwdZ;
+    const w = dx * rightX + dz * rightZ;
+
+    const hl = rm.len * 0.5;
+    const hw = rm.width * 0.5;
+
+    if (s >= -hl - 0.2 && s <= hl + 0.2 && Math.abs(w) <= hw + 0.2) {
+      const u = Math.max(0, Math.min(1, (s + hl) / rm.len));
+      const u2 = u * u, u3 = u2 * u;
+      const smooth = u3 * (u * (u * 6 - 15) + 10);
+      const yTop = rm.y0 + rm.rise * smooth;
+      const yBot = yTop - (rm.T || 0.6);
+
+      if (pos.y < yBot - 0.05) {
+        return { rm, s, w, hl, hw, fwdX, fwdZ, rightX, rightZ, yTop, yBot, clearance: yBot - pos.y };
+      }
+    }
   }
-  const sp = spawns[Math.floor(Math.random() * spawns.length)];
-  return new TH.Vector3(sp.x, sp.y, sp.z);
+  return null;
+}
+
+function pickBotTargetAndRoute(curPos, portals) {
+  const pos = curPos || new TH.Vector3();
+  const underAtPick = getRampUnderState(pos);
+  if (underAtPick && underAtPick.clearance < 2.5) {
+    const toCenter = new TH.Vector3(-pos.x, 0, -pos.z).normalize();
+    const escTarget = pos.clone().addScaledVector(toCenter, 8.0);
+    escTarget.y = 0;
+    return {
+      target: escTarget,
+      waypoints: []
+    };
+  }
+
+  // 25% chance to intentionally walk through an active portal pair if placed
+  if (portals && Math.random() < 0.25) {
+    const pairs = [];
+    if (portals[0] && portals[1] && portals[0].placed && portals[1].placed) pairs.push([portals[0], portals[1]]);
+    if (portals[2] && portals[3] && portals[2].placed && portals[3].placed) pairs.push([portals[2], portals[3]]);
+    if (pairs.length > 0) {
+      const pair = pairs[Math.floor(Math.random() * pairs.length)];
+      const entry = Math.random() < 0.5 ? pair[0] : pair[1];
+      const exit = (entry === pair[0]) ? pair[1] : pair[0];
+      const portalTarget = entry.c.clone().addScaledVector(entry.n, -0.6);
+      const exitTarget = exit.c.clone().addScaledVector(exit.n, 2.0);
+      return {
+        target: portalTarget,
+        waypoints: [exitTarget]
+      };
+    }
+  }
+
+  const ramps = mapData.ramps || [];
+  // 35% chance to try to reach the top of a platform via a ramp
+  if (ramps.length > 0 && Math.random() < 0.35) {
+    const rm = ramps[Math.floor(Math.random() * ramps.length)];
+    const ep = getRampEndpoints(rm);
+
+    // Find elevated platform near the top of this ramp
+    const elevated = (mapData.slabs || []).filter(s => s.kind === 'plat' && Math.hypot(s.c[0] - ep.high.x, s.c[2] - ep.high.z) < 14 && s.c[1] >= ep.high.y - 1.5);
+    let finalTarget = ep.high.clone();
+    if (elevated.length > 0) {
+      const plat = elevated[Math.floor(Math.random() * elevated.length)];
+      finalTarget = new TH.Vector3(plat.c[0], plat.c[1] + plat.s[1] * 0.5, plat.c[2]);
+    }
+
+    if (pos.y < ep.high.y - 1.0) {
+      // Approach point 2.0m before the low end, aligned with ramp centerline
+      const approachLow = ep.low.clone().addScaledVector(ep.fwd, -2.0);
+      // Entrance point 1.5m onto the ramp along centerline to ensure clean ramp entry
+      const startRamp = ep.low.clone().addScaledVector(ep.fwd, 1.5);
+      const midRamp = new TH.Vector3(rm.cx, rm.y0 + rm.rise * 0.5, rm.cz);
+      return {
+        target: approachLow,
+        waypoints: [startRamp, midRamp, ep.high.clone(), finalTarget]
+      };
+    } else {
+      return {
+        target: finalTarget,
+        waypoints: []
+      };
+    }
+  }
+
+  const spawns = (mapData.spawns || []).filter(sp => {
+    const u = getRampUnderState(new TH.Vector3(sp.x, sp.y, sp.z));
+    return !u || u.clearance >= 2.2;
+  });
+  const validSpawns = spawns.length > 0 ? spawns : mapData.spawns;
+
+  const elevated = (mapData.slabs || []).filter(s => s.kind === 'plat' && s.c[1] > 0.5);
+  if (elevated.length > 0 && Math.random() < 0.25) {
+    const plat = elevated[Math.floor(Math.random() * elevated.length)];
+    return {
+      target: new TH.Vector3(plat.c[0], plat.c[1] + plat.s[1] * 0.5, plat.c[2]),
+      waypoints: []
+    };
+  }
+  const sp = validSpawns[Math.floor(Math.random() * validSpawns.length)];
+  return {
+    target: new TH.Vector3(sp.x, sp.y, sp.z),
+    waypoints: []
+  };
 }
 
 // Simple raycast downward to see if there's ground nearby ahead of the bot
@@ -111,12 +238,26 @@ function hasGroundAhead(pos, yaw, obbs_) {
 
 // ------------------------------------------------------------------ wall raycast
 
+function isLavaBlocked(c, PORT_) {
+  if (!mapData.lava) return false;
+  const hw = PORT_ ? PORT_.hw : 1.44;
+  const hh = PORT_ ? PORT_.hh : 2.0;
+  for (const L of mapData.lava) {
+    const dx = c.x - L.x;
+    const dz = c.z - L.z;
+    const minSafeDist = L.r + hw + 0.3;
+    if (dx * dx + dz * dz < minSafeDist * minSafeDist && c.y <= (L.y || 0.1) + hh + 0.3) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function raycastWall(origin, dir, maxDist, obbs_) {
   let bestT = maxDist;
   let best = null;
 
   for (const obb of obbs_) {
-    if (obb.kind === 'lava') continue;
     if (origin.distanceTo(obb.c) - obb.rad > maxDist) continue;
 
     const ox = origin.x - obb.c.x, oy = origin.y - obb.c.y, oz = origin.z - obb.c.z;
@@ -195,7 +336,8 @@ function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, curren
 
   const hit = raycastWall(eyePos, dir, 35, obbs_);
   if (!hit) return null;
-  if (hit.obb.destroyed || hit.obb.noPortal || hit.obb.kind === 'ramp') return null;
+  if (hit.obb.destroyed || hit.obb.noPortal || hit.obb.kind === 'ramp' || hit.obb.kind === 'lava') return null;
+  if (gameState.destroyedWallObbs && gameState.destroyedWallObbs.some(dob => dob.id === hit.obb.id)) return null;
 
   const { point, normal, obb, hitAxis, hitSign } = hit;
 
@@ -220,11 +362,33 @@ function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, curren
   let p2 = dvec.dot(obb.ax[ax2]);
   p2 = Math.max(-limit2, Math.min(limit2, p2));
 
+  // If wall is vertical, adjust portal height so portal base sits near floor level (pos.y + 0.05)
+  if (Math.abs(normal.y) < 0.2) {
+    const targetCenterY = pos.y + PORT_.hh + 0.05;
+    if (Math.abs(obb.ax[ax1].y) > 0.8) {
+      const desiredOffset = (targetCenterY - obb.c.y) * Math.sign(obb.ax[ax1].y);
+      p1 = Math.max(-limit1, Math.min(limit1, desiredOffset));
+    } else if (Math.abs(obb.ax[ax2].y) > 0.8) {
+      const desiredOffset = (targetCenterY - obb.c.y) * Math.sign(obb.ax[ax2].y);
+      p2 = Math.max(-limit2, Math.min(limit2, desiredOffset));
+    }
+  }
+
   const adjustedC = obb.c.clone()
     .addScaledVector(obb.ax[hitAxis], obb.he[hitAxis] * -hitSign)
     .addScaledVector(obb.ax[ax1], p1)
     .addScaledVector(obb.ax[ax2], p2)
     .addScaledVector(normal, 0.02);
+
+  // Reject placement in or under lava pools
+  if (isLavaBlocked(adjustedC, PORT_)) {
+    return null;
+  }
+
+  // Reject placement on any destroyed wall or fragment
+  if (isPortalOnDestroyedWall(adjustedC, normal, r, u, PORT_)) {
+    return null;
+  }
 
   // Reject overlapping placement with any existing placed portal
   if (checkPortalOverlap(adjustedC, normal, r, u, portals, currentPi, PORT_)) {
@@ -250,6 +414,7 @@ function findDestructibleWall(eyePos, fwdDir, maxDist = 20) {
   let bestScore = -1e9;
   for (const obb of obbs) {
     if (obb.kind !== 'wall' || obb.boundary || obb.destroyed) continue;
+    if (gameState.destroyedWallObbs && gameState.destroyedWallObbs.some(dob => dob.id === obb.id)) continue;
     const uIdx = obb.he[0] >= obb.he[2] ? 0 : 2;
     const tIdx = uIdx === 0 ? 2 : 0;
     if (obb.he[tIdx] > 2.5) continue; // must be thin destructible wall
@@ -359,35 +524,67 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
       onFireRocket(eyePos, destWall.dir.clone().multiplyScalar(70), destWall);
       st.weaponHoldUntilT = nowT + 1.5;
     }
-  } else if (pl.activeWeapon === 3 && nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && onFireInstagib) {
-    const opp = findOpponent(pid, eyePos, 38.0);
+  } else if (pl.activeWeapon === 3) {
+    const opp = findOpponent(pid, eyePos, 40.0);
     if (opp) {
-      st.lastInstagibT = nowT;
-      pl.yaw = Math.atan2(-opp.dir.x, -opp.dir.z);
-      pl.pitch = Math.asin(Math.max(-0.99, Math.min(0.99, opp.dir.y)));
-
-      // 5% CHANCE TO HIT OPPONENT
-      const willHit = Math.random() < INSTAGIB_HIT_CHANCE;
-      if (willHit) {
-        const pts = [eyePos.clone(), opp.pos.clone()];
-        onFireInstagib(pts, opp.id, null);
-      } else {
-        // 95% intentional near-miss that scorches surrounding environment
-        const right = new TH.Vector3(-Math.cos(pl.yaw), 0, Math.sin(pl.yaw));
-        const up = new TH.Vector3(0, 1, 0);
-        const randAng = Math.random() * Math.PI * 2;
-        const offsetMag = 0.08 + Math.random() * 0.12;
-        const missDir = opp.dir.clone()
-          .addScaledVector(right, Math.cos(randAng) * offsetMag)
-          .addScaledVector(up, Math.sin(randAng) * offsetMag)
-          .normalize();
-        const hit = raycastWall(eyePos, missDir, 80, obbs);
-        const endPt = hit ? hit.point : eyePos.clone().addScaledVector(missDir, 50);
-        const scorch = hit ? { pos: endPt.toArray(), n: hit.normal.toArray() } : null;
-        const pts = [eyePos.clone(), endPt];
-        onFireInstagib(pts, null, scorch);
+      if (st.instagibTargetPid !== opp.id) {
+        st.instagibTargetPid = opp.id;
+        st.instagibAimStartT = nowT;
       }
-      st.weaponHoldUntilT = nowT + 1.5;
+
+      // Smooth aim convergence: yaw and pitch smoothly track opponent direction
+      const targetYaw = Math.atan2(-opp.dir.x, -opp.dir.z);
+      const targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, opp.dir.y)));
+
+      let oppDyaw = targetYaw - pl.yaw;
+      while (oppDyaw > Math.PI) oppDyaw -= Math.PI * 2;
+      while (oppDyaw < -Math.PI) oppDyaw += Math.PI * 2;
+
+      // Allow shooting only when bot has smoothly aimed onto the target (aiming time > 0.28s and close angle)
+      const aimAligned = Math.abs(oppDyaw) < 0.12 && Math.abs(targetPitch - pl.pitch) < 0.14;
+      const aimDwellOk = (nowT - st.instagibAimStartT) > 0.28;
+
+      if (nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && onFireInstagib && aimAligned && aimDwellOk) {
+        // Re-verify line of sight right at the moment of firing
+        const losHit = raycastWall(eyePos, opp.dir, opp.dist, obbs);
+        const hasClearLOS = !losHit || losHit.distance >= opp.dist - 0.5;
+
+        if (hasClearLOS) {
+          st.lastInstagibT = nowT;
+
+          // EXACT 5% CHANCE TO HIT OPPONENT
+          const willHit = Math.random() < INSTAGIB_HIT_CHANCE;
+          if (willHit) {
+            const pts = [eyePos.clone(), opp.pos.clone()];
+            onFireInstagib(pts, opp.id, null);
+          } else {
+            // 95% intentional near-miss that scorches surrounding environment
+            const right = new TH.Vector3(-Math.cos(pl.yaw), 0, Math.sin(pl.yaw));
+            const up = new TH.Vector3(0, 1, 0);
+            const randAng = Math.random() * Math.PI * 2;
+            const offsetMag = 0.08 + Math.random() * 0.12;
+            const missDir = opp.dir.clone()
+              .addScaledVector(right, Math.cos(randAng) * offsetMag)
+              .addScaledVector(up, Math.sin(randAng) * offsetMag)
+              .normalize();
+            const hit = raycastWall(eyePos, missDir, 80, obbs);
+            const endPt = hit ? hit.point : eyePos.clone().addScaledVector(missDir, 50);
+            const scorch = hit ? { pos: endPt.toArray(), n: hit.normal.toArray() } : null;
+            const pts = [eyePos.clone(), endPt];
+            onFireInstagib(pts, null, scorch);
+          }
+          st.weaponHoldUntilT = nowT + 1.2;
+        }
+      }
+    } else {
+      st.instagibTargetPid = null;
+    }
+  }
+
+  // ---- advance waypoint along route
+  if (st.waypoints && st.waypoints.length > 0) {
+    if (pl.pos.distanceTo(st.targetPos) < 2.2) {
+      st.targetPos = st.waypoints.shift();
     }
   }
 
@@ -396,11 +593,17 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     st.lastThinkT = nowT;
 
     const needNewTarget = !st.targetPos
-      || pl.pos.distanceTo(st.targetPos) < 1.5
+      || (pl.pos.distanceTo(st.targetPos) < 1.5 && (!st.waypoints || st.waypoints.length === 0))
       || st.stuckT > 1.8;
 
     if (needNewTarget) {
-      st.targetPos = pickBotTarget();
+      if (st.waypoints && st.waypoints.length > 0) {
+        st.targetPos = st.waypoints.shift();
+      } else {
+        const route = pickBotTargetAndRoute(pl.pos, portals);
+        st.targetPos = route.target;
+        st.waypoints = route.waypoints;
+      }
       st.stuckT = 0;
       st.avoidUntilT = 0;
       st.unstuckUntilT = 0;
@@ -452,13 +655,25 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   let canStepOver = false;
 
   if (closestHit) {
-    const maxY = closestHit.obb.c.y
-      + Math.abs(closestHit.obb.ax[0].y * closestHit.obb.he[0])
-      + Math.abs(closestHit.obb.ax[1].y * closestHit.obb.he[1])
-      + Math.abs(closestHit.obb.ax[2].y * closestHit.obb.he[2]);
-    const stepHeight = maxY - pl.pos.y;
-    isTallWall = stepHeight > 1.35;
-    canStepOver = stepHeight > 0.35 && stepHeight <= 1.35;
+    if (closestHit.obb.kind === 'ramp') {
+      const contactHeight = closestHit.point.y - pl.pos.y;
+      if (contactHeight < 0.85 || (closestHit.normal.y > 0.35 && contactHeight < 1.2)) {
+        // Walkable ramp slope ahead - do not treat as wall!
+        isTallWall = false;
+        canStepOver = false;
+        closestHit = null;
+      } else if (contactHeight > 1.35) {
+        isTallWall = true;
+      }
+    } else {
+      const maxY = closestHit.obb.c.y
+        + Math.abs(closestHit.obb.ax[0].y * closestHit.obb.he[0])
+        + Math.abs(closestHit.obb.ax[1].y * closestHit.obb.he[1])
+        + Math.abs(closestHit.obb.ax[2].y * closestHit.obb.he[2]);
+      const stepHeight = maxY - pl.pos.y;
+      isTallWall = stepHeight > 1.35;
+      canStepOver = stepHeight > 0.35 && stepHeight <= 1.35;
+    }
 
     if (isTallWall) {
       const toTarget = new TH.Vector3(dx, 0, dz).normalize();
@@ -478,7 +693,16 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
         const lH = raycastWall(lTest, testDir, 1.6, obbs);
         const rH = raycastWall(rTest, testDir, 1.6, obbs);
 
-        if (!chH && !lH && !rH && hasGroundAhead(pl.pos, testYaw, obbs)) {
+        const isRampWalkable = (h) => h && h.obb.kind === 'ramp' && ((h.point.y - pl.pos.y < 0.85) || (h.normal.y > 0.35));
+        const chBlocked = chH && !isRampWalkable(chH);
+        const lBlocked = lH && !isRampWalkable(lH);
+        const rBlocked = rH && !isRampWalkable(rH);
+
+        const testNextPos = pl.pos.clone().addScaledVector(testDir, 1.6);
+        const testUnder = getRampUnderState(testNextPos);
+        const underBlocked = testUnder && testUnder.clearance < 2.2;
+
+        if (!chBlocked && !lBlocked && !rBlocked && !underBlocked && hasGroundAhead(pl.pos, testYaw, obbs)) {
           const dot = testDir.dot(toTarget);
           const score = dot - Math.abs(ang) * 0.15;
           if (score > bestScore) {
@@ -491,7 +715,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
       if (bestAngleYaw !== null) {
         st.avoidYaw = bestAngleYaw;
         st.avoidUntilT = nowT + 0.65;
-      } else if (closestHit.normal) {
+      } else if (closestHit && closestHit.normal) {
         const nx = closestHit.normal.x, nz = closestHit.normal.z;
         const nLen = Math.hypot(nx, nz);
         if (nLen > 0.05) {
@@ -505,8 +729,30 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     }
   }
 
-  // Apply wall avoidance steering or orange portal aim
-  if (nowT < st.avoidUntilT && st.portalPhase !== 'aim_orange') {
+  // Priority steering: instagib tracking > wall avoidance > orange portal aim > navigation
+  let activeOpp = null;
+  if (pl.activeWeapon === 3 && st.instagibTargetPid && gameState.players[st.instagibTargetPid] && !gameState.players[st.instagibTargetPid].isDead) {
+    const oppPl = gameState.players[st.instagibTargetPid];
+    const oppHead = oppPl.pos.clone();
+    oppHead.y += CFG.H * 0.6;
+    const toOpp = oppHead.sub(eyePos);
+    activeOpp = { dir: toOpp.clone().normalize(), dist: toOpp.length() };
+  }
+
+  const underNow = getRampUnderState(pl.pos);
+
+  if (activeOpp) {
+    desiredYaw = Math.atan2(-activeOpp.dir.x, -activeOpp.dir.z);
+  } else if (underNow && underNow.clearance < 2.5) {
+    const toCenter = new TH.Vector3(-pl.pos.x, 0, -pl.pos.z).normalize();
+    const escX = underNow.fwdX * 0.6 + toCenter.x * 0.8;
+    const escZ = underNow.fwdZ * 0.6 + toCenter.z * 0.8;
+    desiredYaw = Math.atan2(-escX, -escZ);
+    st.avoidYaw = desiredYaw;
+    st.avoidUntilT = nowT + 0.6;
+    isTallWall = false;
+    canStepOver = false;
+  } else if (nowT < st.avoidUntilT && st.portalPhase !== 'aim_orange') {
     desiredYaw = st.avoidYaw;
   } else if (st.portalPhase === 'aim_orange') {
     desiredYaw = st.aimOrangeYaw;
@@ -517,22 +763,23 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   while (dyaw > Math.PI) dyaw -= Math.PI * 2;
   while (dyaw < -Math.PI) dyaw += Math.PI * 2;
 
-  const maxTurn = 4.8 * DT;
+  const maxTurn = (activeOpp ? 4.2 : 4.8) * DT;
   if (Math.abs(dyaw) > maxTurn) {
     pl.yaw += Math.sign(dyaw) * maxTurn;
   } else {
     pl.yaw += dyaw;
   }
   while (pl.yaw > Math.PI) pl.yaw -= Math.PI * 2;
-  while (pl.yaw < -Math.PI) pl.yaw += Math.PI * 2;
+  while (pl.yaw < -Math.PI) pl.yaw -= Math.PI * 2;
 
-  // Smooth pitch toward target (smooth camera motion preserved during rocket jump)
-  const heightDiff = st.targetPos.y - pl.pos.y;
-  let desiredPitch = Math.max(-0.4, Math.min(0.4, heightDiff * 0.08));
+  // Smooth pitch: default to horizontal level gaze (pitch 0) rather than looking up at platforms
+  const targetPitch = activeOpp
+    ? Math.asin(Math.max(-0.99, Math.min(0.99, activeOpp.dir.y)))
+    : Math.max(-0.25, Math.min(0.25, ((st.targetPos.y - pl.pos.y) - 1.5) * 0.04));
 
   if (st.rocketJumpPhase === 'aim_down') {
-    desiredPitch = -1.35;
-    pl.pitch += (desiredPitch - pl.pitch) * Math.min(1, 14.0 * DT);
+    const rjPitch = -1.35;
+    pl.pitch += (rjPitch - pl.pitch) * Math.min(1, 14.0 * DT);
 
     if (pl.pitch <= -1.15 || nowT - st.rocketJumpT > 0.22) {
       pl.jumpBuf = nowT;
@@ -548,12 +795,12 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
       st.rocketJumpT = nowT;
     }
   } else if (st.rocketJumpPhase === 'recover') {
-    pl.pitch += (desiredPitch - pl.pitch) * Math.min(1, 8.0 * DT);
+    pl.pitch += (targetPitch - pl.pitch) * Math.min(1, 8.0 * DT);
     if (nowT - st.rocketJumpT > 0.4) {
       st.rocketJumpPhase = 'none';
     }
   } else {
-    pl.pitch += (desiredPitch - pl.pitch) * Math.min(1, 8.0 * DT);
+    pl.pitch += (targetPitch - pl.pitch) * Math.min(1, (activeOpp ? 4.5 : 6.0) * DT);
   }
 
   // ---- stuck tracking & active unstuck
@@ -561,17 +808,18 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     const dMoved = pl.pos.distanceTo(st.lastTickPos);
     if (dist > 0.8 && dMoved < 0.02) {
       st.stuckT += DT;
-    } else if (dMoved > 0.06) {
-      st.stuckT = Math.max(0, st.stuckT - DT * 2.5);
+    } else if (dMoved > 0.05) {
+      st.stuckT = Math.max(0, st.stuckT - DT * 3.0);
     }
   }
   st.lastTickPos = pl.pos.clone();
 
-  // If blocked for > 0.35s:
-  if (st.stuckT > 0.35) {
-    if (canStepOver) {
+  // If blocked for > 0.3s:
+  if (st.stuckT > 0.3) {
+    if (!underNow && (canStepOver || (closestHit && closestHit.distance < 1.2 && pl.grounded))) {
       pl.jumpBuf = nowT;
-    } else if (isTallWall) {
+    }
+    if (isTallWall) {
       const destWall = findDestructibleWall(eyePos, curFwd, 6.0);
       if (destWall && nowT - st.lastRocketT > 5.0 && onFireRocket) {
         pl.activeWeapon = 2;
@@ -579,21 +827,28 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
         st.weaponHoldUntilT = nowT + 1.5;
         onFireRocket(eyePos, destWall.dir.clone().multiplyScalar(70), destWall);
       }
-      if (nowT > st.unstuckUntilT) {
-        st.unstuckUntilT = nowT + 0.5;
+      if (nowT > st.unstuckUntilT && nowT - st.lastUnstuckT > 0.8) {
+        st.unstuckUntilT = nowT + 0.45;
+        st.lastUnstuckT = nowT;
         st.strafeDir = Math.random() < 0.5 ? 'KeyA' : 'KeyD';
       }
     }
   }
 
   let keys = {
-    KeyW: st.portalPhase !== 'aim_orange' && Math.abs(dyaw) < 1.1 && dist > 0.6,
+    KeyW: st.portalPhase !== 'aim_orange' && Math.abs(dyaw) < 1.1 && (dist > 0.6 || st.portalPhase === 'walk_thru' || underNow != null),
     KeyA: false,
     KeyS: false,
     KeyD: false,
     Space: false,
     ShiftLeft: false
   };
+
+  if (underNow && underNow.clearance < 2.2) {
+    keys.Space = false;
+    keys.KeyW = true;
+    keys.KeyS = false;
+  }
 
   if (st.rocketJumpPhase === 'aim_down' || st.rocketJumpPhase === 'recover') {
     keys.KeyW = true;
@@ -609,11 +864,19 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     if (st.strafeDir) keys[st.strafeDir] = true;
   }
 
-  // If stuck for over 1.2s: pick new target and reverse
-  if (st.stuckT > 1.2) {
-    st.targetPos = pickBotTarget();
-    st.avoidYaw = pl.yaw + Math.PI;
-    st.avoidUntilT = nowT + 0.8;
+  // If stuck for over 1.0s: pick new target, turn around, and jump
+  if (st.stuckT > 1.0) {
+    const route = pickBotTargetAndRoute(pl.pos, portals);
+    st.targetPos = route.target;
+    st.waypoints = route.waypoints;
+    if (underNow) {
+      const toCenter = new TH.Vector3(-pl.pos.x, 0, -pl.pos.z).normalize();
+      st.avoidYaw = Math.atan2(-toCenter.x, -toCenter.z);
+    } else {
+      st.avoidYaw = pl.yaw + Math.PI * (0.8 + Math.random() * 0.4);
+      pl.jumpBuf = nowT;
+    }
+    st.avoidUntilT = nowT + 0.9;
     st.stuckT = 0;
     st.unstuckUntilT = 0;
   }
@@ -623,7 +886,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
 
   if (st.portalPhase === 'aim_blue') {
     const hitRes = findPortalSurface(pl.pos, pl.yaw, obbs, portals, PORT_, botPortalBase);
-    if (hitRes) {
+    if (hitRes && !isPortalOnDestroyedWall(hitRes.surface.c, hitRes.surface.n, hitRes.surface.r, hitRes.surface.u, PORT_)) {
       const surface = hitRes.surface;
       pl.pitch = hitRes.pitch;
       const P = portals[botPortalBase];
@@ -650,7 +913,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     if (yawDiff < 0.4 || (nowT - st.orangeAimT > 0.8)) {
       const pIdx = botPortalBase + 1;
       const hitRes = findPortalSurface(pl.pos, pl.yaw, obbs, portals, PORT_, pIdx);
-      if (hitRes) {
+      if (hitRes && !isPortalOnDestroyedWall(hitRes.surface.c, hitRes.surface.n, hitRes.surface.r, hitRes.surface.u, PORT_)) {
         const surface = hitRes.surface;
         pl.pitch = hitRes.pitch;
         const P = portals[pIdx];
@@ -675,8 +938,9 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     const orangePortal = portals[botPortalBase + 1];
 
     if (bluePortal.placed) {
-      st.targetPos = bluePortal.c.clone();
-      if (pl.pos.distanceTo(bluePortal.c) < 2.5 && bluePortal.c.y > pl.pos.y + 0.3) {
+      st.targetPos = bluePortal.c.clone().addScaledVector(bluePortal.n, -0.6);
+      const portalBottomY = bluePortal.c.y - PORT_.hh;
+      if (pl.pos.distanceTo(bluePortal.c) < 2.5 && portalBottomY > pl.pos.y + 0.35) {
         pl.jumpBuf = nowT;
       }
     }
@@ -687,13 +951,15 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
 
     if (passedThrough || reachedBlue || timedOut) {
       st.portalPhase = 'none';
-      st.targetPos = pickBotTarget();
+      const route = pickBotTargetAndRoute(pl.pos, portals);
+      st.targetPos = route.target;
+      st.waypoints = route.waypoints;
       st.lastPortalT = nowT;
     }
   }
 
   // ---- jump decision:
-  const jumpForLedge = heightDiff > 0.4 && heightDiff < 1.6 && dist < 3.5;
+  const jumpForLedge = heightDiffToTarget > 0.4 && heightDiffToTarget < 1.6 && dist < 3.5;
   const shouldJump = pl.grounded && !isTallWall && (
     canStepOver ||
     jumpForLedge ||
@@ -743,6 +1009,10 @@ export function resetBotState(pid) {
     st.avoidYaw = 0;
     st.unstuckUntilT = 0;
     st.strafeDir = null;
+    st.instagibTargetPid = null;
+    st.instagibAimStartT = 0;
+    st.lastUnstuckT = 0;
+    st.waypoints = [];
   }
   if (gameState.players[pid]) {
     gameState.players[pid].crouchT = 0;

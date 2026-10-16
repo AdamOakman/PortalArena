@@ -33,7 +33,7 @@ function mulberry32(a) {
  *   - 4 boundary vantages: long wall-hugging ramps up to mid + high
  *     platforms attached to the boundary walls (tops at ~9m)
  *   - 4 corner outposts (2 levels)
- *   - 12 rimmed lava pools (instant death, like the void)
+ *   - 4 rimmed lava pools (instant death, like the void)
  *   - cover: crates, low walls
  *   - 6 spawn points (4 corners + 2 edge)
  *   - decor: torches, banners, arches, obelisks, braziers, crosses, skulls
@@ -266,13 +266,11 @@ export function generateMap(seedStr) {
     add(x, rim / 2, z + r + 0.5, 2 * r + 2, rim, 1, WALL);
     add(x - r - 0.5, rim / 2, z, 1, rim, 2 * r + 1, WALL);
     add(x + r + 0.5, rim / 2, z, 1, rim, 2 * r + 1, WALL);
-    add(x, 0.02, z, 2 * r, 0.16, 2 * r, LAVA);                // surface at y=0.10
+    add(x, 0.02, z, 2 * r, 0.16, 2 * r, LAVA, 0, 0, false, true); // surface at y=0.10 (no portals on lava)
     lava.push({ x, z, r: r + 0.4, y: 0.1 });
     reserveCircle(x, z, r + 2);
   }
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) lavaPool(sx * 10, sz * 10, 2.5);
   for (const s of [-1, 1]) { lavaPool(s * 24, 0, 2.75); lavaPool(0, s * 24, 2.75); }
-  for (const [x, z] of [[42, 14], [-42, -14], [14, -42], [-14, 42]]) lavaPool(x + rr(-2, 2), z + rr(-2, 2), 3);
 
   // ------------------------------------------------------------- scattered cover
   const groundAnchors = [[-36, -36], [36, 36], [36, -36], [-36, 36]];

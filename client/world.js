@@ -28,6 +28,8 @@ export function initWorld(G) {
       G.worldGroup = null;
     }
     G.obbs = [];
+    G.destroyedWallObbs = [];
+    G.destroyedWalls = [];
     if (G.animObjects) {
       for (const a of G.animObjects) {
         // Pooled objects remain attached to the scene, non-pooled ephemeral objects are removed
@@ -219,7 +221,7 @@ export function initWorld(G) {
     });
   }
 
-  function destroyWall(obb, point, normal, broadcast = true) {
+  function destroyWall(obb, point, normal, broadcast = true, spawnDebris = true) {
     if (!obb || obb.kind !== 'wall') return;
     if (obb.boundary) return; // Boundary walls are indestructible by rockets
     // Long axis = the wider horizontal extent; the other is the wall's thickness.
@@ -246,14 +248,31 @@ export function initWorld(G) {
       });
     }
 
+    if (!G.destroyedWallObbs) G.destroyedWallObbs = [];
+    G.destroyedWallObbs.push({
+      id: obb.id,
+      c: obb.c.clone(),
+      ax: [obb.ax[0].clone(), obb.ax[1].clone(), obb.ax[2].clone()],
+      he: [obb.he[0], obb.he[1], obb.he[2]],
+      rad: obb.rad
+    });
+    obb.destroyed = true;
+    obb.noPortal = true;
+
     // Remove from physics
     const idx = G.obbs.indexOf(obb);
     if (idx > -1) G.obbs.splice(idx, 1);
 
     for (let i = 0; i < 4; i++) {
        const P = G.portals[i];
-       if (P.placed && P.c.distanceTo(obb.c) < obb.rad + 1) {
-          if (Math.abs(P.n.dot(obb.ax[tIdx])) > 0.99) G.cancelPortal(i);
+       if (P.placed && P.c.distanceTo(obb.c) < obb.rad + 2.0) {
+          const d = P.c.clone().sub(obb.c);
+          const u0 = Math.abs(d.dot(obb.ax[0]));
+          const u1 = Math.abs(d.dot(obb.ax[1]));
+          const u2 = Math.abs(d.dot(obb.ax[2]));
+          if (u0 <= obb.he[0] + 0.6 && u1 <= obb.he[1] + 0.6 && u2 <= obb.he[2] + 0.6) {
+             G.cancelPortal(i);
+          }
        }
     }
 
@@ -273,7 +292,7 @@ export function initWorld(G) {
     const endU = uC + R;
 
     if (startU > uMin + MIN_PIECE) pieces.push({ u: (uMin + startU)/2, w: startU - uMin, y: 0, h: yMax - yMin });
-    if (endU < uMax - MIN_PIECE) pieces.push({ u: (endU + uMax)/2, w: uMax - endU, y: 0, h: yMax - yMin });
+    if (endU < uMax - MIN_PIECE) pieces.push({ u: (endU + uMax)/2, w: endU - uMax, y: 0, h: yMax - yMin });
 
     const bandMinU = Math.max(uMin, startU);
     const bandMaxU = Math.min(uMax, endU);
@@ -296,11 +315,18 @@ export function initWorld(G) {
       addWallFragment(obb, uIdx, p.u, p.y, p.w, p.h, pIdx);
     }
 
+    if (!spawnDebris || (typeof document !== 'undefined' && document.hidden)) return;
+
+    // Cap total active debris to avoid performance drops on repeated explosions
+    const activeDebris = G.animObjects ? G.animObjects.filter(a => a.type === 'debris').length : 0;
+    if (activeDebris > 60) return;
+    const debrisCount = activeDebris > 30 ? 8 : 16;
+
     // Spawn physical debris chunks
     const mMat = G.getSlabMat('wall');
     const blastNormal = normal ? normal.clone() : new V3(0, 1, 0);
     const rr = (min, max) => min + Math.random() * (max - min);
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < debrisCount; i++) {
       const bs = rr(0.9, 2.2);
       const bGeo = new TH.BoxGeometry(bs, bs, bs);
       const bMesh = new TH.Group();
@@ -587,8 +613,64 @@ export function initWorld(G) {
     G.requestLock();
   }
 
+  function isPortalOnDestroyedWall(c, n, r, u) {
+    const hw = 0.6, hh = 1.2;
+
+    if (G.destroyedWallObbs) {
+      for (const dob of G.destroyedWallObbs) {
+        const d = c.clone().sub(dob.c);
+        const u0 = Math.abs(d.dot(dob.ax[0]));
+        const u1 = Math.abs(d.dot(dob.ax[1]));
+        const u2 = Math.abs(d.dot(dob.ax[2]));
+        const ext0 = r && u ? (hw * Math.abs(r.dot(dob.ax[0])) + hh * Math.abs(u.dot(dob.ax[0]))) : hw;
+        const ext1 = r && u ? (hw * Math.abs(r.dot(dob.ax[1])) + hh * Math.abs(u.dot(dob.ax[1]))) : hh;
+        const ext2 = r && u ? (hw * Math.abs(r.dot(dob.ax[2])) + hh * Math.abs(u.dot(dob.ax[2]))) : hw;
+        if (u0 <= dob.he[0] + ext0 + 0.2 &&
+            u1 <= dob.he[1] + ext1 + 0.2 &&
+            u2 <= dob.he[2] + ext2 + 0.2) {
+          return true;
+        }
+      }
+    }
+
+    if (G.obbs) {
+      for (const obb of G.obbs) {
+        if (obb.destroyed || obb.noPortal) {
+          const d = c.clone().sub(obb.c);
+          const u0 = Math.abs(d.dot(obb.ax[0]));
+          const u1 = Math.abs(d.dot(obb.ax[1]));
+          const u2 = Math.abs(d.dot(obb.ax[2]));
+          const ext0 = r && u ? (hw * Math.abs(r.dot(obb.ax[0])) + hh * Math.abs(u.dot(obb.ax[0]))) : hw;
+          const ext1 = r && u ? (hw * Math.abs(r.dot(obb.ax[1])) + hh * Math.abs(u.dot(obb.ax[1]))) : hh;
+          const ext2 = r && u ? (hw * Math.abs(r.dot(obb.ax[2])) + hh * Math.abs(u.dot(obb.ax[2]))) : hw;
+          if (u0 <= obb.he[0] + ext0 + 0.2 &&
+              u1 <= obb.he[1] + ext1 + 0.2 &&
+              u2 <= obb.he[2] + ext2 + 0.2) {
+            return true;
+          }
+        }
+      }
+    }
+
+    if (G.destroyedWalls) {
+      for (const dw of G.destroyedWalls) {
+        if (dw.point) {
+          const pt = new V3(...dw.point);
+          if (c.distanceTo(pt) < 5.4) return true;
+        }
+        if (dw.wallCenter) {
+          const wc = new V3(...dw.wallCenter);
+          if (c.distanceTo(wc) < 4.5) return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   G.clearWorld = clearWorld;
   G.loadMap = loadMap;
   G.newMap = newMap;
   G.destroyWall = destroyWall;
+  G.isPortalOnDestroyedWall = isPortalOnDestroyedWall;
 }

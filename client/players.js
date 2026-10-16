@@ -27,7 +27,22 @@ export function initPlayers(G) {
       onJumppad: () => { AudioSys.tone(200, 600, 0.4, 'sine', 0.15); },
       onLand: (vol) => { G.landingThump = vol; },
       onJump: () => { AudioSys.tone(340, 520, 0.06, 'triangle', 0.04); },
-      onTeleport: () => { _tpFlash.classList.remove('fadeflash'); void _tpFlash.offsetWidth; _tpFlash.classList.add('fadeflash'); }
+      onTeleport: () => {
+        _tpFlash.classList.remove('fadeflash');
+        void _tpFlash.offsetWidth;
+        _tpFlash.classList.add('fadeflash');
+        if (G.Network && G.Network.send) {
+          G.Network.send({
+            type: 'teleport',
+            viewOffset: G.pl.viewOffset ? [
+              G.pl.viewOffset.x,
+              G.pl.viewOffset.y,
+              G.pl.viewOffset.z,
+              G.pl.viewOffset.w
+            ] : null
+          });
+        }
+      }
     };
     G.physics.physStep(G.pl, k, G.autohop, dt, G.obbs, G.portals, G.grabCubes, G.grabbedCube, tpState, events, G.remotePlayers);
     tpGracePortal = tpState.tpGracePortal;
@@ -53,7 +68,7 @@ export function initPlayers(G) {
   G.isDead = false;
   const deathCamPos = new TH.Vector3();
   const deathCamTarget = new TH.Vector3();
-  function die(killerId, viaPortal, cause) {
+  function die(killerId, viaPortal, cause, shotOrigin) {
      if (!G.started || G.won || G.isDead) return;
      G.isDead = true;
      const myColor = G.localPlayerIndex === 0 ? 0x33ff33 : 0xff3333;
@@ -62,9 +77,44 @@ export function initPlayers(G) {
 
      G.gun.visible = false; G.rocketGun.visible = false; G.instagibGun.visible = false;
      G.playerModel.visible = false;
-     const offset = new TH.Vector3(0, 2, 4).applyAxisAngle(new TH.Vector3(0, 1, 0), G.pl.yaw);
-     deathCamPos.copy(G.pl.pos).add(offset);
-     deathCamTarget.copy(G.pl.pos);
+
+     const isSuicide = !killerId || killerId === G.localPlayerId || cause === 'lava' || cause === 'void';
+
+     if (isSuicide) {
+       // Suicide kill: maintain standard 3rd-person death camera overlooking the death spot
+       const offset = new TH.Vector3(0, 2, 4).applyAxisAngle(new TH.Vector3(0, 1, 0), G.pl.yaw);
+       deathCamPos.copy(G.pl.pos).add(offset);
+       deathCamTarget.copy(G.pl.pos);
+     } else {
+       // Killed by an opponent: aim camera so the crosshair points in the direction the shot originated
+       if (!shotOrigin && killerId && G.remotePlayers[killerId]) {
+         const kp = G.remotePlayers[killerId];
+         if (kp && kp.pos) {
+           shotOrigin = new TH.Vector3(kp.pos[0], kp.pos[1] + 1.5, kp.pos[2]);
+         }
+       }
+
+       if (shotOrigin) {
+         const eyeH = (CFG.H - (CFG.H - CFG.CROUCH_H) * G.pl.crouchT) - 0.12;
+         const eyePos = new TH.Vector3(G.pl.pos.x, G.pl.pos.y + eyeH, G.pl.pos.z);
+         const toShot = new TH.Vector3().subVectors(shotOrigin, eyePos);
+         const shotDist = toShot.length();
+         const shotDir = shotDist > 0.01 ? toShot.clone().normalize() : new TH.Vector3(-Math.sin(G.pl.yaw), 0, -Math.cos(G.pl.yaw));
+
+         const pullDist = 2.0;
+         const backDir = shotDir.clone().negate();
+         const rayHit = G.raycast ? G.raycast(eyePos, backDir, pullDist + 0.3) : null;
+         const actualPull = rayHit ? Math.max(0.1, rayHit.distance - 0.3) : pullDist;
+
+         deathCamPos.copy(eyePos).addScaledVector(backDir, actualPull);
+         deathCamPos.y += Math.min(0.35, actualPull * 0.25);
+         deathCamTarget.copy(shotOrigin);
+       } else {
+         const offset = new TH.Vector3(0, 2, 4).applyAxisAngle(new TH.Vector3(0, 1, 0), G.pl.yaw);
+         deathCamPos.copy(G.pl.pos).add(offset);
+         deathCamTarget.copy(G.pl.pos);
+       }
+     }
 
      // Server will send 'respawn' after 3 seconds
   }
@@ -99,14 +149,25 @@ export function initPlayers(G) {
       const m = G.remotePlayerMeshes[pid];
       if (rp.predictedDeadUntil && nowT < rp.predictedDeadUntil) rp.isDead = true;
       const isTargetFollowPOV = G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === pid && G.followPerspective === 'pov';
+      if (!isTargetFollowPOV && rp.viewOffset) {
+        const id = new TH.Quaternion();
+        rp.viewOffset.slerp(id, Math.min(1, dt * 5));
+        if (rp.viewOffset.angleTo(id) < 0.001) rp.viewOffset = null;
+      }
       m.visible = !rp.isDead && !isTargetFollowPOV;
       m.position.set(rp.pos[0], rp.pos[1], rp.pos[2]);
       m.rotation.y = rp.yaw;
       const rpCT = rp.crouchT || 0;
+      if (m.userData.smoothCrouchT === undefined) {
+        m.userData.smoothCrouchT = rpCT;
+      } else {
+        m.userData.smoothCrouchT += (rpCT - m.userData.smoothCrouchT) * Math.min(1, dt * 14);
+      }
+      const cT = m.userData.smoothCrouchT;
       const rpBody = m.children.find(c => c.name === 'bodyMesh');
-      if (rpBody) { rpBody.scale.y = 1 - rpCT * 0.4; rpBody.position.y = -rpCT * 0.25; }
+      if (rpBody) { rpBody.scale.y = 1 - cT * 0.4; rpBody.position.y = -cT * 0.25; }
       m.userData.headGroup.rotation.x = rp.pitch;
-      m.userData.headGroup.position.y = 1.5 - rpCT * 0.7;
+      m.userData.headGroup.position.y = 1.5 - cT * 0.7;
       m.userData.mirrorGun.visible = (rp.activeWeapon === 1 || !rp.activeWeapon);
       m.userData.mirrorRocketGun.visible = (rp.activeWeapon === 2);
       if (m.userData.mirrorInstagibGun) m.userData.mirrorInstagibGun.visible = (rp.activeWeapon === 3);
