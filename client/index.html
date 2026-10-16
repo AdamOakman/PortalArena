@@ -36,10 +36,6 @@
     font-weight: bold; font-family: var(--display); font-size: 16px; color: #ffe9c8;
   }
   #crosshair.grab::after { content: 'E'; }
-  #aimring{ position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px;
-    border-radius:6px; border:2px solid transparent; transition:border-color .1s, transform .1s; }
-  #aimring.valid{ border-color:rgba(255,122,34,.75); box-shadow:0 0 12px rgba(255,122,34,.35) inset; }
-  #aimring.invalid{ border-color:rgba(200,52,40,.6); }
   #speedbox{ position:absolute; left:24px; bottom:26px; width:230px; }
   #speedlabel{ font-size:11px; letter-spacing:.28em; color:var(--ash); margin-bottom:4px; }
   #speedval{ font-family:var(--display); font-size:30px; font-weight:700; color:var(--bone); text-shadow:0 0 14px rgba(255,122,34,.75); }
@@ -144,16 +140,54 @@
   #winpanel h1{ color:#ffe9c8; text-shadow:0 0 26px rgba(255,180,80,.9); }
   #winstats{ font-size:15px; color:#d8d0c0; line-height:2; margin-bottom:10px; }
   #winstats b{ font-family:var(--display); color:#ffd9a8; }
+  #spectateinfo{
+    position:absolute; bottom:28px; left:50%; transform:translateX(-50%);
+    font-family:var(--display); font-size:17px; font-weight:600; letter-spacing:.14em;
+    color:var(--bone); text-shadow:0 0 12px rgba(255,122,34,.6), 0 0 20px rgba(0,0,0,.9);
+    pointer-events:none; white-space:nowrap;
+  }
+  @keyframes loading-screen-pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+  #connect-overlay{
+    position:fixed; inset:0; z-index:99999;
+    background:rgba(10,7,8,0.85);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    opacity:1; transition:opacity .3s ease;
+    pointer-events:auto;
+  }
+  #connect-overlay.hidden{
+    opacity:0; pointer-events:none;
+  }
+  #connect-overlay-title{
+    text-align:center; font-family:var(--display); font-size:30px;
+    font-weight:600; letter-spacing:.28em; color:var(--bone-dim);
+    text-shadow:0 0 18px rgba(255,122,34,.25);
+    animation:loading-screen-pulse 1.4s ease-in-out infinite;
+  }
+  #fpsbox{
+    position:absolute; top:20px; left:24px;
+    font-family:var(--display); font-size:16px; font-weight:700;
+    color:var(--bone); text-shadow:0 0 10px rgba(255,122,34,.6), 0 0 20px rgba(0,0,0,.9);
+    letter-spacing:.08em; pointer-events:none; z-index:30;
+    display:flex; align-items:baseline; gap:5px;
+  }
+  #fpsval{
+    font-size:20px; font-weight:800; color:#ffe0b0;
+    text-shadow:0 0 12px rgba(255,179,77,.7);
+  }
+  #fpsunit{
+    font-size:11px; font-weight:600; letter-spacing:.22em;
+    color:var(--ash);
+  }
   .hidden{ display:none !important; }
   #err{ position:fixed; inset:auto 0 0 0; padding:14px; text-align:center; color:#ffb0b0; font-size:13px; z-index:20; background:rgba(60,0,0,.7); }
 </style>
 </head>
 <body>
 <canvas id="gl"></canvas>
+<div id="fpsbox"><span id="fpsval">--</span><span id="fpsunit">FPS</span></div>
 
 <div id="hud" class="hidden">
   <div id="crosshair"></div>
-  <div id="aimring"></div>
   <div id="matchbar">
     <div class="mseat">
       <div class="mname a" id="nameA">—</div>
@@ -182,6 +216,7 @@
     <div id="bar"><div id="barfill"></div></div>
   </div>
   <div id="infoline">seed <b id="seedinfo">–</b> · fov <b id="fovinf">115</b> · sound <b id="muteinf">on</b></div>
+  <div id="spectateinfo" class="hidden"></div>
   <div id="countdown" class="hidden"></div>
   <div id="flash"></div>
 </div>
@@ -199,6 +234,7 @@
       <span><b>[ ]</b> — FOV · <b>F</b> — fullscreen</span><span><b>R</b> — ready up · <b>N</b> — new map · <b>TAB</b> — stats · <b>ESC</b> — menu</span>
     </div>
     <div class="btnrow"><button id="btnstart">▶ ENTER THE CHAMBER</button></div>
+    <div id="connstatus" class="hidden" style="color:#ff8877;font-size:13px;margin-top:10px;letter-spacing:.05em;text-align:center;"></div>
     <div class="row">
       <label class="grow">Player Name <input type="text" id="nameinput" placeholder="Guest" value="Guest"></label>
     </div>
@@ -240,6 +276,11 @@
     <div id="winstats"></div>
     <div class="btnrow"><button id="btnagain" class="warm">NEW UNIVERSE (N)</button><button id="btnsame">REPLAY THIS SEED</button></div>
   </div>
+</div>
+
+<div id="connect-overlay" class="hidden">
+  <div id="connect-overlay-title">Connecting...</div>
+  <button id="connect-overlay-cancel" class="warm" style="margin-top:24px;padding:8px 22px;font-size:12px;letter-spacing:.15em;">CANCEL</button>
 </div>
 
 <script type="module" src="./main.js"></script>

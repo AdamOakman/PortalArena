@@ -5,9 +5,27 @@ import { AudioSys } from './audio.js';
    portal/weapon events, deaths, respawns, pings, round end.
    ============================================================================ */
 
+function applyDestroyedWalls(G, V3, walls) {
+  if (!walls || walls.length === 0) return;
+  if (!G.destroyedWalls) G.destroyedWalls = [];
+  for (const dw of walls) {
+    G.destroyedWalls.push(dw);
+    const cCenter = dw.wallCenter ? new V3(...dw.wallCenter) : null;
+    const cPt = new V3(...dw.point);
+    let obb = null;
+    if (dw.wallId) obb = G.obbs.find(o => o.id === dw.wallId);
+    if (!obb && cCenter) obb = G.obbs.find(o => o.c.distanceTo(cCenter) < 0.3);
+    if (!obb) obb = G.obbs.find(o => o.kind === 'wall' && !o.boundary && o.c.distanceTo(cPt) <= o.rad + 0.5);
+    if (obb) {
+      G.destroyWall(obb, cPt, dw.normal ? new V3(...dw.normal) : null, false, false);
+    }
+  }
+}
+
 export function onMessage(G, data) {
   const { TH, V3 } = G;
   if (data.type === 'init') {
+    if (G.onConnectionSuccess) G.onConnectionSuccess();
     G.localPlayerId = data.playerId;
     G.isSpectator = !!data.isSpectator;
     G.localPlayerIndex = (data.playerIndex >= 0) ? (data.playerIndex % 2) : -1;
@@ -37,22 +55,10 @@ export function onMessage(G, data) {
     }
 
     G.started = true; G.startPanel.classList.add('hidden');
-    if (G.currentSeed !== data.seed) G.loadMap(data.seed);
-    if (data.destroyedWalls && data.destroyedWalls.length > 0) {
-      if (!G.destroyedWalls) G.destroyedWalls = [];
-      for (const dw of data.destroyedWalls) {
-        G.destroyedWalls.push(dw);
-        const cCenter = dw.wallCenter ? new V3(...dw.wallCenter) : null;
-        const cPt = new V3(...dw.point);
-        let obb = null;
-        if (dw.wallId) obb = G.obbs.find(o => o.id === dw.wallId);
-        if (!obb && cCenter) obb = G.obbs.find(o => o.c.distanceTo(cCenter) < 0.3);
-        if (!obb) obb = G.obbs.find(o => o.kind === 'wall' && !o.boundary && o.c.distanceTo(cPt) <= o.rad + 0.5);
-        if (obb) {
-          G.destroyWall(obb, cPt, dw.normal ? new V3(...dw.normal) : null, false, false);
-        }
-      }
-    }
+    G.loadMap(data.seed);
+    G.destroyedWalls = [];
+    G.destroyedWallObbs = [];
+    applyDestroyedWalls(G, V3, data.destroyedWalls);
     if (data.spawn && !G.isSpectator) { G.pl.pos.fromArray(data.spawn); G.pl.vel.set(0, 0, 0); G.pl.cp.copy(G.pl.pos); }
     G.isConnected = true;
     if (data.match) {
@@ -82,6 +88,12 @@ export function onMessage(G, data) {
     G.instagibGun.visible = (G.activeWeapon === 3);
     G.playerModel.visible = true;
 
+    if (data.seed && G.resetWalls) {
+      G.resetWalls(data.seed);
+      G.destroyedWalls = [];
+      G.destroyedWallObbs = [];
+      applyDestroyedWalls(G, V3, data.destroyedWalls);
+    }
     if (data.spawn) {
       G.pl.pos.fromArray(data.spawn);
       G.pl.vel.set(0, 0, 0);
@@ -110,6 +122,12 @@ export function onMessage(G, data) {
     G.specPos.y += 2;
     G.specYaw = G.pl.yaw;
     G.specPitch = G.pl.pitch;
+    if (data.seed && G.resetWalls) {
+      G.resetWalls(data.seed);
+      G.destroyedWalls = [];
+      G.destroyedWallObbs = [];
+      applyDestroyedWalls(G, V3, data.destroyedWalls);
+    }
     if (data.match) G.match = data.match;
     const switchBtn = document.getElementById('btnswitchmode');
     if (switchBtn) switchBtn.textContent = 'JOIN GAME (J)';
@@ -122,7 +140,10 @@ export function onMessage(G, data) {
   } else if (data.type === 'player_disconnected') {
     G.addEventLog(data.name + ' dropped from the game');
   } else if (data.type === 'map_change') {
-    G.loadMap(data.seed);
+    if (G.resetWalls) G.resetWalls(data.seed);
+    else G.loadMap(data.seed);
+    G.destroyedWalls = [];
+    G.destroyedWallObbs = [];
     if (data.spawn && !G.isSpectator) {
       G.pl.pos.fromArray(data.spawn);
       G.pl.vel.set(0, 0, 0);
@@ -131,7 +152,13 @@ export function onMessage(G, data) {
     }
   } else if (data.type === 'state') {
     if (data.match) {
+      const oldPhase = G.match ? G.match.phase : null;
       G.match = data.match;
+      if (oldPhase && oldPhase !== data.match.phase) {
+        if (G.resetWalls) G.resetWalls();
+        G.destroyedWalls = [];
+        G.destroyedWallObbs = [];
+      }
       const me = G.match.players[G.localPlayerId];
       G.localReady = me ? !!me.ready : false;
       G.won = (G.match.phase === 'summary');
@@ -147,14 +174,39 @@ export function onMessage(G, data) {
         if (G.cancelCountdown) G.cancelCountdown();
       }
     }
+    if (data.destroyedWallCount === 0 && G.destroyedWalls && G.destroyedWalls.length > 0) {
+      if (G.resetWalls) G.resetWalls();
+      G.destroyedWalls = [];
+      G.destroyedWallObbs = [];
+    }
     for (const pid in data.players) {
        if (pid === G.localPlayerId && !G.isSpectator) {
          continue;
        }
        const oldRp = G.remotePlayers[pid];
        G.remotePlayers[pid] = data.players[pid];
+       if (!G.remotePlayers[pid].name) {
+         if (data.match && data.match.players && data.match.players[pid] && data.match.players[pid].name) {
+           G.remotePlayers[pid].name = data.match.players[pid].name;
+         } else if (oldRp && oldRp.name) {
+           G.remotePlayers[pid].name = oldRp.name;
+         }
+       }
        if (oldRp) {
-         if (oldRp.predictedDeadUntil) G.remotePlayers[pid].predictedDeadUntil = oldRp.predictedDeadUntil;
+         if (data.players[pid].isDead) {
+           G.remotePlayers[pid].isDead = true;
+           if (oldRp.deathCamPos) G.remotePlayers[pid].deathCamPos = oldRp.deathCamPos;
+           if (oldRp.deathCamTarget) G.remotePlayers[pid].deathCamTarget = oldRp.deathCamTarget;
+           if (oldRp.lastShotOrigin) G.remotePlayers[pid].lastShotOrigin = oldRp.lastShotOrigin;
+           if (oldRp.lastKillerId) G.remotePlayers[pid].lastKillerId = oldRp.lastKillerId;
+         } else {
+           G.remotePlayers[pid].isDead = false;
+           G.remotePlayers[pid].deathCamPos = null;
+           G.remotePlayers[pid].deathCamTarget = null;
+           G.remotePlayers[pid].lastShotOrigin = null;
+           G.remotePlayers[pid].lastKillerId = null;
+           G.remotePlayers[pid].predictedDeadUntil = null;
+         }
          if (oldRp.viewOffset) {
            G.remotePlayers[pid].viewOffset = oldRp.viewOffset;
          } else if (data.players[pid].viewOffset) {
@@ -187,19 +239,6 @@ export function onMessage(G, data) {
         let onBadWall = false;
         if (G.isPortalOnDestroyedWall && G.isPortalOnDestroyedWall(P.c, P.n, P.r, P.u)) {
           onBadWall = true;
-        } else {
-          for (const obb of G.obbs) {
-            if (obb.destroyed || obb.noPortal) {
-              const dx = P.c.x - obb.c.x, dy = P.c.y - obb.c.y, dz = P.c.z - obb.c.z;
-              const l0 = Math.abs(dx * obb.ax[0].x + dy * obb.ax[0].y + dz * obb.ax[0].z);
-              const l1 = Math.abs(dx * obb.ax[1].x + dy * obb.ax[1].y + dz * obb.ax[1].z);
-              const l2 = Math.abs(dx * obb.ax[2].x + dy * obb.ax[2].y + dz * obb.ax[2].z);
-              if (l0 <= obb.he[0] + 0.3 && l1 <= obb.he[1] + 0.3 && l2 <= obb.he[2] + 0.3) {
-                onBadWall = true;
-                break;
-              }
-            }
-          }
         }
         if (onBadWall) {
           P.placed = false;
@@ -227,19 +266,6 @@ export function onMessage(G, data) {
     let onBadWall = false;
     if (G.isPortalOnDestroyedWall && G.isPortalOnDestroyedWall(pC, pN, pR, pU)) {
       onBadWall = true;
-    } else {
-      for (const obb of G.obbs) {
-        if (obb.destroyed || obb.noPortal) {
-          const dx = pC.x - obb.c.x, dy = pC.y - obb.c.y, dz = pC.z - obb.c.z;
-          const l0 = Math.abs(dx * obb.ax[0].x + dy * obb.ax[0].y + dz * obb.ax[0].z);
-          const l1 = Math.abs(dx * obb.ax[1].x + dy * obb.ax[1].y + dz * obb.ax[1].z);
-          const l2 = Math.abs(dx * obb.ax[2].x + dy * obb.ax[2].y + dz * obb.ax[2].z);
-          if (l0 <= obb.he[0] + 0.3 && l1 <= obb.he[1] + 0.3 && l2 <= obb.he[2] + 0.3) {
-            onBadWall = true;
-            break;
-          }
-        }
-      }
     }
     if (!onBadWall) {
       const P = G.portals[data.pi];
@@ -305,6 +331,25 @@ export function onMessage(G, data) {
     if (typeof document !== 'undefined' && document.hidden) return;
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
     if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) G.muzzleT = 1;
+    let spawnPos = new V3(...data.pos);
+    const vel = new V3(...data.vel);
+    const rDir = vel.clone().normalize();
+
+    if (G.isSpectator && G.spectatorMode === 'follow' && G.followPerspective === 'pov' && G.spectateTargetPid === data.playerId) {
+      G.camera.updateMatrixWorld(true);
+      G.rocketGun.updateMatrixWorld(true);
+      spawnPos = new V3(0, 0, -0.6).applyMatrix4(G.rocketGun.matrixWorld);
+    } else if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) {
+      const isBot = (G.match && G.match.players && G.match.players[data.playerId] && G.match.players[data.playerId].isBot);
+      const rm = G.remotePlayerMeshes[data.playerId];
+      if (isBot && rm && rm.userData.mirrorRocketGun) {
+        rm.updateMatrixWorld(true);
+        if (rm.userData.headGroup) rm.userData.headGroup.updateMatrixWorld(true);
+        rm.userData.mirrorRocketGun.updateMatrixWorld(true);
+        spawnPos = new V3(0, 0, -0.6).applyMatrix4(rm.userData.mirrorRocketGun.matrixWorld);
+      }
+    }
+
     const rMesh = new TH.Group();
     const bGeo = new TH.CylinderGeometry(0.06, 0.06, 0.4, 8);
     const bMat = new TH.MeshStandardMaterial({ color: 0x222222 });
@@ -314,13 +359,13 @@ export function onMessage(G, data) {
     const tip = new TH.Mesh(tGeo, tMat);
     tip.position.y = 0.3;
     rMesh.add(body, tip);
-    rMesh.rotation.order = 'YXZ';
-    rMesh.quaternion.setFromUnitVectors(new V3(0, 0, -1), new V3(...data.vel).normalize());
-    rMesh.rotateX(Math.PI / 2);
-    rMesh.position.fromArray(data.pos);
+    if (rDir.lengthSq() > 0.0001) {
+      rMesh.quaternion.setFromUnitVectors(new V3(0, 1, 0), rDir);
+    }
+    rMesh.position.copy(spawnPos);
     G.scene.add(rMesh);
-    G.rockets.push({ pos: new V3(...data.pos), vel: new V3(...data.vel), mesh: rMesh, life: 5, isLocal: false, shooterId: data.playerId });
-    AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1, 0, new V3(...data.pos));
+    G.rockets.push({ pos: spawnPos.clone(), vel, mesh: rMesh, life: 5, isLocal: false, shooterId: data.playerId });
+    AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1, 0, spawnPos);
   } else if (data.type === 'fire_instagib') {
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
     if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) G.muzzleT = 1;
@@ -368,6 +413,7 @@ export function onMessage(G, data) {
     const deadRp = G.remotePlayers[data.playerId];
     if (deadRp) {
       deadRp.isDead = true;
+      if (data.killerId) deadRp.lastKillerId = data.killerId;
       const deadPos = new V3(...data.pos);
       const isSuicide = !data.killerId || data.killerId === data.playerId || data.cause === 'lava' || data.cause === 'void';
       let shotOrigin = deadRp.lastShotOrigin || null;
@@ -403,33 +449,81 @@ export function onMessage(G, data) {
     }
     if (data.feedMsg) G.addEventLog(data.feedMsg, data.feedHot);
   } else if (data.type === 'respawn') {
-    if (!G.isSpectator) {
+    const isLocal = !G.isSpectator && (!data.playerId || data.playerId === G.localPlayerId);
+    if (isLocal) {
       G.isDead = false;
       G.playerModel.visible = true;
       if (G.activeWeapon === 1) G.gun.visible = true;
       if (G.activeWeapon === 2) G.rocketGun.visible = true;
       if (G.activeWeapon === 3) G.instagibGun.visible = true;
-      G.pl.pos.fromArray(data.pos);
+      if (data.pos) G.pl.pos.fromArray(data.pos);
       G.pl.vel.set(0, 0, 0);
       G.pl.yaw = -Math.PI / 2; G.pl.pitch = 0; G.pl.viewOffset = null;
       AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
+    }
+    const pid = data.playerId || (isLocal ? G.localPlayerId : null);
+    if (pid && G.remotePlayers[pid]) {
+      const respawnRp = G.remotePlayers[pid];
+      respawnRp.isDead = false;
+      respawnRp.deathCamPos = null;
+      respawnRp.deathCamTarget = null;
+      respawnRp.lastShotOrigin = null;
+      respawnRp.lastKillerId = null;
+      respawnRp.predictedDeadUntil = null;
+      if (G.remotePlayerMeshes[pid]) {
+        if (data.pos) G.remotePlayerMeshes[pid].position.fromArray(data.pos);
+        G.remotePlayerMeshes[pid].visible = true;
+      }
     }
   } else if (data.type === 'pong') {
     G.lastPingMs = Math.max(0, Math.round(performance.now() - data.t));
   } else if (data.type === 'round_over') {
     G.match = data.match;
     G.won = true;
+    if (G.resetWalls) G.resetWalls();
+    G.destroyedWalls = [];
+    G.destroyedWallObbs = [];
     if (!G.isSpectator) G.showSummary();
   } else if (data.type === 'countdown_start') {
     G.countdownActive = true;
     if (G.match) G.match.phase = 'countdown';
     if (G.showCountdown) G.showCountdown();
+    if (G.resetWalls) G.resetWalls();
+    G.destroyedWalls = [];
+    G.destroyedWallObbs = [];
+  } else if (data.type === 'reset_walls') {
+    if (G.resetWalls) G.resetWalls(data.seed);
+    G.destroyedWalls = [];
+    G.destroyedWallObbs = [];
   }
 }
 
 export function onNetworkClose(G) {
   G.isConnected = false;
   if (G.started) {
-     setTimeout(() => { if (G.lastIp) G.Network.connect(G.lastIp, G.lastPass, G.lastName); }, 1000);
+    G.isReconnecting = true;
+    if (G.showConnectOverlay) G.showConnectOverlay('Reconnecting...');
+    if (!G.connectionTimeout && G.onConnectionTimeout) {
+      G.connectionTimeout = setTimeout(() => {
+        G.onConnectionTimeout('Reconnecting timed out after 30 seconds');
+      }, 30000);
+    }
+    if (!G.reconnectRetryTimer) {
+      G.reconnectRetryTimer = setTimeout(() => {
+        G.reconnectRetryTimer = null;
+        if (G.isReconnecting && G.lastIp && G.Network) {
+          G.Network.connect(G.lastIp, G.lastPass, G.lastName);
+        }
+      }, 1500);
+    }
+  } else if (G.isConnecting) {
+    if (!G.reconnectRetryTimer) {
+      G.reconnectRetryTimer = setTimeout(() => {
+        G.reconnectRetryTimer = null;
+        if (G.isConnecting && G.lastIp && G.Network) {
+          G.Network.connect(G.lastIp, G.lastPass, G.lastName);
+        }
+      }, 1500);
+    }
   }
 }

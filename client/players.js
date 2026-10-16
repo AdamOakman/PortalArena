@@ -148,7 +148,7 @@ export function initPlayers(G) {
       }
       const m = G.remotePlayerMeshes[pid];
       if (rp.predictedDeadUntil && nowT < rp.predictedDeadUntil) rp.isDead = true;
-      const isTargetFollowPOV = G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === pid && G.followPerspective === 'pov';
+      const isTargetFollowPOV = G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === pid && G.followPerspective === 'pov' && !rp.isDead;
       if (!isTargetFollowPOV && rp.viewOffset) {
         const id = new TH.Quaternion();
         rp.viewOffset.slerp(id, Math.min(1, dt * 5));
@@ -167,7 +167,7 @@ export function initPlayers(G) {
       const rpBody = m.children.find(c => c.name === 'bodyMesh');
       if (rpBody) { rpBody.scale.y = 1 - cT * 0.4; rpBody.position.y = -cT * 0.25; }
       m.userData.headGroup.rotation.x = rp.pitch;
-      m.userData.headGroup.position.y = 1.5 - cT * 0.7;
+      m.userData.headGroup.position.y = (CFG.H - (CFG.H - CFG.CROUCH_H) * cT) - 0.12;
       m.userData.mirrorGun.visible = (rp.activeWeapon === 1 || !rp.activeWeapon);
       m.userData.mirrorRocketGun.visible = (rp.activeWeapon === 2);
       if (m.userData.mirrorInstagibGun) m.userData.mirrorInstagibGun.visible = (rp.activeWeapon === 3);
@@ -175,11 +175,11 @@ export function initPlayers(G) {
          m.userData.muzzleT = Math.max(0, m.userData.muzzleT - dt * 6);
          const mt = m.userData.muzzleT;
          const rScale = 1 + mt * 0.12;
-         const rZ = -0.4 + mt * 0.15;
+         const rZ = -0.5 + mt * 0.15;
          const rRot = mt * 0.3;
-         m.userData.mirrorGun.scale.setScalar(1); m.userData.mirrorGun.position.z = -0.4; m.userData.mirrorGun.rotation.x = 0;
-         m.userData.mirrorRocketGun.scale.setScalar(1); m.userData.mirrorRocketGun.position.z = -0.4; m.userData.mirrorRocketGun.rotation.x = 0;
-         if (m.userData.mirrorInstagibGun) { m.userData.mirrorInstagibGun.scale.setScalar(1); m.userData.mirrorInstagibGun.position.z = -0.4; m.userData.mirrorInstagibGun.rotation.x = 0; }
+         m.userData.mirrorGun.scale.setScalar(1); m.userData.mirrorGun.position.z = -0.5; m.userData.mirrorGun.rotation.x = 0;
+         m.userData.mirrorRocketGun.scale.setScalar(1); m.userData.mirrorRocketGun.position.z = -0.5; m.userData.mirrorRocketGun.rotation.x = 0;
+         if (m.userData.mirrorInstagibGun) { m.userData.mirrorInstagibGun.scale.setScalar(1); m.userData.mirrorInstagibGun.position.z = -0.5; m.userData.mirrorInstagibGun.rotation.x = 0; }
          const aw = rp.activeWeapon || 1;
          const activeMir = aw === 1 ? m.userData.mirrorGun : (aw === 2 ? m.userData.mirrorRocketGun : m.userData.mirrorInstagibGun);
          if (activeMir) { activeMir.scale.setScalar(rScale); activeMir.position.z = rZ; activeMir.rotation.x = rRot; }
@@ -214,7 +214,7 @@ export function initPlayers(G) {
     if (cBody) { cBody.scale.y = 1 - G.pl.crouchT * 0.4; cBody.position.y = -G.pl.crouchT * 0.25; }
     if (playerModel.userData.headGroup) {
       playerModel.userData.headGroup.rotation.x = G.pl.pitch;
-      playerModel.userData.headGroup.position.y = 1.5 - G.pl.crouchT * 0.7;
+      playerModel.userData.headGroup.position.y = (CFG.H - (CFG.H - CFG.CROUCH_H) * G.pl.crouchT) - 0.12;
     }
     if (playerModel.userData.mirrorGun) {
       playerModel.userData.mirrorGun.visible = (G.activeWeapon === 1);

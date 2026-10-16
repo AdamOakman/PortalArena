@@ -1,8 +1,27 @@
 export function initNetwork(handlers) {
   let ws = null;
-  
+
+  function disconnect() {
+    if (ws) {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      try { ws.close(); } catch (err) { void err; }
+      ws = null;
+    }
+  }
+
   function connect(ip, pass, name) {
-    ws = new WebSocket('ws://' + ip);
+    disconnect();
+    try {
+      ws = new WebSocket('ws://' + ip);
+    } catch (err) {
+      console.error('WS Connect error', err);
+      if (handlers.onError) handlers.onError(err);
+      if (handlers.onClose) handlers.onClose();
+      return;
+    }
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: 'auth', password: pass, name: name }));
     };
@@ -26,5 +45,5 @@ export function initNetwork(handlers) {
     }
   }
 
-  return { connect, send };
+  return { connect, send, disconnect };
 }

@@ -21,9 +21,9 @@ export function initPortals(G) {
     q.renderOrder = 5; G.quads.push(q); G.portalGroup.add(q);
 
     const frameGrp = new TH.Group();
-    const core = new TH.Mesh(new TH.TorusGeometry(1, 0.02, 8, 64), new TH.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
-    const glow1 = new TH.Mesh(new TH.TorusGeometry(1, 0.08, 8, 64), new TH.MeshBasicMaterial({ color: G.portals[i].color, transparent: true, opacity: 0.8, blending: TH.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
-    const glow2 = new TH.Mesh(new TH.TorusGeometry(1, 0.25, 8, 64), new TH.MeshBasicMaterial({ color: G.portals[i].color, transparent: true, opacity: 0.35, blending: TH.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+    const core = new TH.Mesh(new TH.TorusGeometry(1, 0.02, 8, 64), new TH.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    const glow1 = new TH.Mesh(new TH.TorusGeometry(1, 0.08, 8, 64), new TH.MeshBasicMaterial({ color: G.portals[i].color, transparent: true, opacity: 0.8, blending: TH.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    const glow2 = new TH.Mesh(new TH.TorusGeometry(1, 0.25, 8, 64), new TH.MeshBasicMaterial({ color: G.portals[i].color, transparent: true, opacity: 0.35, blending: TH.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
     frameGrp.add(core, glow1, glow2);
     frameGrp.scale.set(PORT.hw + 0.05, PORT.hh + 0.05, 1);
     G.frames.push(frameGrp); G.portalGroup.add(frameGrp);
@@ -138,53 +138,17 @@ export function initPortals(G) {
     const P = G.portals[pi];
     const n = hit.normal.clone().normalize();
     const f = frameFor(n);
-    let c = hit.point.clone();
-    const dvec = new TH.Vector3().subVectors(c, hit.obb.c);
+    const validPlacement = G.physics.findClosestValidPortalPos(
+      hit.point, n, f.r, f.u, hit.obb, pi,
+      G.obbs, G.portals, G.lavaPools, G.destroyedWallObbs, G.destroyedWalls
+    );
 
-    // Clamp to face boundaries
-    for (let k = 0; k < 3; k++) {
-      const ax = hit.obb.ax[k];
-      if (Math.abs(n.dot(ax)) > 0.99) continue; // Skip normal axis
-
-      const ext = PORT.hw * Math.abs(f.r.dot(ax)) + PORT.hh * Math.abs(f.u.dot(ax));
-      const limit = hit.obb.he[k] - ext - 0.02;
-
-      if (limit < 0) {
-        // Platform is physically too small for this portal
-        AudioSys.tone(220, 120, 0.15, 'square', 0.06);
-        return false;
-      }
-
-      let proj = dvec.dot(ax);
-      if (proj > limit) proj = limit;
-      if (proj < -limit) proj = -limit;
-
-      const oldProj = dvec.dot(ax);
-      dvec.addScaledVector(ax, proj - oldProj);
-    }
-
-    // Reconstruct c and offset slightly
-    c.copy(hit.obb.c).add(dvec).addScaledVector(n, 0.02);
-    if (G.isPortalOnDestroyedWall && G.isPortalOnDestroyedWall(c, n, f.r, f.u)) {
+    if (!validPlacement) {
       AudioSys.tone(220, 120, 0.15, 'square', 0.06);
       return false;
     }
-    /* no overlapping placement on the same face or intersecting nearby */
-    for (let i = 0; i < G.portals.length; i++) {
-      if (i === pi) continue;
-      const Q = G.portals[i];
-      if (Q.placed) {
-        const sameFace = Math.abs(n.dot(Q.n)) > 0.98 && Math.abs(c.clone().sub(Q.c).dot(n)) < 0.2;
-        if (sameFace) {
-          const d = c.clone().sub(Q.c);
-          const du = Math.abs(d.dot(f.r)), dv = Math.abs(d.dot(f.u));
-          if (du < PORT.hw * 2 + 0.35 && dv < PORT.hh * 2 + 0.35) { AudioSys.tone(220, 120, 0.15, 'square', 0.06); return false; }
-        }
-        if (c.distanceTo(Q.c) < Math.max(PORT.hw, PORT.hh) * 1.5) {
-          AudioSys.tone(220, 120, 0.15, 'square', 0.06); return false;
-        }
-      }
-    }
+
+    const c = validPlacement.c;
     P.placed = true; P.closing = false; P.c.copy(c); P.n.copy(n); P.r.copy(f.r); P.u.copy(f.u); P.openTime = performance.now() / 1000;
     G.Network.send({
         type: 'portal_place', pi,

@@ -80,7 +80,7 @@ export function initModels(TH, camera, scene) {
 
     const headGroup = new TH.Group();
     headGroup.name = 'headGroup';
-    headGroup.position.set(0, 1.5, 0);
+    headGroup.position.set(0, 1.58, 0);
     model.add(headGroup);
 
     const headGeo = new TH.BoxGeometry(0.4, 0.4, 0.4);
@@ -97,17 +97,17 @@ export function initModels(TH, camera, scene) {
 
 
         const mirrorGun = gun.clone();
-    mirrorGun.position.set(0.2, -0.2, -0.4);
+    mirrorGun.position.set(0.3, -0.26, -0.5);
     mirrorGun.rotation.set(0, 0, 0);
     headGroup.add(mirrorGun);
 
     const mirrorRocketGun = rocketGun.clone();
-    mirrorRocketGun.position.set(0.2, -0.2, -0.4);
+    mirrorRocketGun.position.set(0.3, -0.26, -0.5);
     mirrorRocketGun.rotation.set(0, 0, 0);
     headGroup.add(mirrorRocketGun);
 
     const mirrorInstagibGun = instagibGun.clone();
-    mirrorInstagibGun.position.set(0.2, -0.2, -0.4);
+    mirrorInstagibGun.position.set(0.3, -0.26, -0.5);
     mirrorInstagibGun.rotation.set(0, 0, 0);
     headGroup.add(mirrorInstagibGun);
 

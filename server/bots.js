@@ -14,8 +14,11 @@
  */
 
 import * as TH from 'three';
-import { CFG, TICK_RATE } from '../shared/constants.js';
+import { CFG, PORT, TICK_RATE } from '../shared/constants.js';
+import { initPhysics } from '../shared/physics.js';
 import { mapData, obbs, gameState, isPortalOnDestroyedWall } from './gamestate.js';
+
+const physics = initPhysics(TH, CFG, PORT);
 
 // ------------------------------------------------------------------ constants
 
@@ -53,7 +56,13 @@ function ensureState(pid) {
       lastTickPos: null,
       avoidUntilT: 0,
       avoidYaw: 0,
-      aimOrangeYaw: 0,
+      blueSurface: null,
+      blueAimYaw: 0,
+      blueAimPitch: 0,
+      blueAimT: 0,
+      orangeSurface: null,
+      orangeAimYaw: 0,
+      orangeAimPitch: 0,
       orangeAimT: 0,
       unstuckUntilT: 0,
       strafeDir: null,
@@ -119,6 +128,37 @@ export function getRampUnderState(pos) {
   return null;
 }
 
+export function getRampAtPos(pos) {
+  const ramps = mapData.ramps || [];
+  for (const rm of ramps) {
+    let fwdX = 1, fwdZ = 0, rightX = 0, rightZ = 1;
+    if (rm.dir === 1) { fwdX = 0; fwdZ = 1; rightX = -1; rightZ = 0; }
+    else if (rm.dir === 2) { fwdX = -1; fwdZ = 0; rightX = 0; rightZ = -1; }
+    else if (rm.dir === 3) { fwdX = 0; fwdZ = -1; rightX = 1; rightZ = 0; }
+
+    const dx = pos.x - rm.cx;
+    const dz = pos.z - rm.cz;
+    const s = dx * fwdX + dz * fwdZ;
+    const w = dx * rightX + dz * rightZ;
+
+    const hl = rm.len * 0.5;
+    const hw = rm.width * 0.5;
+
+    if (s >= -hl - 0.6 && s <= hl + 0.6 && Math.abs(w) <= hw + 0.6) {
+      const u = Math.max(0, Math.min(1, (s + hl) / rm.len));
+      const u2 = u * u, u3 = u2 * u;
+      const smooth = u3 * (u * (u * 6 - 15) + 10);
+      const yTop = rm.y0 + rm.rise * smooth;
+      const yBot = yTop - (rm.T || 0.6);
+
+      const onRamp = (pos.y >= yBot - 0.25 && pos.y <= yTop + 1.25);
+      const nearRamp = (pos.y >= rm.y0 - 0.6 && pos.y <= rm.y0 + rm.rise + 1.6);
+      return { rm, s, w, hl, hw, fwdX, fwdZ, rightX, rightZ, yTop, yBot, onRamp, nearRamp, u };
+    }
+  }
+  return null;
+}
+
 function pickBotTargetAndRoute(curPos, portals) {
   const pos = curPos || new TH.Vector3();
   const underAtPick = getRampUnderState(pos);
@@ -170,10 +210,25 @@ function pickBotTargetAndRoute(curPos, portals) {
       // Entrance point 1.5m onto the ramp along centerline to ensure clean ramp entry
       const startRamp = ep.low.clone().addScaledVector(ep.fwd, 1.5);
       const midRamp = new TH.Vector3(rm.cx, rm.y0 + rm.rise * 0.5, rm.cz);
-      return {
-        target: approachLow,
-        waypoints: [startRamp, midRamp, ep.high.clone(), finalTarget]
-      };
+
+      const dToLow = pos.distanceTo(ep.low);
+      const dotFwd = pos.clone().sub(ep.low).dot(ep.fwd);
+      if (dotFwd > 0.5 && dToLow < rm.len) {
+        return {
+          target: midRamp,
+          waypoints: [ep.high.clone(), finalTarget]
+        };
+      } else if (dToLow < 2.5) {
+        return {
+          target: startRamp,
+          waypoints: [midRamp, ep.high.clone(), finalTarget]
+        };
+      } else {
+        return {
+          target: approachLow,
+          waypoints: [startRamp, midRamp, ep.high.clone(), finalTarget]
+        };
+      }
     } else {
       return {
         target: finalTarget,
@@ -238,7 +293,7 @@ function hasGroundAhead(pos, yaw, obbs_) {
 
 // ------------------------------------------------------------------ wall raycast
 
-function isLavaBlocked(c, PORT_) {
+export function isLavaBlocked(c, PORT_) {
   if (!mapData.lava) return false;
   const hw = PORT_ ? PORT_.hw : 1.44;
   const hh = PORT_ ? PORT_.hh : 2.0;
@@ -380,32 +435,59 @@ function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, curren
     .addScaledVector(obb.ax[ax2], p2)
     .addScaledVector(normal, 0.02);
 
-  // Reject placement in or under lava pools
-  if (isLavaBlocked(adjustedC, PORT_)) {
+  const valid = physics.findClosestValidPortalPos(
+    adjustedC, normal, r, u, obb, currentPi,
+    obbs_, portals, mapData.lava, gameState.destroyedWallObbs, gameState.destroyedWalls
+  );
+  if (!valid) {
     return null;
   }
 
-  // Reject placement on any destroyed wall or fragment
-  if (isPortalOnDestroyedWall(adjustedC, normal, r, u, PORT_)) {
-    return null;
-  }
-
-  // Reject overlapping placement with any existing placed portal
-  if (checkPortalOverlap(adjustedC, normal, r, u, portals, currentPi, PORT_)) {
-    return null;
-  }
-
-  return { c: adjustedC, n: normal, r, u, eyePos };
+  return { c: valid.c, n: normal, r, u, eyePos };
 }
 
-function findPortalSurface(pos, yaw, obbs_, portals, PORT_, currentPi) {
-  const testPitches = [0.1, 0.0, 0.2, -0.1];
-  for (const p of testPitches) {
-    const res = findPortalSurfaceAtPitch(pos, yaw, p, obbs_, portals, PORT_, currentPi);
-    if (res) return { surface: res, pitch: p };
+function findPortalSurfaceInCone(pos, baseYaw, obbs_, portals, PORT_, currentPi) {
+  const yawOffsets = [0, -0.25, 0.25, -0.5, 0.5];
+  const testPitches = [0.05, 0.15, -0.05, 0.25, -0.15];
+  for (const yOff of yawOffsets) {
+    const y = baseYaw + yOff;
+    for (const p of testPitches) {
+      const res = findPortalSurfaceAtPitch(pos, y, p, obbs_, portals, PORT_, currentPi);
+      if (res && !isPortalOnDestroyedWall(res.c, res.n, res.r, res.u, PORT_)) {
+        const eyePos = pos.clone();
+        eyePos.y += CFG.H - 0.12;
+        const toSpot = res.c.clone().sub(eyePos);
+        const aimYaw = Math.atan2(-toSpot.x, -toSpot.z);
+        const aimPitch = Math.asin(Math.max(-0.99, Math.min(0.99, toSpot.y / toSpot.length())));
+        return { surface: res, aimYaw, aimPitch };
+      }
+    }
   }
   return null;
 }
+
+function findOrangePortalSurface(pos, blueN, obbs_, portals, PORT_, currentPi) {
+  const angleSpreads = [Math.PI * 0.5, -Math.PI * 0.5, Math.PI * 0.8, -Math.PI * 0.8, Math.PI, 0];
+  const testPitches = [0.05, 0.2, -0.05, 0.35, -0.15];
+  const baseAngle = Math.atan2(blueN.x, blueN.z);
+  for (const ang of angleSpreads) {
+    const y = baseAngle + ang;
+    for (const p of testPitches) {
+      const res = findPortalSurfaceAtPitch(pos, y, p, obbs_, portals, PORT_, currentPi);
+      if (res && !isPortalOnDestroyedWall(res.c, res.n, res.r, res.u, PORT_)) {
+        if (checkPortalOverlap(res.c, res.n, res.r, res.u, portals, currentPi, PORT_)) continue;
+        const eyePos = pos.clone();
+        eyePos.y += CFG.H - 0.12;
+        const toSpot = res.c.clone().sub(eyePos);
+        const aimYaw = Math.atan2(-toSpot.x, -toSpot.z);
+        const aimPitch = Math.asin(Math.max(-0.99, Math.min(0.99, toSpot.y / toSpot.length())));
+        return { surface: res, aimYaw, aimPitch };
+      }
+    }
+  }
+  return null;
+}
+
 
 // ------------------------------------------------------------------ destructible wall & opponent targeting
 
@@ -583,8 +665,12 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
 
   // ---- advance waypoint along route
   if (st.waypoints && st.waypoints.length > 0) {
-    if (pl.pos.distanceTo(st.targetPos) < 2.2) {
+    const hDist = Math.hypot(st.targetPos.x - pl.pos.x, st.targetPos.z - pl.pos.z);
+    if (hDist < 1.3 && Math.abs(st.targetPos.y - pl.pos.y) < 1.8) {
       st.targetPos = st.waypoints.shift();
+      st.stuckT = 0;
+      st.avoidUntilT = 0;
+      st.unstuckUntilT = 0;
     }
   }
 
@@ -592,8 +678,11 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   if (nowT - st.lastThinkT > THINK_INTERVAL_MS / 1000) {
     st.lastThinkT = nowT;
 
+    const hDistToTarget = st.targetPos ? Math.hypot(st.targetPos.x - pl.pos.x, st.targetPos.z - pl.pos.z) : 0;
+    const reachedTarget = st.targetPos && (hDistToTarget < 1.3 && Math.abs(st.targetPos.y - pl.pos.y) < 1.8);
+
     const needNewTarget = !st.targetPos
-      || (pl.pos.distanceTo(st.targetPos) < 1.5 && (!st.waypoints || st.waypoints.length === 0))
+      || (reachedTarget && (!st.waypoints || st.waypoints.length === 0))
       || st.stuckT > 1.8;
 
     if (needNewTarget) {
@@ -616,7 +705,17 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
       nowT - st.lastPortalT > PORTAL_COOLDOWN_S &&
       Math.random() < PORTAL_CHANCE
     ) {
-      st.portalPhase = 'aim_blue';
+      const botPortalBase = getBotPortalBase(pl);
+      const blueFound = findPortalSurfaceInCone(pl.pos, pl.yaw, obbs, portals, PORT_, botPortalBase);
+      if (blueFound) {
+        st.blueSurface = blueFound.surface;
+        st.blueAimYaw = blueFound.aimYaw;
+        st.blueAimPitch = blueFound.aimPitch;
+        st.blueAimT = nowT;
+        st.portalPhase = 'aim_blue';
+      } else {
+        st.lastPortalT = nowT + 2.0;
+      }
     }
   }
 
@@ -656,15 +755,9 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
 
   if (closestHit) {
     if (closestHit.obb.kind === 'ramp') {
-      const contactHeight = closestHit.point.y - pl.pos.y;
-      if (contactHeight < 0.85 || (closestHit.normal.y > 0.35 && contactHeight < 1.2)) {
-        // Walkable ramp slope ahead - do not treat as wall!
-        isTallWall = false;
-        canStepOver = false;
-        closestHit = null;
-      } else if (contactHeight > 1.35) {
-        isTallWall = true;
-      }
+      isTallWall = false;
+      canStepOver = false;
+      closestHit = null;
     } else {
       const maxY = closestHit.obb.c.y
         + Math.abs(closestHit.obb.ax[0].y * closestHit.obb.he[0])
@@ -693,7 +786,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
         const lH = raycastWall(lTest, testDir, 1.6, obbs);
         const rH = raycastWall(rTest, testDir, 1.6, obbs);
 
-        const isRampWalkable = (h) => h && h.obb.kind === 'ramp' && ((h.point.y - pl.pos.y < 0.85) || (h.normal.y > 0.35));
+        const isRampWalkable = (h) => h && h.obb.kind === 'ramp';
         const chBlocked = chH && !isRampWalkable(chH);
         const lBlocked = lH && !isRampWalkable(lH);
         const rBlocked = rH && !isRampWalkable(rH);
@@ -729,7 +822,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     }
   }
 
-  // Priority steering: instagib tracking > wall avoidance > orange portal aim > navigation
+  // Priority steering: instagib tracking > ramp escape > portal aim > wall avoidance > navigation
   let activeOpp = null;
   if (pl.activeWeapon === 3 && st.instagibTargetPid && gameState.players[st.instagibTargetPid] && !gameState.players[st.instagibTargetPid].isDead) {
     const oppPl = gameState.players[st.instagibTargetPid];
@@ -740,6 +833,8 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   }
 
   const underNow = getRampUnderState(pl.pos);
+  const rampState = getRampAtPos(pl.pos);
+  const onRamp = rampState && rampState.onRamp;
 
   if (activeOpp) {
     desiredYaw = Math.atan2(-activeOpp.dir.x, -activeOpp.dir.z);
@@ -752,10 +847,12 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     st.avoidUntilT = nowT + 0.6;
     isTallWall = false;
     canStepOver = false;
-  } else if (nowT < st.avoidUntilT && st.portalPhase !== 'aim_orange') {
-    desiredYaw = st.avoidYaw;
+  } else if (st.portalPhase === 'aim_blue') {
+    desiredYaw = st.blueAimYaw;
   } else if (st.portalPhase === 'aim_orange') {
-    desiredYaw = st.aimOrangeYaw;
+    desiredYaw = st.orangeAimYaw;
+  } else if (nowT < st.avoidUntilT) {
+    desiredYaw = st.avoidYaw;
   }
 
   // Smooth yaw rotation
@@ -763,7 +860,8 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   while (dyaw > Math.PI) dyaw -= Math.PI * 2;
   while (dyaw < -Math.PI) dyaw += Math.PI * 2;
 
-  const maxTurn = (activeOpp ? 4.2 : 4.8) * DT;
+  const isPortalAiming = st.portalPhase === 'aim_blue' || st.portalPhase === 'aim_orange';
+  const maxTurn = (isPortalAiming ? 10.0 : (activeOpp ? 4.2 : 4.8)) * DT;
   if (Math.abs(dyaw) > maxTurn) {
     pl.yaw += Math.sign(dyaw) * maxTurn;
   } else {
@@ -772,10 +870,17 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   while (pl.yaw > Math.PI) pl.yaw -= Math.PI * 2;
   while (pl.yaw < -Math.PI) pl.yaw += Math.PI * 2;
 
-  // Smooth pitch: default to horizontal level gaze (pitch 0) rather than looking up at platforms
-  const targetPitch = activeOpp
-    ? Math.asin(Math.max(-0.99, Math.min(0.99, activeOpp.dir.y)))
-    : Math.max(-0.25, Math.min(0.25, ((st.targetPos.y - pl.pos.y) - 1.5) * 0.04));
+  // Smooth pitch
+  let targetPitch;
+  if (activeOpp) {
+    targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, activeOpp.dir.y)));
+  } else if (st.portalPhase === 'aim_blue') {
+    targetPitch = st.blueAimPitch;
+  } else if (st.portalPhase === 'aim_orange') {
+    targetPitch = st.orangeAimPitch;
+  } else {
+    targetPitch = Math.max(-0.25, Math.min(0.25, ((st.targetPos.y - pl.pos.y) - 1.5) * 0.04));
+  }
 
   if (st.rocketJumpPhase === 'aim_down') {
     const rjPitch = -1.35;
@@ -800,7 +905,8 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
       st.rocketJumpPhase = 'none';
     }
   } else {
-    pl.pitch += (targetPitch - pl.pitch) * Math.min(1, (activeOpp ? 4.5 : 6.0) * DT);
+    const pitchSpeed = isPortalAiming ? 12.0 : (activeOpp ? 4.5 : 6.0);
+    pl.pitch += (targetPitch - pl.pitch) * Math.min(1, pitchSpeed * DT);
   }
 
   // ---- stuck tracking & active unstuck
@@ -816,7 +922,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
 
   // If blocked for > 0.3s:
   if (st.stuckT > 0.3) {
-    if (!underNow && (canStepOver || (closestHit && closestHit.distance < 1.2 && pl.grounded))) {
+    if (!underNow && !onRamp && (canStepOver || (closestHit && closestHit.distance < 1.2 && pl.grounded))) {
       pl.jumpBuf = nowT;
     }
     if (isTallWall) {
@@ -836,7 +942,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   }
 
   let keys = {
-    KeyW: st.portalPhase !== 'aim_orange' && Math.abs(dyaw) < 1.1 && (dist > 0.6 || st.portalPhase === 'walk_thru' || underNow != null),
+    KeyW: (!isPortalAiming || Math.abs(dyaw) < 0.5) && Math.abs(dyaw) < 1.1 && (dist > 0.6 || st.portalPhase === 'walk_thru' || underNow != null || onRamp),
     KeyA: false,
     KeyS: false,
     KeyD: false,
@@ -885,10 +991,15 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   const botPortalBase = getBotPortalBase(pl);
 
   if (st.portalPhase === 'aim_blue') {
-    const hitRes = findPortalSurface(pl.pos, pl.yaw, obbs, portals, PORT_, botPortalBase);
-    if (hitRes && !isPortalOnDestroyedWall(hitRes.surface.c, hitRes.surface.n, hitRes.surface.r, hitRes.surface.u, PORT_)) {
-      const surface = hitRes.surface;
-      pl.pitch = hitRes.pitch;
+    let aimDyaw = st.blueAimYaw - pl.yaw;
+    while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
+    while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
+    const aimDpitch = Math.abs(st.blueAimPitch - pl.pitch);
+    const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
+    const timedOut = nowT - st.blueAimT > 0.35;
+
+    if (st.blueSurface && (aligned || timedOut)) {
+      const surface = st.blueSurface;
       const P = portals[botPortalBase];
       P.placed = true;
       P.c.copy(surface.c);
@@ -898,40 +1009,48 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
 
       if (onPortalPlaced) onPortalPlaced(botPortalBase, surface, surface.eyePos);
 
-      st.portalPhase = 'aim_orange';
-      const turnDir = Math.random() < 0.5 ? 1 : -1;
-      st.aimOrangeYaw = pl.yaw + turnDir * (Math.PI * 0.55 + Math.random() * 0.4);
-      while (st.aimOrangeYaw > Math.PI) st.aimOrangeYaw -= Math.PI * 2;
-      while (st.aimOrangeYaw < -Math.PI) st.aimOrangeYaw += Math.PI * 2;
-      st.orangeAimT = nowT;
-    } else {
-      st.portalPhase = 'none';
-      st.lastPortalT = nowT + 3.0;
-    }
-  } else if (st.portalPhase === 'aim_orange') {
-    const yawDiff = Math.abs(st.aimOrangeYaw - pl.yaw);
-    if (yawDiff < 0.4 || (nowT - st.orangeAimT > 0.8)) {
-      const pIdx = botPortalBase + 1;
-      const hitRes = findPortalSurface(pl.pos, pl.yaw, obbs, portals, PORT_, pIdx);
-      if (hitRes && !isPortalOnDestroyedWall(hitRes.surface.c, hitRes.surface.n, hitRes.surface.r, hitRes.surface.u, PORT_)) {
-        const surface = hitRes.surface;
-        pl.pitch = hitRes.pitch;
-        const P = portals[pIdx];
-        P.placed = true;
-        P.c.copy(surface.c);
-        P.n.copy(surface.n);
-        P.r.copy(surface.r);
-        P.u.copy(surface.u);
-
-        if (onPortalPlaced) onPortalPlaced(pIdx, surface, surface.eyePos);
-
-        st.portalPhase = 'walk_thru';
-        st.lastPortalT = nowT;
-        st.walkThruT = nowT;
-      } else if (nowT - st.orangeAimT > 2.2) {
+      // Immediately search for orange portal surface across the room
+      const orangeFound = findOrangePortalSurface(pl.pos, surface.n, obbs, portals, PORT_, botPortalBase + 1);
+      if (orangeFound) {
+        st.orangeSurface = orangeFound.surface;
+        st.orangeAimYaw = orangeFound.aimYaw;
+        st.orangeAimPitch = orangeFound.aimPitch;
+        st.orangeAimT = nowT;
+        st.portalPhase = 'aim_orange';
+      } else {
         st.portalPhase = 'none';
         st.lastPortalT = nowT + 3.0;
       }
+    } else if (nowT - st.blueAimT > 0.8) {
+      st.portalPhase = 'none';
+      st.lastPortalT = nowT + 2.0;
+    }
+  } else if (st.portalPhase === 'aim_orange') {
+    let aimDyaw = st.orangeAimYaw - pl.yaw;
+    while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
+    while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
+    const aimDpitch = Math.abs(st.orangeAimPitch - pl.pitch);
+    const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
+    const timedOut = nowT - st.orangeAimT > 0.45;
+
+    if (st.orangeSurface && (aligned || timedOut)) {
+      const pIdx = botPortalBase + 1;
+      const surface = st.orangeSurface;
+      const P = portals[pIdx];
+      P.placed = true;
+      P.c.copy(surface.c);
+      P.n.copy(surface.n);
+      P.r.copy(surface.r);
+      P.u.copy(surface.u);
+
+      if (onPortalPlaced) onPortalPlaced(pIdx, surface, surface.eyePos);
+
+      st.portalPhase = 'walk_thru';
+      st.lastPortalT = nowT;
+      st.walkThruT = nowT;
+    } else if (nowT - st.orangeAimT > 1.2) {
+      st.portalPhase = 'none';
+      st.lastPortalT = nowT + 3.0;
     }
   } else if (st.portalPhase === 'walk_thru') {
     const bluePortal = portals[botPortalBase];
@@ -959,8 +1078,8 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   }
 
   // ---- jump decision:
-  const jumpForLedge = heightDiffToTarget > 0.4 && heightDiffToTarget < 1.6 && dist < 3.5;
-  const shouldJump = pl.grounded && !isTallWall && (
+  const jumpForLedge = !onRamp && heightDiffToTarget > 0.4 && heightDiffToTarget < 1.6 && dist < 3.5;
+  const shouldJump = pl.grounded && !isTallWall && !onRamp && (
     canStepOver ||
     jumpForLedge ||
     !hasGroundAhead(pl.pos, pl.yaw, obbs)
@@ -971,7 +1090,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     st.lastJumpT = nowT;
   }
 
-  if (dist < 0.5 && st.portalPhase !== 'walk_thru') {
+  if (dist < 0.5 && st.portalPhase !== 'walk_thru' && (!st.waypoints || st.waypoints.length === 0)) {
     keys.KeyW = false;
   }
 
@@ -1007,6 +1126,14 @@ export function resetBotState(pid) {
     st.lastTickPos = null;
     st.avoidUntilT = 0;
     st.avoidYaw = 0;
+    st.blueSurface = null;
+    st.blueAimYaw = 0;
+    st.blueAimPitch = 0;
+    st.blueAimT = 0;
+    st.orangeSurface = null;
+    st.orangeAimYaw = 0;
+    st.orangeAimPitch = 0;
+    st.orangeAimT = 0;
     st.unstuckUntilT = 0;
     st.strafeDir = null;
     st.instagibTargetPid = null;

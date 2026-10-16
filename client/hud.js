@@ -72,10 +72,10 @@ export function initHUD(document) {
     scoreB: dom('scoreB'),
     readyA: dom('readyA'),
     readyB: dom('readyB'),
-    aim: dom('aimring'),
     winstats: dom('winstats'),
     statsboard: dom('statsboard'),
-    statsbody: dom('statsbody')
+    statsbody: dom('statsbody'),
+    spectateinfo: dom('spectateinfo')
   };
 
   // Seat map from the server match snapshot: seat 0 = left, seat 1 = right
@@ -123,7 +123,7 @@ export function initHUD(document) {
   }
 
   function updateHUD(state) {
-    const { pl, CFG, currentSeed, hit, match, localReady, localIndex, statsOpen, localPid, started, isSpectator, spectatorSpeed, spectatorMode, followPerspective, isTargetDead } = state;
+    const { pl, CFG, currentSeed, match, localReady, localIndex, statsOpen, localPid, started, isSpectator, spectatorSpeed, spectatorMode, followPerspective, isTargetDead, spectateTargetPid, remotePlayers } = state;
 
     // The whole HUD stays hidden in the main menu (orbit preview)
     hud.root.classList.toggle('hidden', !started);
@@ -139,6 +139,31 @@ export function initHUD(document) {
         crosshairEl.style.display = 'none';
       } else {
         crosshairEl.style.display = '';
+      }
+    }
+
+    if (hud.spectateinfo) {
+      if (isSpectator && spectatorMode === 'follow' && spectateTargetPid) {
+        let targetName = null;
+        if (remotePlayers && remotePlayers[spectateTargetPid] && remotePlayers[spectateTargetPid].name) {
+          targetName = remotePlayers[spectateTargetPid].name;
+        } else if (match && match.players && match.players[spectateTargetPid] && match.players[spectateTargetPid].name) {
+          targetName = match.players[spectateTargetPid].name;
+        } else if (match && match.spectators && match.spectators[spectateTargetPid] && match.spectators[spectateTargetPid].name) {
+          targetName = match.spectators[spectateTargetPid].name;
+        }
+
+        if (!targetName && match && match.players) {
+          const p = match.players[String(spectateTargetPid)] || match.players[Number(spectateTargetPid)];
+          if (p && p.name) targetName = p.name;
+        }
+
+        if (!targetName) targetName = `Player ${spectateTargetPid}`;
+        hud.spectateinfo.textContent = `Spectating ${targetName}`;
+        hud.spectateinfo.classList.remove('hidden');
+      } else {
+        hud.spectateinfo.classList.add('hidden');
+        hud.spectateinfo.textContent = '';
       }
     }
     
@@ -180,8 +205,6 @@ export function initHUD(document) {
       }
     }
     
-    // Aimring
-    hud.aim.classList.toggle('valid', !isSpectator && !!hit);
 
     if (match && match.phase === 'summary' && hud.winstats) {
       const seat = seats(match);

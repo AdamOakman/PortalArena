@@ -175,6 +175,114 @@ function start(ns, loading) {
     }
   };
 
+  /* ------------------------------------------------ connection & overlay */
+  G.showConnectOverlay = (text) => {
+    const el = document.getElementById('connect-overlay');
+    const title = document.getElementById('connect-overlay-title');
+    if (title) title.textContent = text;
+    if (el) el.classList.remove('hidden');
+  };
+
+  G.hideConnectOverlay = () => {
+    const el = document.getElementById('connect-overlay');
+    if (el) el.classList.add('hidden');
+  };
+
+  G.onConnectionTimeout = (msg) => {
+    if (G.connectionTimeout) {
+      clearTimeout(G.connectionTimeout);
+      G.connectionTimeout = null;
+    }
+    if (G.reconnectRetryTimer) {
+      clearTimeout(G.reconnectRetryTimer);
+      G.reconnectRetryTimer = null;
+    }
+    G.isConnecting = false;
+    G.isReconnecting = false;
+    if (G.Network && G.Network.disconnect) G.Network.disconnect();
+    G.hideConnectOverlay();
+    if (document.exitPointerLock) document.exitPointerLock();
+    G.pointerLocked = false;
+    G.started = false;
+    G.isConnected = false;
+    G.isDead = false;
+    G.isSpectator = true;
+    G.spectatorMode = 'freefly';
+    G.spectateTargetPid = null;
+    if (G.gun) G.gun.visible = false;
+    if (G.rocketGun) G.rocketGun.visible = false;
+    if (G.instagibGun) G.instagibGun.visible = false;
+    if (G.playerModel) G.playerModel.visible = false;
+    if (G.portals) {
+      for (const p of G.portals) {
+        p.placed = false;
+        p.closing = false;
+      }
+    }
+    if (G.remotePlayerMeshes) {
+      for (const pid in G.remotePlayerMeshes) {
+        if (G.remotePlayerMeshes[pid]) {
+          G.scene.remove(G.remotePlayerMeshes[pid]);
+          G.remotePlayerMeshes[pid].traverse(o => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) o.material.dispose();
+          });
+        }
+      }
+      G.remotePlayerMeshes = {};
+    }
+    G.remotePlayers = {};
+    const hud = document.getElementById('hud');
+    if (hud) hud.classList.add('hidden');
+    const menu = document.getElementById('menupanel');
+    if (menu) menu.classList.add('hidden');
+    const win = document.getElementById('winpanel');
+    if (win) win.classList.add('hidden');
+    const startPanel = document.getElementById('startpanel');
+    if (startPanel) {
+      startPanel.classList.remove('hidden');
+      startPanel.style.opacity = '1';
+    }
+    const connStatus = document.getElementById('connstatus');
+    if (connStatus) {
+      connStatus.textContent = msg || 'Connection timed out after 30 seconds';
+      connStatus.classList.remove('hidden');
+    }
+    if (G.addEventLog) {
+      G.addEventLog(msg || 'Connection timed out after 30 seconds', true);
+    }
+  };
+
+  G.startConnection = (ip, pass, name) => {
+    G.lastIp = ip;
+    G.lastPass = pass;
+    G.lastName = name;
+    G.isConnecting = true;
+    G.isReconnecting = false;
+    const connStatus = document.getElementById('connstatus');
+    if (connStatus) connStatus.classList.add('hidden');
+    G.showConnectOverlay('Connecting...');
+    if (G.connectionTimeout) clearTimeout(G.connectionTimeout);
+    G.connectionTimeout = setTimeout(() => {
+      G.onConnectionTimeout('Connecting timed out after 30 seconds');
+    }, 30000);
+    G.Network.connect(ip, pass, name);
+  };
+
+  G.onConnectionSuccess = () => {
+    G.isConnecting = false;
+    G.isReconnecting = false;
+    if (G.connectionTimeout) {
+      clearTimeout(G.connectionTimeout);
+      G.connectionTimeout = null;
+    }
+    if (G.reconnectRetryTimer) {
+      clearTimeout(G.reconnectRetryTimer);
+      G.reconnectRetryTimer = null;
+    }
+    G.hideConnectOverlay();
+  };
+
   initWorld(G);
   initPortals(G);
   initWeapons(G);

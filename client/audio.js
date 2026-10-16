@@ -6,8 +6,16 @@ export const AudioSys = {
   _noiseBuf: null,
   _lastToneTimes: {},
   ensure() {
-    if (!this.ac) { try { this.ac = new (window.AudioContext || window.webkitAudioContext()); } catch { /* ignore */ } }
+    if (!this.ac) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) this.ac = new AudioCtx();
+      } catch { /* ignore */ }
+    }
     if (this.ac && !this._master) this._buildBuses();
+    if (this.ac && this.ac.state === 'suspended') {
+      this.ac.resume().catch(() => {});
+    }
   },
   /* SFX bus: every sound is panned into the stereo field and sent through a
      shared chamber-reverb send, so direction (pan) and distance (volume plus
@@ -84,6 +92,7 @@ export const AudioSys = {
     send.connect(this._conv);
   },
   tone(f0, f1, dur, type = 'sine', vol = 0.12, when = 0, pos = null) {
+    if (!this.ac) this.ensure();
     if (!this.ac || this.muted || (typeof document !== 'undefined' && document.hidden)) return;
     const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
     const toneKey = `${type}_${Math.round(f0)}_${Math.round(f1)}`;
@@ -107,6 +116,7 @@ export const AudioSys = {
   },
   /* White-noise burst with an optional swept biquad filter (whoosh / zap crackle). */
   noise(dur, vol = 0.15, when = 0, pos = null, filter = null) {
+    if (!this.ac) this.ensure();
     if (!this.ac || this.muted || (typeof document !== 'undefined' && document.hidden)) return;
     const s = this.spatial(pos);
     const finalVol = s.vol * vol;
