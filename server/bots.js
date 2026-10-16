@@ -770,7 +770,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     pl.yaw += dyaw;
   }
   while (pl.yaw > Math.PI) pl.yaw -= Math.PI * 2;
-  while (pl.yaw < -Math.PI) pl.yaw -= Math.PI * 2;
+  while (pl.yaw < -Math.PI) pl.yaw += Math.PI * 2;
 
   // Smooth pitch: default to horizontal level gaze (pitch 0) rather than looking up at platforms
   const targetPitch = activeOpp
