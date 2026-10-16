@@ -10,6 +10,7 @@ export const gameState = {
   players: {},
   spectators: {},
   destroyedWalls: [],
+  destroyedWallObbs: [],
   portals: [
     { placed: false, c: new TH.Vector3(), n: new TH.Vector3(), r: new TH.Vector3(), u: new TH.Vector3(), color: 0x2eeaff },
     { placed: false, c: new TH.Vector3(), n: new TH.Vector3(), r: new TH.Vector3(), u: new TH.Vector3(), color: 0x0055ff },
@@ -195,14 +196,29 @@ export function serverDestroyWall(wallId, wallCenter, point) {
   const tIdx = uIdx === 0 ? 2 : 0;
   if (obb.he[tIdx] > 2.5) return null;
 
+  if (!gameState.destroyedWallObbs) gameState.destroyedWallObbs = [];
+  gameState.destroyedWallObbs.push({
+    id: obb.id,
+    c: obb.c.clone(),
+    ax: [obb.ax[0].clone(), obb.ax[1].clone(), obb.ax[2].clone()],
+    he: [obb.he[0], obb.he[1], obb.he[2]],
+    rad: obb.rad
+  });
+  obb.destroyed = true;
+  obb.noPortal = true;
+
   const idx = obbs.indexOf(obb);
   if (idx > -1) obbs.splice(idx, 1);
 
   const cancelledPortals = [];
   for (let i = 0; i < gameState.portals.length; i++) {
     const P = gameState.portals[i];
-    if (P.placed && P.c.distanceTo(obb.c) < obb.rad + 1) {
-      if (Math.abs(P.n.dot(obb.ax[tIdx])) > 0.99) {
+    if (P.placed && P.c.distanceTo(obb.c) < obb.rad + 2.0) {
+      const d = P.c.clone().sub(obb.c);
+      const u0 = Math.abs(d.dot(obb.ax[0]));
+      const u1 = Math.abs(d.dot(obb.ax[1]));
+      const u2 = Math.abs(d.dot(obb.ax[2]));
+      if (u0 <= obb.he[0] + 0.6 && u1 <= obb.he[1] + 0.6 && u2 <= obb.he[2] + 0.6) {
         P.placed = false;
         cancelledPortals.push(i);
       }
@@ -267,6 +283,7 @@ export function serverDestroyWall(wallId, wallCenter, point) {
 export function resetMapState() {
   obbs = buildObbs(mapData);
   gameState.destroyedWalls = [];
+  gameState.destroyedWallObbs = [];
   
   for (const p of gameState.portals) {
     p.placed = false;
@@ -301,4 +318,62 @@ export function updateMap(newSeed) {
     }
   }
 }
+
+export function isPortalOnDestroyedWall(c, n, r, u, PORT_) {
+  const hw = PORT_ ? PORT_.hw : 0.6;
+  const hh = PORT_ ? PORT_.hh : 1.2;
+
+  // 1. Check against full OBBs of all destroyed walls
+  if (gameState.destroyedWallObbs) {
+    for (const dob of gameState.destroyedWallObbs) {
+      const d = c.clone().sub(dob.c);
+      const u0 = Math.abs(d.dot(dob.ax[0]));
+      const u1 = Math.abs(d.dot(dob.ax[1]));
+      const u2 = Math.abs(d.dot(dob.ax[2]));
+      const ext0 = r && u ? (hw * Math.abs(r.dot(dob.ax[0])) + hh * Math.abs(u.dot(dob.ax[0]))) : hw;
+      const ext1 = r && u ? (hw * Math.abs(r.dot(dob.ax[1])) + hh * Math.abs(u.dot(dob.ax[1]))) : hh;
+      const ext2 = r && u ? (hw * Math.abs(r.dot(dob.ax[2])) + hh * Math.abs(u.dot(dob.ax[2]))) : hw;
+      if (u0 <= dob.he[0] + ext0 + 0.2 &&
+          u1 <= dob.he[1] + ext1 + 0.2 &&
+          u2 <= dob.he[2] + ext2 + 0.2) {
+        return true;
+      }
+    }
+  }
+
+  // 2. Check against all destroyed fragments / noPortal in obbs
+  for (const obb of obbs) {
+    if (obb.destroyed || obb.noPortal) {
+      const d = c.clone().sub(obb.c);
+      const u0 = Math.abs(d.dot(obb.ax[0]));
+      const u1 = Math.abs(d.dot(obb.ax[1]));
+      const u2 = Math.abs(d.dot(obb.ax[2]));
+      const ext0 = r && u ? (hw * Math.abs(r.dot(obb.ax[0])) + hh * Math.abs(u.dot(obb.ax[0]))) : hw;
+      const ext1 = r && u ? (hw * Math.abs(r.dot(obb.ax[1])) + hh * Math.abs(u.dot(obb.ax[1]))) : hh;
+      const ext2 = r && u ? (hw * Math.abs(r.dot(obb.ax[2])) + hh * Math.abs(u.dot(obb.ax[2]))) : hw;
+      if (u0 <= obb.he[0] + ext0 + 0.2 &&
+          u1 <= obb.he[1] + ext1 + 0.2 &&
+          u2 <= obb.he[2] + ext2 + 0.2) {
+        return true;
+      }
+    }
+  }
+
+  // 3. Check against gameState.destroyedWalls blast points and wall centers
+  if (gameState.destroyedWalls) {
+    for (const dw of gameState.destroyedWalls) {
+      if (dw.point) {
+        const pt = new TH.Vector3(...dw.point);
+        if (c.distanceTo(pt) < 5.4) return true;
+      }
+      if (dw.wallCenter) {
+        const wc = new TH.Vector3(...dw.wallCenter);
+        if (c.distanceTo(wc) < 4.5) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 

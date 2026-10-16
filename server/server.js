@@ -8,10 +8,26 @@ const wss = new WebSocketServer({ port: 3001 });
 const physics = initPhysics(TH, CFG, PORT);
 
 const SERVER_PASSWORD = "secret";
-import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, startCountdown, beginRound, matchToWaiting, matchInfo, pickSpawn, placeAtSpawn, serverDestroyWall, resetMapState } from './gamestate.js';
+import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, startCountdown, beginRound, matchToWaiting, matchInfo, pickSpawn, placeAtSpawn, serverDestroyWall, resetMapState, isPortalOnDestroyedWall } from './gamestate.js';
 
 // ------------------------------------------------------------------ bot management
 const BOT_COUNT = 2; // how many bots to fill the server with when empty
+const FUNNY_BOT_NAMES = [
+  'SirLagALot', 'AimBot9000', 'PotatoAim', 'GibMagnet', 'RocketClown',
+  'GlitchyMcFly', 'ToastLord', 'NoScopeGrandpa', 'OopsAllPortals', 'CampyMcCampface',
+  'CtrlAltDefeat', 'ByteMe', 'LavaEnthusiast', 'PanicJumper', 'YeetMaster',
+  'RoombaWithAGun', 'RubberBander', 'FragBait', 'DizzieRascal', 'WallHugger',
+  'PixelPusher', 'CaptainWhiff', 'SpawnCamper', 'BogoSort', 'Error404Skill',
+  'QuantumNoob', 'ClickHappy', 'Overclocker', 'PacketLoss', 'TriggerTroll'
+];
+
+function pickFunnyBotName() {
+  const existingNames = new Set(Object.values(gameState.players).map(p => p.name));
+  const available = FUNNY_BOT_NAMES.filter(n => !existingNames.has(n));
+  const pool = available.length > 0 ? available : FUNNY_BOT_NAMES;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 let nextBotId = 0;
 
 function addBot() {
@@ -21,7 +37,7 @@ function addBot() {
   const usedIdxs = Object.values(gameState.players).map(p => p.spawnIdx).filter(i => i != null);
   const spawnIdx = pickSpawn(usedIdxs);
   const spawn = mapData.spawns[spawnIdx];
-  const botName = 'Bot_' + nextBotId;
+  const botName = pickFunnyBotName();
   gameState.players[botId] = {
     isBot: true,
     playerIndex,
@@ -387,11 +403,23 @@ wss.on('connection', (ws) => {
       if (checkPortalOverlap(candidateC, candidateN, candidateR, candidateU, gameState.portals, data.pi, PORT)) {
         return;
       }
+      if (mapData.lava) {
+        for (const L of mapData.lava) {
+          const dx = candidateC.x - L.x, dz = candidateC.z - L.z;
+          const minSafeDist = L.r + PORT.hw + 0.3;
+          if (dx * dx + dz * dz < minSafeDist * minSafeDist && candidateC.y <= (L.y || 0.1) + PORT.hh + 0.3) {
+            return;
+          }
+        }
+      }
       if (data.wallId) {
         const hitObb = obbs.find(o => o.id === data.wallId);
         if (hitObb && (hitObb.noPortal || hitObb.destroyed || hitObb.kind === 'ramp')) {
           return;
         }
+      }
+      if (isPortalOnDestroyedWall(candidateC, candidateN, candidateR, candidateU, PORT)) {
+        return;
       }
       for (const obb of obbs) {
         if (obb.destroyed) {
@@ -488,6 +516,23 @@ wss.on('connection', (ws) => {
       wss.clients.forEach(c => {
         if (c !== ws && c.readyState === 1) c.send(msg);
       });
+    } else if (data.type === 'teleport') {
+      if (playerId && gameState.players[playerId]) {
+        const p = gameState.players[playerId];
+        if (data.viewOffset) {
+          p.viewOffset = new TH.Quaternion(data.viewOffset[0], data.viewOffset[1], data.viewOffset[2], data.viewOffset[3]);
+        } else {
+          p.viewOffset = null;
+        }
+        const tpMsg = JSON.stringify({
+          type: 'player_teleport',
+          playerId,
+          viewOffset: data.viewOffset
+        });
+        wss.clients.forEach(c => {
+          if (c !== ws && c.readyState === 1) c.send(tpMsg);
+        });
+      }
     } else if (data.type === 'player_died') {
       handlePlayerDeath(playerId, data.killerId, data.cause, data.viaPortal);
     } else if (data.type === 'new_map') {
@@ -556,7 +601,6 @@ const DT = 1 / TICK_RATE;
 
 // Provide a dummy R_AB / R_BA for teleport check (we'll implement real matrices later)
 const tpState = { nowT: 0, tpGracePortal: null, tpGraceT: -1, R_AB, R_BA };
-const events = {};
 
 function triggerCountdown() {
   startCountdown();
@@ -709,13 +753,17 @@ function stepPhysics(dt) {
 
     if (pl.isBot) {
       if (pl.crouchT > 0) {
-        pl.crouchT = Math.max(0, pl.crouchT - dt * 8);
+        pl.crouchT = Math.max(0, pl.crouchT - dt * 3);
       }
       if (!pl.isDead && match.phase !== 'countdown') {
         lastKeys = tickBot(pid, pl, tpState.nowT, gameState.portals, PORT, {
           onPortalPlaced: (pIdx, surface, eyePos) => {
-            updatePair();
             const P = gameState.portals[pIdx];
+            if (isPortalOnDestroyedWall(P.c, P.n, P.r, P.u, PORT)) {
+              P.placed = false;
+              return;
+            }
+            updatePair();
             const placeMsg = JSON.stringify({
               type: 'portal_place',
               pi: pIdx,
@@ -773,6 +821,24 @@ function stepPhysics(dt) {
       pl.vel.set(0, 0, 0);
     }
 
+    const playerEvents = {
+      onTeleport: (teleportedPl) => {
+        const tpMsg = JSON.stringify({
+          type: 'player_teleport',
+          playerId: pid,
+          viewOffset: (teleportedPl && teleportedPl.viewOffset) ? [
+            teleportedPl.viewOffset.x,
+            teleportedPl.viewOffset.y,
+            teleportedPl.viewOffset.z,
+            teleportedPl.viewOffset.w
+          ] : null
+        });
+        wss.clients.forEach(c => {
+          if (c.readyState === 1) c.send(tpMsg);
+        });
+      }
+    };
+
     physics.physStep(
       pl, 
       lastKeys, 
@@ -783,9 +849,15 @@ function stepPhysics(dt) {
       gameState.grabCubes, 
       null, 
       tpState, 
-      events,
+      playerEvents,
       gameState.players
     );
+
+    if (pl.viewOffset) {
+      const id = new TH.Quaternion();
+      pl.viewOffset.slerp(id, Math.min(1, dt * 5));
+      if (pl.viewOffset.angleTo(id) < 0.001) pl.viewOffset = null;
+    }
 
     // Bot death check (void / lava)
     if (pl.isBot && !pl.isDead) {
@@ -880,7 +952,8 @@ setInterval(() => {
       activeWeapon: p.activeWeapon || 1,
       crouchT: p.crouchT || 0,
       isDead: !!p.isDead,
-      playerIndex: p.playerIndex
+      playerIndex: p.playerIndex,
+      viewOffset: p.viewOffset ? [p.viewOffset.x, p.viewOffset.y, p.viewOffset.z, p.viewOffset.w] : null
     };
   }
 

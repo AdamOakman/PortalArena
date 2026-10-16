@@ -429,6 +429,7 @@ export function initWeapons(G) {
   }
 
   function explosion(pos, isLocal) {
+    if (typeof document !== 'undefined' && document.hidden) return;
     AudioSys.tone(100, 40, 0.4, 'square', 0.2, 0, pos);
     const expl = new TH.Mesh(new TH.SphereGeometry(3.5, 16, 16), new TH.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 1 }));
     expl.position.copy(pos);

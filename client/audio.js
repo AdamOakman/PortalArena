@@ -4,6 +4,7 @@ export const AudioSys = {
   listenerPos: null,
   listenerYaw: null,
   _noiseBuf: null,
+  _lastToneTimes: {},
   ensure() {
     if (!this.ac) { try { this.ac = new (window.AudioContext || window.webkitAudioContext()); } catch { /* ignore */ } }
     if (this.ac && !this._master) this._buildBuses();
@@ -23,7 +24,15 @@ export const AudioSys = {
     this._dry.connect(this._master);
     this._conv.connect(this._wet);
     this._wet.connect(this._master);
-    this._master.connect(ac.destination);
+
+    const limiter = ac.createDynamicsCompressor();
+    limiter.threshold.value = -3;
+    limiter.knee.value = 3;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.08;
+    this._master.connect(limiter);
+    limiter.connect(ac.destination);
   },
   /* Procedural small-chamber impulse response: ~9 early reflections in the
      first 60 ms over an exponentially decaying 0.8 s noise tail, decorrelated
@@ -75,7 +84,14 @@ export const AudioSys = {
     send.connect(this._conv);
   },
   tone(f0, f1, dur, type = 'sine', vol = 0.12, when = 0, pos = null) {
-    if (!this.ac || this.muted) return;
+    if (!this.ac || this.muted || (typeof document !== 'undefined' && document.hidden)) return;
+    const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+    const toneKey = `${type}_${Math.round(f0)}_${Math.round(f1)}`;
+    if (this._lastToneTimes[toneKey] && (now - this._lastToneTimes[toneKey] < 50)) {
+      return;
+    }
+    this._lastToneTimes[toneKey] = now;
+
     const s = this.spatial(pos);
     const finalVol = s.vol * vol;
     if (!finalVol) return;
@@ -91,7 +107,7 @@ export const AudioSys = {
   },
   /* White-noise burst with an optional swept biquad filter (whoosh / zap crackle). */
   noise(dur, vol = 0.15, when = 0, pos = null, filter = null) {
-    if (!this.ac || this.muted) return;
+    if (!this.ac || this.muted || (typeof document !== 'undefined' && document.hidden)) return;
     const s = this.spatial(pos);
     const finalVol = s.vol * vol;
     if (!this._noiseBuf) {

@@ -152,9 +152,35 @@ export function initLoop(G) {
   }
 
   let last = performance.now();
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && G.rockets) {
+        for (let i = G.rockets.length - 1; i >= 0; i--) {
+          if (!G.rockets[i].isLocal) {
+            G.scene.remove(G.rockets[i].mesh);
+            G.rockets[i].mesh.traverse(o => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
+            G.rockets.splice(i, 1);
+          }
+        }
+      }
+    });
+  }
+
   function frame(now) {
     requestAnimationFrame(frame);
-    let dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const elapsed = (now - last) / 1000;
+    let dt = Math.min(0.05, elapsed);
+    last = now;
+
+    if (elapsed > 0.25 && G.rockets) {
+      for (let i = G.rockets.length - 1; i >= 0; i--) {
+        if (!G.rockets[i].isLocal) {
+          G.scene.remove(G.rockets[i].mesh);
+          G.rockets[i].mesh.traverse(o => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
+          G.rockets.splice(i, 1);
+        }
+      }
+    }
     if (G.isSpectator) {
       AudioSys.listenerPos = G.camera.position;
       AudioSys.listenerYaw = (G.spectatorMode === 'follow' && G.spectateTargetPid && G.remotePlayers[G.spectateTargetPid])
@@ -248,6 +274,15 @@ export function initLoop(G) {
                 G.camera.position.set(rp.pos[0], rp.pos[1] + crouchOffset, rp.pos[2]);
                 G.camera.rotation.order = 'YXZ';
                 G.camera.quaternion.setFromEuler(new TH.Euler(rp.pitch, rp.yaw, 0, 'YXZ'));
+                if (rp.viewOffset) {
+                  const id = new TH.Quaternion();
+                  rp.viewOffset.slerp(id, Math.min(1, dt * 5));
+                  if (rp.viewOffset.angleTo(id) < 0.001) {
+                    rp.viewOffset = null;
+                  } else {
+                    G.camera.quaternion.multiply(rp.viewOffset);
+                  }
+                }
                 G.specPos.copy(G.camera.position);
                 G.specYaw = rp.yaw;
                 G.specPitch = rp.pitch;
@@ -478,8 +513,11 @@ export function initLoop(G) {
 
         if (targetHit || r.life <= 0) {
           const explPos = targetHit ? targetHit.point : r.pos;
-          G.explosion(explPos, r.isLocal);
-          if (targetHit && targetHit.isWall) G.destroyWall(targetHit.obb, targetHit.point, targetHit.normal, r.isLocal);
+          if (typeof document === 'undefined' || !document.hidden) G.explosion(explPos, r.isLocal);
+          if (targetHit && targetHit.isWall) {
+            const spawnDebris = (typeof document === 'undefined' || !document.hidden);
+            G.destroyWall(targetHit.obb, targetHit.point, targetHit.normal, r.isLocal, spawnDebris);
+          }
           G.scene.remove(r.mesh);
           r.mesh.traverse(o => { if(o.material) o.material.dispose(); if(o.geometry) o.geometry.dispose(); });
           G.rockets.splice(i, 1);
@@ -685,7 +723,6 @@ export function initLoop(G) {
            }
            if (a.life < 1.5) {
               a.obj.material.opacity = a.life / 1.5;
-              a.obj.scale.setScalar(0.5 + (a.life / 3.0) * 0.5);
            }
         }
       } else if (a.type === 'debris') {
