@@ -1,3 +1,7 @@
+/**
+ * AudioController & AudioSys — Subsystem translating engine events into synthesized positional audio.
+ */
+
 export const AudioSys = {
   ac: null,
   muted: false,
@@ -179,3 +183,37 @@ export const AudioSys = {
     return this.muted;
   }
 };
+
+/**
+ * AudioController — Subsystem translating engine events into synthesized positional audio.
+ */
+export class AudioController {
+  constructor(engine) {
+    this.engine = engine;
+    this._setupListeners();
+  }
+
+  _setupListeners() {
+    if (!this.engine || !this.engine.eventBus) return;
+
+    const bus = this.engine.eventBus;
+    bus.on('SOUND_JUMP', () => AudioSys.tone(340, 520, 0.06, 'triangle', 0.04));
+    bus.on('SOUND_LAND', (data) => {
+      const vol = data && data.volume ? data.volume : 0.2;
+      AudioSys.tone(90, 45, 0.12, 'sine', vol);
+    });
+    bus.on('SOUND_JUMPPAD', () => AudioSys.tone(200, 600, 0.4, 'sine', 0.15));
+    bus.on('SOUND_PORTAL_OPEN', (data) => AudioSys.portalOpen(data ? data.position : null));
+    bus.on('SOUND_PORTAL_CLOSE', (data) => AudioSys.portalClose(data ? data.position : null));
+    bus.on('SOUND_INSTAGIB_SHOT', (data) => AudioSys.instagibShot(data ? data.position : null));
+    bus.on('SOUND_INSTAGIB_ZAP', (data) => AudioSys.zap(data ? data.position : null, data ? data.delay : 0));
+  }
+
+  toggleMute() {
+    return AudioSys.toggleMute();
+  }
+
+  ensure() {
+    AudioSys.ensure();
+  }
+}

@@ -1,10 +1,133 @@
-import { AudioSys } from './audio.js';
-import { CFG, PORT } from '../shared/constants.js';
+import * as THREE from 'three';
+import { EventBus } from './EventBus.js';
+import { EntityManager } from '../entities/EntityManager.js';
+import { PlayerController } from '../entities/PlayerController.js';
+import { WeaponManager } from '../weapons/WeaponManager.js';
+import { MatchStateMachine } from '../state/MatchStateMachine.js';
+import { WorldManager } from '../world/WorldManager.js';
+import { PortalManager } from '../portals/PortalManager.js';
+import { InputManager } from '../input/InputManager.js';
+import { NetworkManager } from '../network/NetworkManager.js';
+import { RenderManager } from '../rendering/RenderManager.js';
+import { HUDController } from '../ui/HUDController.js';
+import { AudioController } from '../audio/AudioController.js';
+import { PortalGun } from '../weapons/PortalGun.js';
+import { RocketLauncher } from '../weapons/RocketLauncher.js';
+import { InstagibRifle } from '../weapons/InstagibRifle.js';
+import { AudioSys } from '../audio/AudioController.js';
+import { CFG, PORT } from '../../shared/constants.js';
 
-/* ============================================================================
-   LOOP — the main animation frame: input/physics stepping, weapon & beam
-   updates, grab cubes, portal visuals, animated FX objects, HUD, and render.
-   ============================================================================ */
+/**
+ * GameEngine — Central OOP Composition Root, loop coordinator, and lifecycle manager.
+ */
+export class GameEngine {
+  constructor(canvas, context = null) {
+    this.canvas = canvas;
+    this.context = context;
+    if (context) {
+      context.engine = this;
+    }
+    this.eventBus = new EventBus();
+    this.renderManager = context?.renderManager || new RenderManager(canvas);
+    this.audioController = context?.audioController || new AudioController(this);
+    this.hudController = context?.hudController || new HUDController(this);
+
+    this.entityManager = new EntityManager(this);
+    this.player = context?.playerController || new PlayerController(this);
+    this.entityManager.spawn(this.player);
+
+    this.worldManager = context?.worldManager || new WorldManager(this);
+    this.portalManager = context?.portalManager || new PortalManager(this);
+    this.inputManager = context?.inputManager || new InputManager(this, canvas);
+    this.network = context?.network || context?.Network || new NetworkManager(this);
+    this.weaponManager = context?.weaponManager || new WeaponManager(this.eventBus, this);
+    this.matchState = new MatchStateMachine(this);
+
+    // Register weapon strategies into slots
+    this.weaponManager.register(1, new PortalGun(this));
+    this.weaponManager.register(2, new RocketLauncher(this));
+    this.weaponManager.register(3, new InstagibRifle(this));
+
+    this.isRunning = false;
+    this.lastFrameTime = performance.now();
+  }
+
+  /**
+   * Start the main engine loop.
+   */
+  start() {
+    this.isRunning = true;
+    this.lastFrameTime = performance.now();
+    if (!this.context) {
+      this.tick();
+    }
+  }
+
+  /**
+   * Stop the main engine loop.
+   */
+  stop() {
+    this.isRunning = false;
+  }
+
+  /**
+   * Main per-frame tick.
+   */
+  tick = () => {
+    if (!this.isRunning) return;
+
+    const now = performance.now();
+    const dt = Math.min((now - this.lastFrameTime) / 1000, 0.1);
+    this.lastFrameTime = now;
+
+    this.update(dt);
+    this.render();
+
+    requestAnimationFrame(this.tick);
+  };
+
+  /**
+   * Update all engine subsystems and entities.
+   * @param {number} dt
+   */
+  update(dt) {
+    if (this.context) {
+      this.eventBus.emit('ENGINE_TICK', { dt });
+      return;
+    }
+    this.matchState.update(dt);
+    this.weaponManager.update(dt);
+    if (this.inputManager && this.player) {
+      this.player.stepPhysics(dt, this.inputManager.keys, this.context);
+    }
+    this.entityManager.update(dt);
+    this.eventBus.emit('ENGINE_TICK', { dt });
+  }
+
+  /**
+   * Render the active scene.
+   */
+  render() {
+    if (this.renderManager && !this.context) {
+      this.renderManager.render();
+    }
+    this.eventBus.emit('ENGINE_RENDER');
+  }
+
+  /**
+   * Cleanup and dispose engine resources.
+   */
+  destroy() {
+    this.stop();
+    this.entityManager.clear();
+    this.eventBus.clear();
+  }
+}
+
+/**
+ * Procedural backward compatibility wrapper for the main game animation frame.
+ * @param {Object} G - Game state context
+ */
 export function initLoop(G) {
   const { TH, V3 } = G;
 
@@ -32,7 +155,10 @@ export function initLoop(G) {
           let kBest = 0, best = -Infinity;
           for (let k = 0; k < 3; k++) {
             const over = Math.abs(lc[k]) - obb.he[k];
-            if (over > best) { best = over; kBest = k; }
+            if (over > best) {
+              best = over;
+              kBest = k;
+            }
           }
           const lcVal = kBest === 0 ? lc[0] : (kBest === 1 ? lc[1] : lc[2]);
           n = obb.ax[kBest].clone().multiplyScalar(Math.sign(lcVal) || 1);
@@ -59,7 +185,10 @@ export function initLoop(G) {
               const du = Math.abs((pos.x - P.c.x) * P.r.x + (pos.y - P.c.y) * P.r.y + (pos.z - P.c.z) * P.r.z);
               const dv = Math.abs((pos.x - P.c.x) * P.u.x + (pos.y - P.c.y) * P.u.y + (pos.z - P.c.z) * P.u.z);
               const dn = Math.abs((pos.x - P.c.x) * P.n.x + (pos.y - P.c.y) * P.n.y + (pos.z - P.c.z) * P.n.z);
-              if (du < PORT.hw && dv < PORT.hh && dn < 2.0) { hole = true; break; }
+              if (du < PORT.hw && dv < PORT.hh && dn < 2.0) {
+                hole = true;
+                break;
+              }
             }
             if (hole) break;
           }
@@ -155,13 +284,17 @@ export function initLoop(G) {
   let fpsFrames = 0;
   let lastFpsUpdate = performance.now();
   let fpsValEl = null;
+
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && G.rockets) {
         for (let i = G.rockets.length - 1; i >= 0; i--) {
           if (!G.rockets[i].isLocal) {
             G.scene.remove(G.rockets[i].mesh);
-            G.rockets[i].mesh.traverse(o => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
+            G.rockets[i].mesh.traverse(o => {
+              if (o.material) o.material.dispose();
+              if (o.geometry) o.geometry.dispose();
+            });
             G.rockets.splice(i, 1);
           }
         }
@@ -172,8 +305,12 @@ export function initLoop(G) {
   function frame(now) {
     requestAnimationFrame(frame);
     const elapsed = (now - last) / 1000;
-    let dt = Math.min(0.05, elapsed);
+    const dt = Math.min(0.05, elapsed);
     last = now;
+
+    if (G.engine?.eventBus) {
+      G.engine.eventBus.emit('ENGINE_TICK', { dt });
+    }
 
     fpsFrames++;
     if (now - lastFpsUpdate >= 250) {
@@ -191,11 +328,15 @@ export function initLoop(G) {
       for (let i = G.rockets.length - 1; i >= 0; i--) {
         if (!G.rockets[i].isLocal) {
           G.scene.remove(G.rockets[i].mesh);
-          G.rockets[i].mesh.traverse(o => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
+          G.rockets[i].mesh.traverse(o => {
+            if (o.material) o.material.dispose();
+            if (o.geometry) o.geometry.dispose();
+          });
           G.rockets.splice(i, 1);
         }
       }
     }
+
     if (G.isSpectator) {
       AudioSys.listenerPos = G.camera.position;
       AudioSys.listenerYaw = (G.spectatorMode === 'follow' && G.spectateTargetPid && G.remotePlayers[G.spectateTargetPid])
@@ -206,19 +347,21 @@ export function initLoop(G) {
       AudioSys.listenerYaw = G.pl.yaw;
     }
     G.nowT += dt;
+
     if (G.started && G.isConnected && G.localPlayerId != null && G.nowT >= G.nextPingT) {
       G.Network.send({ type: 'ping', t: performance.now(), ping: G.lastPingMs });
       G.nextPingT = G.nowT + 5;
     }
 
-    if (!G.started) { // idle preview orbit while at menu — close, centered on the arena
-      // radius 20 < 25 keeps the camera inside the boundary walls for the whole orbit
+    if (!G.started) {
       const t = now * 0.00012;
       G.camera.position.set(Math.cos(t) * 20, 17, Math.sin(t) * 20);
       G.camera.lookAt(0, 2.5, 0);
-      G.gun.visible = false; G.rocketGun.visible = false; G.instagibGun.visible = false; // no weapon in the menu orbit view
+      G.gun.visible = false;
+      G.rocketGun.visible = false;
+      G.instagibGun.visible = false;
     } else if (G.isSpectator) {
-      let activeKeys = G.pointerLocked ? G.keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
+      const activeKeys = G.pointerLocked ? G.keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
 
       if (G.spectatorMode === 'freefly') {
         const fwd = new V3(0, 0, -1).applyEuler(new TH.Euler(G.specPitch, G.specYaw, 0, 'YXZ')).normalize();
@@ -299,7 +442,7 @@ export function initLoop(G) {
                 }
               }
               G.camera.position.lerp(rp.deathCamPos, Math.min(1, dt * 5));
-              const lookMat = new TH.Matrix4().lookAt(G.camera.position, rp.deathCamTarget, new TH.Vector3(0, 1, 0));
+              const lookMat = new TH.Matrix4().lookAt(G.camera.position, rp.deathCamTarget, new THREE.Vector3(0, 1, 0));
               G.camera.quaternion.slerp(new TH.Quaternion().setFromRotationMatrix(lookMat), Math.min(1, dt * 5));
               G.specPos.copy(G.camera.position);
               const euler = new TH.Euler().setFromQuaternion(G.camera.quaternion, 'YXZ');
@@ -343,12 +486,8 @@ export function initLoop(G) {
       }
 
       G.playerModel.visible = false;
-
-      // Render remote players
       G.updateRemotePlayers(dt, G.nowT);
-
     } else if (!G.won) {
-
       let activeKeys = G.pointerLocked ? G.keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
       if (G.countdownActive || (G.match && G.match.phase === 'countdown')) {
         activeKeys = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
@@ -357,26 +496,41 @@ export function initLoop(G) {
       const isCrouching = activeKeys.KeyC || activeKeys.ControlLeft;
       G.pl.crouchT = Math.max(0, Math.min(1, G.pl.crouchT + (isCrouching ? dt * 10 : -dt * 10)));
 
-        if (G.localPlayerId != null) { G.Network.send({
+      if (G.localPlayerId != null) {
+        G.Network.send({
           type: 'input',
-          dt: dt,
+          dt,
           keys: {
-            KeyW: activeKeys.KeyW, KeyA: activeKeys.KeyA, KeyS: activeKeys.KeyS, KeyD: activeKeys.KeyD, Space: activeKeys.Space, ShiftLeft: activeKeys.ShiftLeft
+            KeyW: activeKeys.KeyW,
+            KeyA: activeKeys.KeyA,
+            KeyS: activeKeys.KeyS,
+            KeyD: activeKeys.KeyD,
+            Space: activeKeys.Space,
+            ShiftLeft: activeKeys.ShiftLeft
           },
           yaw: G.pl.yaw,
           pitch: G.pl.pitch,
-          autohop: G.autohop, crouch: isCrouching, crouchT: G.pl.crouchT,
+          autohop: G.autohop,
+          crouch: isCrouching,
+          crouchT: G.pl.crouchT,
           jumpBuf: G.pl.jumpBuf,
           pos: G.pl.pos.toArray(),
           vel: G.pl.vel.toArray(),
           activeWeapon: G.activeWeapon,
-          isDead: G.isDead, grabbedCubeIdx: G.grabbedCube ? G.grabCubes.indexOf(G.grabbedCube) : undefined, grabbedCubePos: G.grabbedCube ? G.grabbedCube.pos.toArray() : undefined, grabbedCubeVel: G.grabbedCube ? G.grabbedCube.vel.toArray() : undefined });
+          isDead: G.isDead,
+          grabbedCubeIdx: G.grabbedCube ? G.grabCubes.indexOf(G.grabbedCube) : undefined,
+          grabbedCubePos: G.grabbedCube ? G.grabbedCube.pos.toArray() : undefined,
+          grabbedCubeVel: G.grabbedCube ? G.grabbedCube.vel.toArray() : undefined
+        });
       }
 
       let rem = G.isConnected ? dt : 0;
-      while (rem > 1e-4) { const s = Math.min(rem, 1 / 120); G.physStep(s, activeKeys); rem -= s; }
+      while (rem > 1e-4) {
+        const s = Math.min(rem, 1 / 120);
+        G.physStep(s, activeKeys);
+        rem -= s;
+      }
 
-      // Render remote players
       G.updateRemotePlayers(dt, G.nowT);
     }
 
@@ -386,7 +540,7 @@ export function initLoop(G) {
     G.placePortalVisuals();
     G.renderPortalViews();
 
-    G.muzzleT = Math.max(0, G.muzzleT - dt * 6);
+    G.muzzleT = Math.max(0, (G.muzzleT || 0) - dt * 6);
     const mt = G.muzzleT;
     const scale = 1 + mt * 0.12;
     const lZ = -0.5 + mt * 0.2;
@@ -396,9 +550,15 @@ export function initLoop(G) {
     const targetPl = isFollowPOV ? G.remotePlayers[G.spectateTargetPid] : null;
 
     if (!G.isSpectator) {
-      G.gun.scale.setScalar(1); G.gun.position.z = -0.5; G.gun.rotation.x = 0;
-      G.rocketGun.scale.setScalar(1); G.rocketGun.position.z = -0.5; G.rocketGun.rotation.x = 0;
-      G.instagibGun.scale.setScalar(1); G.instagibGun.position.z = -0.5; G.instagibGun.rotation.x = 0;
+      G.gun.scale.setScalar(1);
+      G.gun.position.z = -0.5;
+      G.gun.rotation.x = 0;
+      G.rocketGun.scale.setScalar(1);
+      G.rocketGun.position.z = -0.5;
+      G.rocketGun.rotation.x = 0;
+      G.instagibGun.scale.setScalar(1);
+      G.instagibGun.position.z = -0.5;
+      G.instagibGun.rotation.x = 0;
 
       const pM = G.playerModel.userData;
       if (pM.mirrorGun) { pM.mirrorGun.scale.setScalar(1); pM.mirrorGun.position.z = -0.5; pM.mirrorGun.rotation.x = 0; }
@@ -409,13 +569,25 @@ export function initLoop(G) {
       const actHUD = aw === 1 ? G.gun : (aw === 2 ? G.rocketGun : G.instagibGun);
       const actMir = aw === 1 ? pM.mirrorGun : (aw === 2 ? pM.mirrorRocketGun : pM.mirrorInstagibGun);
 
-      actHUD.scale.setScalar(scale); actHUD.position.z = lZ; actHUD.rotation.x = lRot;
+      actHUD.scale.setScalar(scale);
+      actHUD.position.z = lZ;
+      actHUD.rotation.x = lRot;
       if (aw === 1 && G.gun.userData.core) G.gun.userData.core.material.emissiveIntensity = 2.2 + mt * 6;
-      if (actMir) { actMir.scale.setScalar(1 + mt * 0.12); actMir.position.z = -0.5 + mt * 0.15; actMir.rotation.x = mt * 0.3; }
+      if (actMir) {
+        actMir.scale.setScalar(1 + mt * 0.12);
+        actMir.position.z = -0.5 + mt * 0.15;
+        actMir.rotation.x = mt * 0.3;
+      }
     } else if (targetPl && !targetPl.isDead) {
-      G.gun.scale.setScalar(1); G.gun.position.z = -0.5; G.gun.rotation.x = 0;
-      G.rocketGun.scale.setScalar(1); G.rocketGun.position.z = -0.5; G.rocketGun.rotation.x = 0;
-      G.instagibGun.scale.setScalar(1); G.instagibGun.position.z = -0.5; G.instagibGun.rotation.x = 0;
+      G.gun.scale.setScalar(1);
+      G.gun.position.z = -0.5;
+      G.gun.rotation.x = 0;
+      G.rocketGun.scale.setScalar(1);
+      G.rocketGun.position.z = -0.5;
+      G.rocketGun.rotation.x = 0;
+      G.instagibGun.scale.setScalar(1);
+      G.instagibGun.position.z = -0.5;
+      G.instagibGun.rotation.x = 0;
 
       const aw = targetPl.activeWeapon || 1;
       G.gun.visible = (aw === 1);
@@ -432,7 +604,9 @@ export function initLoop(G) {
       }
 
       const actHUD = aw === 1 ? G.gun : (aw === 2 ? G.rocketGun : G.instagibGun);
-      actHUD.scale.setScalar(scale); actHUD.position.z = lZ; actHUD.rotation.x = lRot;
+      actHUD.scale.setScalar(scale);
+      actHUD.position.z = lZ;
+      actHUD.rotation.x = lRot;
       if (aw === 1 && G.gun.userData.core) G.gun.userData.core.material.emissiveIntensity = 2.2 + mt * 6;
     } else {
       G.gun.visible = false;
@@ -445,8 +619,12 @@ export function initLoop(G) {
       const b = G.activeBeams[i];
       b.life -= dt;
       if (b.life <= 0) {
-        G.scene.remove(b.coreMesh); G.scene.remove(b.hMesh); G.scene.remove(b.points);
-        b.coreMesh.material.dispose(); b.hMesh.material.dispose(); b.points.material.dispose();
+        G.scene.remove(b.coreMesh);
+        G.scene.remove(b.hMesh);
+        G.scene.remove(b.points);
+        b.coreMesh.material.dispose();
+        b.hMesh.material.dispose();
+        b.points.material.dispose();
         b.points.geometry.dispose();
         G.activeBeams.splice(i, 1);
         continue;
@@ -454,16 +632,14 @@ export function initLoop(G) {
       b.coreMesh.material.opacity = b.life * 0.9;
       b.coreMesh.scale.x = b.life * 0.6;
       b.coreMesh.scale.y = b.life * 0.6;
-
       b.hMesh.material.opacity = b.life * 0.8;
       b.hMesh.rotateZ(dt * 15);
-
       b.points.material.opacity = b.life;
       const pos = b.points.geometry.attributes.position.array;
       for (let j = 0; j < b.vel.length; j++) {
-        pos[j*3] += b.vel[j].x * dt;
-        pos[j*3+1] += b.vel[j].y * dt;
-        pos[j*3+2] += b.vel[j].z * dt;
+        pos[j * 3] += b.vel[j].x * dt;
+        pos[j * 3 + 1] += b.vel[j].y * dt;
+        pos[j * 3 + 2] += b.vel[j].z * dt;
       }
       b.points.geometry.attributes.position.needsUpdate = true;
     }
@@ -475,37 +651,37 @@ export function initLoop(G) {
 
       let teleported = false;
       for (let pairIdx = 0; pairIdx < 2; pairIdx++) {
-         if (teleported) break;
-         const offset = pairIdx * 2;
-         if (G.portals[offset].placed && G.portals[offset+1].placed) {
-            const nextPos = r.pos.clone().add(step);
-            for (let idx = 0; idx < 2; idx++) {
-               const pi = offset + idx;
-               const P = G.portals[pi], Q = G.portals[offset + (1 - idx)];
-               const a = (r.pos.x - P.c.x) * P.n.x + (r.pos.y - P.c.y) * P.n.y + (r.pos.z - P.c.z) * P.n.z;
-               const b = (nextPos.x - P.c.x) * P.n.x + (nextPos.y - P.c.y) * P.n.y + (nextPos.z - P.c.z) * P.n.z;
-               if ((a > 0) !== (b > 0)) {
-                  const t = Math.max(0, Math.min(1, a / (a - b)));
-                  const cx = r.pos.x + (nextPos.x - r.pos.x) * t;
-                  const cy = r.pos.y + (nextPos.y - r.pos.y) * t;
-                  const cz = r.pos.z + (nextPos.z - r.pos.z) * t;
-                  const du = Math.abs((cx - P.c.x) * P.r.x + (cy - P.c.y) * P.r.y + (cz - P.c.z) * P.r.z);
-                  const dv = Math.abs((cx - P.c.x) * P.u.x + (cy - P.c.y) * P.u.y + (cz - P.c.z) * P.u.z);
-                  if (du <= PORT.hw && dv <= PORT.hh) {
-                     const R = idx === 0 ? G.R_AB[pairIdx] : G.R_BA[pairIdx];
-                     r.vel.applyMatrix4(R);
-                     const rel = new V3(cx, cy, cz).sub(P.c).applyMatrix4(R);
-                     r.pos.copy(Q.c).add(rel).addScaledVector(r.vel, dt * (1 - t));
-                     const newDir = r.vel.clone().normalize();
-                     if (newDir.lengthSq() > 0.001) {
-                        r.mesh.quaternion.setFromUnitVectors(new TH.Vector3(0, 1, 0), newDir);
-                     }
-                     teleported = true;
-                     break;
-                  }
-               }
+        if (teleported) break;
+        const offset = pairIdx * 2;
+        if (G.portals[offset].placed && G.portals[offset + 1].placed) {
+          const nextPos = r.pos.clone().add(step);
+          for (let idx = 0; idx < 2; idx++) {
+            const pi = offset + idx;
+            const P = G.portals[pi], Q = G.portals[offset + (1 - idx)];
+            const a = (r.pos.x - P.c.x) * P.n.x + (r.pos.y - P.c.y) * P.n.y + (r.pos.z - P.c.z) * P.n.z;
+            const b = (nextPos.x - P.c.x) * P.n.x + (nextPos.y - P.c.y) * P.n.y + (nextPos.z - P.c.z) * P.n.z;
+            if ((a > 0) !== (b > 0)) {
+              const t = Math.max(0, Math.min(1, a / (a - b)));
+              const cx = r.pos.x + (nextPos.x - r.pos.x) * t;
+              const cy = r.pos.y + (nextPos.y - r.pos.y) * t;
+              const cz = r.pos.z + (nextPos.z - r.pos.z) * t;
+              const du = Math.abs((cx - P.c.x) * P.r.x + (cy - P.c.y) * P.r.y + (cz - P.c.z) * P.r.z);
+              const dv = Math.abs((cx - P.c.x) * P.u.x + (cy - P.c.y) * P.u.y + (cz - P.c.z) * P.u.z);
+              if (du <= PORT.hw && dv <= PORT.hh) {
+                const R = idx === 0 ? G.R_AB[pairIdx] : G.R_BA[pairIdx];
+                r.vel.applyMatrix4(R);
+                const rel = new V3(cx, cy, cz).sub(P.c).applyMatrix4(R);
+                r.pos.copy(Q.c).add(rel).addScaledVector(r.vel, dt * (1 - t));
+                const newDir = r.vel.clone().normalize();
+                if (newDir.lengthSq() > 0.001) {
+                  r.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), newDir);
+                }
+                teleported = true;
+                break;
+              }
             }
-         }
+          }
+        }
       }
 
       if (!teleported) {
@@ -520,12 +696,12 @@ export function initLoop(G) {
           if (r.shooterId && String(pid) === String(r.shooterId)) continue;
           const rp = G.remotePlayers[pid];
           if (!rp || rp.isDead) continue;
-          const box = new TH.Box3();
-          const rpPos = new TH.Vector3().fromArray(rp.pos);
-          box.min.copy(rpPos).add(new TH.Vector3(-0.45, 0, -0.45));
-          box.max.copy(rpPos).add(new TH.Vector3(0.45, CFG.H, 0.45));
-          const ray = new TH.Ray(r.pos, rDir);
-          const pt = ray.intersectBox(box, new TH.Vector3());
+          const box = new THREE.Box3();
+          const rpPos = new THREE.Vector3().fromArray(rp.pos);
+          box.min.copy(rpPos).add(new THREE.Vector3(-0.45, 0, -0.45));
+          box.max.copy(rpPos).add(new THREE.Vector3(0.45, CFG.H, 0.45));
+          const ray = new THREE.Ray(r.pos, rDir);
+          const pt = ray.intersectBox(box, new THREE.Vector3());
           if (pt) {
             const d = r.pos.distanceTo(pt);
             if (d < bestDist) {
@@ -536,11 +712,11 @@ export function initLoop(G) {
         }
 
         if (!r.isLocal && !G.isDead && (!r.shooterId || String(r.shooterId) !== String(G.localPlayerId))) {
-          const box = new TH.Box3();
-          box.min.copy(G.pl.pos).add(new TH.Vector3(-0.45, 0, -0.45));
-          box.max.copy(G.pl.pos).add(new TH.Vector3(0.45, CFG.H, 0.45));
-          const ray = new TH.Ray(r.pos, rDir);
-          const pt = ray.intersectBox(box, new TH.Vector3());
+          const box = new THREE.Box3();
+          box.min.copy(G.pl.pos).add(new THREE.Vector3(-0.45, 0, -0.45));
+          box.max.copy(G.pl.pos).add(new THREE.Vector3(0.45, CFG.H, 0.45));
+          const ray = new THREE.Ray(r.pos, rDir);
+          const pt = ray.intersectBox(box, new THREE.Vector3());
           if (pt) {
             const d = r.pos.distanceTo(pt);
             if (d < bestDist) {
@@ -561,7 +737,10 @@ export function initLoop(G) {
             G.destroyWall(targetHit.obb, targetHit.point, targetHit.normal, r.isLocal, spawnDebris);
           }
           G.scene.remove(r.mesh);
-          r.mesh.traverse(o => { if(o.material) o.material.dispose(); if(o.geometry) o.geometry.dispose(); });
+          r.mesh.traverse(o => {
+            if (o.material) o.material.dispose();
+            if (o.geometry) o.geometry.dispose();
+          });
           G.rockets.splice(i, 1);
           continue;
         }
@@ -569,7 +748,6 @@ export function initLoop(G) {
       }
       r.mesh.position.copy(r.pos);
 
-      // Use pre-allocated smoke pool slot (avoids new Mesh+Geometry+Material every frame)
       const _ss = G._acquireSmoke();
       if (_ss) {
         _ss.mesh.position.copy(r.pos);
@@ -583,115 +761,113 @@ export function initLoop(G) {
     G.updateLocalView(dt, now);
 
     for (const c of G.grabCubes) {
-       if (c === G.grabbedCube) {
-          const t = new V3(0.5, -0.4, -1.2).applyQuaternion(G.camera.quaternion);
-          const wantPos = G.camera.position.clone().add(t);
-          if (c.pos.distanceTo(wantPos) > 5.0) c.pos.copy(wantPos); // snap if teleported
-          else c.pos.lerp(wantPos, dt * 15);
-          c.vel.set(0, 0, 0);
-          const qSpin = new TH.Quaternion().setFromEuler(new TH.Euler(dt * 2, dt * 3, 0));
-          c.quat.multiply(qSpin);
-       } else {
-          c.vel.y -= CFG.G * dt;
-          const step = c.vel.clone().multiplyScalar(dt);
+      if (c === G.grabbedCube) {
+        const t = new V3(0.5, -0.4, -1.2).applyQuaternion(G.camera.quaternion);
+        const wantPos = G.camera.position.clone().add(t);
+        if (c.pos.distanceTo(wantPos) > 5.0) c.pos.copy(wantPos);
+        else c.pos.lerp(wantPos, dt * 15);
+        c.vel.set(0, 0, 0);
+        const qSpin = new TH.Quaternion().setFromEuler(new TH.Euler(dt * 2, dt * 3, 0));
+        c.quat.multiply(qSpin);
+      } else {
+        c.vel.y -= CFG.G * dt;
+        const step = c.vel.clone().multiplyScalar(dt);
 
-          const teleported = G.physics.teleportCube(c, dt, G.portals, G.R_AB, G.R_BA);
-          if (!teleported) {
-             c.pos.add(step);
-             G.collideCube(c, c.rad);
-             if (c.vel.lengthSq() < 0.001) {
-                c.vel.set(0, 0, 0); // sleep when very slow
-                c.rotVel.multiplyScalar(0.8);
-                const eu = new TH.Euler().setFromQuaternion(c.quat);
-                const snap = Math.PI / 2;
-                c.rotVel.x += (Math.round(eu.x / snap) * snap - eu.x) * dt * 30;
-                c.rotVel.y += (Math.round(eu.y / snap) * snap - eu.y) * dt * 30;
-                c.rotVel.z += (Math.round(eu.z / snap) * snap - eu.z) * dt * 30;
-             }
-
-             const qSpin = new TH.Quaternion().setFromEuler(new TH.Euler(c.rotVel.x * dt, c.rotVel.y * dt, c.rotVel.z * dt));
-             c.quat.multiply(qSpin);
+        const teleported = G.physics.teleportCube(c, dt, G.portals, G.R_AB, G.R_BA);
+        if (!teleported) {
+          c.pos.add(step);
+          G.collideCube(c, c.rad);
+          if (c.vel.lengthSq() < 0.001) {
+            c.vel.set(0, 0, 0);
+            c.rotVel.multiplyScalar(0.8);
+            const eu = new TH.Euler().setFromQuaternion(c.quat);
+            const snap = Math.PI / 2;
+            c.rotVel.x += (Math.round(eu.x / snap) * snap - eu.x) * dt * 30;
+            c.rotVel.y += (Math.round(eu.y / snap) * snap - eu.y) * dt * 30;
+            c.rotVel.z += (Math.round(eu.z / snap) * snap - eu.z) * dt * 30;
           }
-       }
+
+          const qSpin = new TH.Quaternion().setFromEuler(new TH.Euler(c.rotVel.x * dt, c.rotVel.y * dt, c.rotVel.z * dt));
+          c.quat.multiply(qSpin);
+        }
+      }
     }
 
     if (G.instCubeMesh) {
       G.resolveCubeCollisions();
-      // Update mesh positions again after resolution
-      const dummy = new TH.Object3D();
+      const dummy = new THREE.Object3D();
       for (const c of G.grabCubes) {
-         dummy.position.copy(c.pos);
-         dummy.quaternion.copy(c.quat);
-         dummy.updateMatrix();
-         G.instCubeMesh.setMatrixAt(c.id, dummy.matrix);
-         G.instCubeEdges.setMatrixAt(c.id, dummy.matrix);
+        dummy.position.copy(c.pos);
+        dummy.quaternion.copy(c.quat);
+        dummy.updateMatrix();
+        G.instCubeMesh.setMatrixAt(c.id, dummy.matrix);
+        G.instCubeEdges.setMatrixAt(c.id, dummy.matrix);
       }
       G.instCubeMesh.instanceMatrix.needsUpdate = true;
       G.instCubeEdges.instanceMatrix.needsUpdate = true;
     }
 
     for (let i = 0; i < 4; i++) {
-       const P = G.portals[i];
-       if (!P.placed && !P.closing) continue;
+      const P = G.portals[i];
+      if (!P.placed && !P.closing) continue;
 
-       let scl;
-       if (P.closing) {
-           // Closing: inverse of the opening bounce — same 0.5 s duration
-           // and wobble, collapsing to zero.
-           const cAge = (performance.now() / 1000) - P.closeTime;
-           if (cAge >= 0.5) {
-               P.closing = false;
-               scl = 0;
-           } else {
-               const t = cAge / 0.5;
-               scl = 1.0 - t + Math.sin(t * Math.PI * 3.0) * (1.0 - t) * 0.3;
-           }
-       } else {
-           const age = (performance.now() / 1000) - (P.openTime || 0);
-           // overshoot elastic bounce
-           if (age < 0.5) {
-               const t = age / 0.5;
-               scl = 1.0 + Math.sin(t * Math.PI * 3.0) * (1.0 - t) * 0.3;
-           } else {
-               scl = 1.0 + Math.sin(age * 3.0) * 0.02; // breathing
-           }
-       }
+      let scl;
+      if (P.closing) {
+        const cAge = (performance.now() / 1000) - P.closeTime;
+        if (cAge >= 0.5) {
+          P.closing = false;
+          scl = 0;
+        } else {
+          const t = cAge / 0.5;
+          scl = 1.0 - t + Math.sin(t * Math.PI * 3.0) * (1.0 - t) * 0.3;
+        }
+      } else {
+        const age = (performance.now() / 1000) - (P.openTime || 0);
+        if (age < 0.5) {
+          const t = age / 0.5;
+          scl = 1.0 + Math.sin(t * Math.PI * 3.0) * (1.0 - t) * 0.3;
+        } else {
+          scl = 1.0 + Math.sin(age * 3.0) * 0.02;
+        }
+      }
 
-       const camPos = G.camera.position;
-       const dot = (camPos.x - P.c.x) * P.n.x + (camPos.y - P.c.y) * P.n.y + (camPos.z - P.c.z) * P.n.z;
-       const isFacing = dot > 0.05;
+      const camPos = G.camera.position;
+      const dot = (camPos.x - P.c.x) * P.n.x + (camPos.y - P.c.y) * P.n.y + (camPos.z - P.c.z) * P.n.z;
+      const isFacing = dot > 0.05;
 
-       G.quads[i].scale.setScalar(scl);
-       G.frames[i].scale.set((PORT.hw + 0.05) * scl, (PORT.hh + 0.05) * scl, 1);
-       G.frames[i].visible = isFacing;
-       const pulse = 1.0 + 0.12 * Math.sin(G.nowT * 2.8 + i * 1.7) + 0.06 * Math.cos(G.nowT * 5.3 + i * 2.3);
-       G.glowLights[i].intensity = isFacing ? (13.0 * scl * pulse) : 0;
-       G.glowLights[i].color.setHex(P.color);
+      G.quads[i].scale.setScalar(scl);
+      G.frames[i].scale.set((PORT.hw + 0.05) * scl, (PORT.hh + 0.05) * scl, 1);
+      G.frames[i].visible = isFacing;
+      const pulse = 1.0 + 0.12 * Math.sin(G.nowT * 2.8 + i * 1.7) + 0.06 * Math.cos(G.nowT * 5.3 + i * 2.3);
+      G.glowLights[i].intensity = isFacing ? (13.0 * scl * pulse) : 0;
+      G.glowLights[i].color.setHex(P.color);
 
-       const sp = G.sparkles[i];
-       sp.mesh.visible = isFacing;
-       if (!isFacing) continue;
+      const sp = G.sparkles[i];
+      sp.mesh.visible = isFacing;
+      if (!isFacing) continue;
 
-       for (let j = 0; j < 100; j++) {
-          if (sp.life[j] <= 0) {
-             if (Math.random() < 0.2) {
-                const ang = Math.random() * Math.PI * 2;
-                const ex = Math.cos(ang) * PORT.hw;
-                const ey = Math.sin(ang) * PORT.hh;
-                sp.pos[j*3] = ex; sp.pos[j*3+1] = ey; sp.pos[j*3+2] = (Math.random() - 0.5) * 0.2;
-                sp.vel[j].set(ex, ey, 0).normalize().multiplyScalar(Math.random() * 2.0 + 1.0);
-                sp.vel[j].z = (Math.random() - 0.5) * 3.0;
-                sp.life[j] = 0.5 + Math.random() * 1.0;
-             }
-          } else {
-             sp.life[j] -= dt * 1.2;
-             sp.pos[j*3] += sp.vel[j].x * dt;
-             sp.pos[j*3+1] += sp.vel[j].y * dt;
-             sp.pos[j*3+2] += sp.vel[j].z * dt;
+      for (let j = 0; j < 100; j++) {
+        if (sp.life[j] <= 0) {
+          if (Math.random() < 0.2) {
+            const ang = Math.random() * Math.PI * 2;
+            const ex = Math.cos(ang) * PORT.hw;
+            const ey = Math.sin(ang) * PORT.hh;
+            sp.pos[j * 3] = ex;
+            sp.pos[j * 3 + 1] = ey;
+            sp.pos[j * 3 + 2] = (Math.random() - 0.5) * 0.2;
+            sp.vel[j].set(ex, ey, 0).normalize().multiplyScalar(Math.random() * 2.0 + 1.0);
+            sp.vel[j].z = (Math.random() - 0.5) * 3.0;
+            sp.life[j] = 0.5 + Math.random() * 1.0;
           }
-       }
-       sp.mesh.geometry.attributes.position.needsUpdate = true;
-       sp.mesh.geometry.attributes.life.needsUpdate = true;
+        } else {
+          sp.life[j] -= dt * 1.2;
+          sp.pos[j * 3] += sp.vel[j].x * dt;
+          sp.pos[j * 3 + 1] += sp.vel[j].y * dt;
+          sp.pos[j * 3 + 2] += sp.vel[j].z * dt;
+        }
+      }
+      sp.mesh.geometry.attributes.position.needsUpdate = true;
+      sp.mesh.geometry.attributes.life.needsUpdate = true;
     }
 
     for (let i = G.animObjects.length - 1; i >= 0; i--) {
@@ -708,99 +884,100 @@ export function initLoop(G) {
       } else if (a.type === 'expl') {
         a.life -= dt * 3;
         if (a.life <= 0) {
-           G.scene.remove(a.obj);
-           a.obj.material.dispose(); a.obj.geometry.dispose();
-           G.animObjects.splice(i, 1);
+          G.scene.remove(a.obj);
+          a.obj.material.dispose();
+          a.obj.geometry.dispose();
+          G.animObjects.splice(i, 1);
         } else {
-           a.obj.scale.setScalar(1 + (1 - a.life) * 1.5);
-           a.obj.material.opacity = Math.max(0, a.life);
+          a.obj.scale.setScalar(1 + (1 - a.life) * 1.5);
+          a.obj.material.opacity = Math.max(0, a.life);
         }
       } else if (a.type === 'smoke') {
         a.life -= dt * 2.5;
         if (a.life <= 0) {
-           G._releaseSmoke(a.slot); // return to pool — no scene.remove/dispose needed
-           G.animObjects.splice(i, 1);
+          G._releaseSmoke(a.slot);
+          G.animObjects.splice(i, 1);
         } else {
-           a.obj.scale.setScalar(a.life * 1.5);
-           a.obj.material.opacity = a.life * 0.4;
-           a.obj.position.y += dt * 0.5;
-           a.obj.rotation.x += dt;
-           a.obj.rotation.y += dt;
+          a.obj.scale.setScalar(a.life * 1.5);
+          a.obj.material.opacity = a.life * 0.4;
+          a.obj.position.y += dt * 0.5;
+          a.obj.rotation.x += dt;
+          a.obj.rotation.y += dt;
         }
       } else if (a.type === 'instagib_beam2') {
         a.life -= dt * 2.5;
         if (a.life <= 0) {
-           a.obj.visible = false;
-           a.points.geometry.setDrawRange(0, 0);
-           G._ibPool.release(a.slot);
-           G.animObjects.splice(i, 1);
+          a.obj.visible = false;
+          a.points.geometry.setDrawRange(0, 0);
+          G._ibPool.release(a.slot);
+          G.animObjects.splice(i, 1);
         } else {
-           a.core.material.opacity = a.life;
-           a.glow.material.opacity = a.life * 0.6;
-           a.points.material.opacity = a.life;
-           const posAttr = a.points.geometry.attributes.position;
-           for (let j = 0; j < a.pCount; j++) {
-             posAttr.array[j*3] += a.vel[j].x * dt;
-             posAttr.array[j*3+1] += a.vel[j].y * dt;
-             posAttr.array[j*3+2] += a.vel[j].z * dt;
-             a.vel[j].multiplyScalar(0.9);
-           }
-           posAttr.needsUpdate = true;
+          a.core.material.opacity = a.life;
+          a.glow.material.opacity = a.life * 0.6;
+          a.points.material.opacity = a.life;
+          const posAttr = a.points.geometry.attributes.position;
+          for (let j = 0; j < a.pCount; j++) {
+            posAttr.array[j * 3] += a.vel[j].x * dt;
+            posAttr.array[j * 3 + 1] += a.vel[j].y * dt;
+            posAttr.array[j * 3 + 2] += a.vel[j].z * dt;
+            a.vel[j].multiplyScalar(0.9);
+          }
+          posAttr.needsUpdate = true;
         }
       } else if (a.type === 'scorch') {
         a.life -= dt;
         if (a.life <= 0) {
-           a.obj.visible = false;
-           G._scorchPool.release(a.slot);
-           G.animObjects.splice(i, 1);
+          a.obj.visible = false;
+          G._scorchPool.release(a.slot);
+          G.animObjects.splice(i, 1);
         } else {
-           a.obj.material.opacity = a.life < G.SCORCH_FADE ? a.life / G.SCORCH_FADE : 1;
+          a.obj.material.opacity = a.life < G.SCORCH_FADE ? a.life / G.SCORCH_FADE : 1;
         }
       } else if (a.type === 'gib') {
         a.life -= dt;
         if (a.life <= 0) {
-           a.obj.visible = false;
-           G._gibPool.release(a.slot);
-           G.animObjects.splice(i, 1);
+          a.obj.visible = false;
+          G._gibPool.release(a.slot);
+          G.animObjects.splice(i, 1);
         } else {
-           a.vel.y -= 25.0 * dt; // gravity CFG.G is usually ~25
-           a.obj.position.addScaledVector(a.vel, dt);
-           if (a.obj.position.y < 0.15 && a.vel.y < 0) {
-              a.obj.position.y = 0.15;
-              a.vel.y *= -0.6;
-              a.vel.x *= 0.8;
-              a.vel.z *= 0.8;
-           }
-           if (a.life < 1.5) {
-              a.obj.material.opacity = a.life / 1.5;
-           }
+          a.vel.y -= 25.0 * dt;
+          a.obj.position.addScaledVector(a.vel, dt);
+          if (a.obj.position.y < 0.15 && a.vel.y < 0) {
+            a.obj.position.y = 0.15;
+            a.vel.y *= -0.6;
+            a.vel.x *= 0.8;
+            a.vel.z *= 0.8;
+          }
+          if (a.life < 1.5) {
+            a.obj.material.opacity = a.life / 1.5;
+          }
         }
       } else if (a.type === 'debris') {
         a.life -= dt;
         if (a.life <= 0) {
-           G.scene.remove(a.obj);
-           a.obj.traverse(o => { if (o.geometry) o.geometry.dispose(); });
-           G.animObjects.splice(i, 1);
+          G.scene.remove(a.obj);
+          a.obj.traverse(o => {
+            if (o.geometry) o.geometry.dispose();
+          });
+          G.animObjects.splice(i, 1);
         } else {
-           a.vel.y -= CFG.G * dt; // Gravity
-           a.obj.position.addScaledVector(a.vel, dt);
-           a.obj.rotation.x += a.rot.x * dt;
-           a.obj.rotation.y += a.rot.y * dt;
-           a.obj.rotation.z += a.rot.z * dt;
+          a.vel.y -= CFG.G * dt;
+          a.obj.position.addScaledVector(a.vel, dt);
+          a.obj.rotation.x += a.rot.x * dt;
+          a.obj.rotation.y += a.rot.y * dt;
+          a.obj.rotation.z += a.rot.z * dt;
 
-           // Floor bounce
-           if (a.obj.position.y < -0.1 && a.vel.y < 0) {
-              a.obj.position.y = -0.1;
-              a.vel.y *= -0.5;
-              a.vel.x *= 0.6;
-              a.vel.z *= 0.6;
-              a.rot.multiplyScalar(0.5);
-           }
+          if (a.obj.position.y < -0.1 && a.vel.y < 0) {
+            a.obj.position.y = -0.1;
+            a.vel.y *= -0.5;
+            a.vel.x *= 0.6;
+            a.vel.z *= 0.6;
+            a.rot.multiplyScalar(0.5);
+          }
 
-           // Fade out at end
-           if (a.life < 1.0) {
-             a.obj.scale.setScalar(a.life);
-           }
+          if (a.life < 1.0) {
+            a.obj.scale.setScalar(a.life);
+          }
         }
       } else if (a.type === 'flame') {
         const f = 1 + 0.15 * Math.sin(now * 0.02 + a.phase) + 0.07 * Math.sin(now * 0.053 + a.phase * 2);
@@ -840,20 +1017,26 @@ export function initLoop(G) {
       isTargetDead: !!(G.spectateTargetPid && G.remotePlayers[G.spectateTargetPid] && G.remotePlayers[G.spectateTargetPid].isDead),
       remotePlayers: G.remotePlayers
     });
+
     G.skyGroup.position.copy(G.camera.position);
     G.updateSky(G.nowT);
     G.renderer.setRenderTarget(null);
     G.renderer.render(G.scene, G.camera);
+    if (G.engine) {
+      G.engine.render();
+    }
   }
 
-  window.addEventListener('resize', () => {
-    G.renderer.setSize(innerWidth, innerHeight);
-    G.camera.aspect = innerWidth / innerHeight; G.camera.updateProjectionMatrix();
-    G.makeRTs();
-  });
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', () => {
+      G.renderer.setSize(window.innerWidth, window.innerHeight);
+      G.camera.aspect = window.innerWidth / window.innerHeight;
+      G.camera.updateProjectionMatrix();
+      if (G.makeRTs) G.makeRTs();
+    });
+  }
 
   function start() {
-    /* first map (preview behind menu) — loadMap() runs the renderer pre-warm */
     G.loadMap(String(Math.floor(Math.random() * 1e9)));
     requestAnimationFrame(frame);
   }

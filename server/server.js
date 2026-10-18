@@ -1,14 +1,57 @@
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import * as TH from 'three';
 import { CFG, PORT, TICK_RATE, MAX_PLAYERS, MAX_SPECTATORS } from '../shared/constants.js';
 import { initPhysics } from '../shared/physics.js';
-import { tickBot, removeBot, cleanupBotPortals, resetBotState, getBotPortalBase } from './bots.js';
+import { tickBot, removeBot, cleanupBotPortals, resetBotState, getBotPortalBase } from './bots/BotAgent.js';
 
-const wss = new WebSocketServer({ port: 3001 });
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DIST_DIR = path.resolve(__dirname, '../dist');
+
+const MIME_TYPES = {
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.wav': 'audio/wav',
+  '.woff2': 'font/woff2',
+};
+
+const server = http.createServer((req, res) => {
+  const reqUrl = req.url === '/' ? '/index.html' : (req.url || '').split('?')[0];
+  const safePath = path.normalize(reqUrl).replace(/^(\.\.[/\\])+/, '');
+  const filePath = path.join(DIST_DIR, safePath);
+
+  if (!filePath.startsWith(DIST_DIR)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+
+  fs.stat(filePath, (err, stats) => {
+    if (err || !stats.isFile()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found - Ensure `npm run build` has been executed.');
+      return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    res.writeHead(200, { 'Content-Type': contentType });
+    fs.createReadStream(filePath).pipe(res);
+  });
+});
+
+const wss = new WebSocketServer({ server });
 const physics = initPhysics(TH, CFG, PORT);
 
 const SERVER_PASSWORD = "secret";
-import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, startCountdown, beginRound, matchToWaiting, matchInfo, pickSpawn, placeAtSpawn, serverDestroyWall, resetMapState, resetDestructibleWalls, isPortalOnDestroyedWall } from './gamestate.js';
+import { seedStr, mapData, gameState, obbs, updateMap, match, beginWarmup, startCountdown, beginRound, matchToWaiting, matchInfo, pickSpawn, placeAtSpawn, serverDestroyWall, resetMapState, resetDestructibleWalls, isPortalOnDestroyedWall } from './match/MatchSession.js';
 
 // ------------------------------------------------------------------ bot management
 const BOT_COUNT = 2; // how many bots to fill the server with when empty
@@ -1015,7 +1058,9 @@ setInterval(() => {
 
 }, 1000 / TICK_RATE);
 
-console.log("Portal Arena Server running on ws://localhost:3001");
+server.listen(3001, () => {
+  console.log("Portal Arena Server running at http://localhost:3001 and ws://localhost:3001");
+});
 
 
 

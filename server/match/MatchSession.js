@@ -1,6 +1,6 @@
 import * as TH from 'three';
-import { generateMap } from '../shared/mapgen.js';
-import { WARMUP_TIME, ROUND_TIME, PORT } from '../shared/constants.js';
+import { generateMap } from '../../shared/mapgen.js';
+import { WARMUP_TIME, ROUND_TIME, PORT } from '../../shared/constants.js';
 
 export let seedStr = String(Math.floor(Math.random() * 1e9));
 export let mapData = generateMap(seedStr);
@@ -24,54 +24,82 @@ export const gameState = {
   }))
 };
 
+export function buildObbs(map) {
+  let slabIdx = 0;
+  return map.slabs.map(s => {
+    const mesh = new TH.Mesh(new TH.BoxGeometry(s.s[0], s.s[1], s.s[2]));
+    mesh.position.set(...s.c);
+    mesh.rotation.order = 'YZX';
+    if (s.ry) mesh.rotation.y = s.ry;
+    if (s.rz) mesh.rotation.z = s.rz;
+    mesh.updateMatrixWorld(true);
+
+    const ax = [new TH.Vector3(1, 0, 0), new TH.Vector3(0, 1, 0), new TH.Vector3(0, 0, 1)];
+    ax[0].transformDirection(mesh.matrixWorld);
+    ax[1].transformDirection(mesh.matrixWorld);
+    ax[2].transformDirection(mesh.matrixWorld);
+
+    return {
+      id: `slab_${slabIdx}`,
+      slabIdx: slabIdx++,
+      c: new TH.Vector3(...s.c),
+      ax,
+      he: [s.s[0] / 2, s.s[1] / 2, s.s[2] / 2],
+      rad: Math.hypot(s.s[0] / 2, s.s[1] / 2, s.s[2] / 2),
+      kind: s.kind,
+      boundary: s.boundary,
+      noPortal: s.noPortal,
+      ramp: s.ramp
+    };
+  });
+}
+
 export let obbs = buildObbs(mapData);
-// ---------------------------------------------------------------- match / round state
-// Phases: waiting (0-1 players) -> warmup (both connected, <= WARMUP_TIME)
-//        -> active (ROUND_TIME duel) -> summary (winner shown) -> warmup (rematch)
+
 export const match = {
   phase: 'waiting',
-  deadlineMs: 0,        // wall-clock ms (Date.now()) at which the current timed phase ends
-  ready: {},             // { [pid]: bool }
-  scores: {},            // { [pid]: kills in the current round }
-  roundWins: {},         // { [pid]: cumulative round wins across rematches }
-  winner: null           // pid of the round winner, or 'tie'
+  deadlineMs: 0,
+  ready: {},
+  scores: {},
+  roundWins: {},
+  winner: null
 };
 
- // ---------------------------------------------------------------- spawn selection
- // The duel map has 6 spawn points. Rules:
- //  - on connect:   random point, never one the opponent is using
- //  - on death:     random one of the 2 points farthest from the opponent
- //  - round start:  p0 random, p1 random among the 2 farthest from p0
- function spawnDistSq(a, b) { const dx = a.x - b.x, dz = a.z - b.z; return dx * dx + dz * dz; }
+function spawnDistSq(a, b) {
+  const dx = a.x - b.x, dz = a.z - b.z;
+  return dx * dx + dz * dz;
+}
 
- export function pickSpawn(avoidIdxs, refPos, farN) {
-   const all = mapData.spawns.map((s, i) => i);
-   let pool = all.filter(i => !avoidIdxs.includes(i));
-   if (pool.length === 0) pool = all;
-   if (refPos && pool.length > 1) {
-     const ranked = pool.slice().sort((a, b) => spawnDistSq(mapData.spawns[b], refPos) - spawnDistSq(mapData.spawns[a], refPos));
-     const top = ranked.slice(0, Math.min(farN || 1, ranked.length));
-     return top[Math.floor(Math.random() * top.length)];
-   }
-   return pool[Math.floor(Math.random() * pool.length)];
- }
+export function pickSpawn(avoidIdxs = [], refPos = null, farN = 1) {
+  const all = mapData.spawns.map((_, i) => i);
+  let pool = all.filter(i => !avoidIdxs.includes(i));
+  if (pool.length === 0) pool = all;
+  if (refPos && pool.length > 1) {
+    const ranked = pool.slice().sort((a, b) =>
+      spawnDistSq(mapData.spawns[b], refPos) - spawnDistSq(mapData.spawns[a], refPos)
+    );
+    const top = ranked.slice(0, Math.min(farN || 1, ranked.length));
+    return top[Math.floor(Math.random() * top.length)];
+  }
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
- export function placeAtSpawn(p, idx) {
-   const s = mapData.spawns[idx];
-   p.pos.set(s.x, s.y, s.z);
-   p.vel.set(0, 0, 0);
-   p.spawnIdx = idx;
- }
+export function placeAtSpawn(p, idx) {
+  const s = mapData.spawns[idx];
+  p.pos.set(s.x, s.y, s.z);
+  p.vel.set(0, 0, 0);
+  p.spawnIdx = idx;
+}
 
- export function assignRoundSpawns(pids) {
-   if (pids.length === 0) return;
-   const i0 = pickSpawn([]);
-   placeAtSpawn(gameState.players[pids[0]], i0);
-   if (pids.length > 1) {
-     const i1 = pickSpawn([i0], mapData.spawns[i0], 2);
-     placeAtSpawn(gameState.players[pids[1]], i1);
-   }
- }
+export function assignRoundSpawns(pids) {
+  if (pids.length === 0) return;
+  const i0 = pickSpawn([]);
+  placeAtSpawn(gameState.players[pids[0]], i0);
+  if (pids.length > 1) {
+    const i1 = pickSpawn([i0], mapData.spawns[i0], 2);
+    placeAtSpawn(gameState.players[pids[1]], i1);
+  }
+}
 
 export function beginWarmup() {
   match.phase = 'warmup';
@@ -79,7 +107,10 @@ export function beginWarmup() {
   match.scores = {};
   match.winner = null;
   match.ready = {};
-  for (const id in gameState.players) { gameState.players[id].shots = 0; gameState.players[id].hits = 0; }
+  for (const id in gameState.players) {
+    gameState.players[id].shots = 0;
+    gameState.players[id].hits = 0;
+  }
   resetMapState();
 }
 
@@ -98,7 +129,7 @@ export function startCountdown() {
 
 export function beginRound() {
   match.phase = 'active';
-  match.scores = {};  // reset warmup practice score for the active round
+  match.scores = {};
   match.deadlineMs = Date.now() + ROUND_TIME * 1000;
   for (const id in gameState.players) {
     const p = gameState.players[id];
@@ -126,7 +157,8 @@ export function matchInfo() {
       ready: !!match.ready[pid],
       score: match.scores[pid] || 0,
       ping: p.ping || 0,
-      shots, hits,
+      shots,
+      hits,
       acc: shots > 0 ? Math.round((hits / shots) * 100) : 0,
       isBot: !!p.isBot
     };
@@ -149,37 +181,6 @@ export function matchInfo() {
     winner: match.winner,
     roundWins: Object.assign({}, match.roundWins)
   };
-}
-
-
-function buildObbs(map) {
-  let slabIdx = 0;
-  return map.slabs.map(s => {
-    const mesh = new TH.Mesh(new TH.BoxGeometry(s.s[0], s.s[1], s.s[2]));
-    mesh.position.set(...s.c);
-    mesh.rotation.order = 'YZX';
-    if (s.ry) mesh.rotation.y = s.ry;
-    if (s.rz) mesh.rotation.z = s.rz;
-    mesh.updateMatrixWorld(true);
-    
-    const ax = [new TH.Vector3(1,0,0), new TH.Vector3(0,1,0), new TH.Vector3(0,0,1)];
-    ax[0].transformDirection(mesh.matrixWorld);
-    ax[1].transformDirection(mesh.matrixWorld);
-    ax[2].transformDirection(mesh.matrixWorld);
-    
-    return {
-      id: `slab_${slabIdx}`,
-      slabIdx: slabIdx++,
-      c: new TH.Vector3(...s.c),
-      ax,
-      he: [s.s[0]/2, s.s[1]/2, s.s[2]/2],
-      rad: Math.hypot(s.s[0]/2, s.s[1]/2, s.s[2]/2),
-      kind: s.kind,
-      boundary: s.boundary,
-      noPortal: s.noPortal,
-      ramp: s.ramp
-    };
-  });
 }
 
 export function serverDestroyWall(wallId, wallCenter, point) {
@@ -293,7 +294,7 @@ export function resetDestructibleWalls() {
 
 export function resetMapState() {
   resetDestructibleWalls();
-  
+
   for (const p of gameState.portals) {
     p.placed = false;
     p.c.set(0, 0, 0);
@@ -301,13 +302,13 @@ export function resetMapState() {
     p.r.set(0, 0, 0);
     p.u.set(0, 0, 0);
   }
-  
+
   gameState.grabCubes = mapData.grabCubes.map(c => ({
     pos: new TH.Vector3(...c.c),
     vel: new TH.Vector3(),
     rotVel: new TH.Vector3()
   }));
-  
+
   assignRoundSpawns(Object.keys(gameState.players));
   for (const pid in gameState.players) {
     const p = gameState.players[pid];
@@ -332,7 +333,6 @@ export function isPortalOnDestroyedWall(c, n, r, u, PORT_) {
   const hw = PORT_ ? PORT_.hw : (PORT ? PORT.hw : 1.4375);
   const hh = PORT_ ? PORT_.hh : (PORT ? PORT.hh : 2.0);
 
-  // 1. Check against full OBBs of all destroyed walls
   if (gameState.destroyedWallObbs) {
     for (const dob of gameState.destroyedWallObbs) {
       const d = c.clone().sub(dob.c);
@@ -350,7 +350,6 @@ export function isPortalOnDestroyedWall(c, n, r, u, PORT_) {
     }
   }
 
-  // 2. Check against all destroyed fragments in obbs (excluding indestructible ramps)
   for (const obb of obbs) {
     if (obb.kind === 'ramp') continue;
     if (obb.destroyed || obb.noPortal) {
@@ -369,7 +368,6 @@ export function isPortalOnDestroyedWall(c, n, r, u, PORT_) {
     }
   }
 
-  // 3. Check against gameState.destroyedWalls blast points and wall centers
   if (gameState.destroyedWalls) {
     for (const dw of gameState.destroyedWalls) {
       if (dw.point) {
@@ -386,4 +384,53 @@ export function isPortalOnDestroyedWall(c, n, r, u, PORT_) {
   return false;
 }
 
+/**
+ * MatchSession — Encapsulates server-side duel match state, phases, scoring, and spawns.
+ */
+export class MatchSession {
+  constructor(seed = null) {
+    this.seedStr = seed || seedStr;
+    this.mapData = mapData;
+    this.gameState = gameState;
+    this.obbs = obbs;
+    this.match = match;
+  }
 
+  beginWarmup(players = {}) {
+    beginWarmup();
+    void players;
+  }
+
+  startCountdown(players = {}) {
+    startCountdown();
+    void players;
+  }
+
+  beginRound(pids = [], players = {}) {
+    beginRound();
+    if (pids.length > 0) {
+      assignRoundSpawns(pids);
+    }
+    void players;
+  }
+
+  resetToWaiting() {
+    matchToWaiting();
+  }
+
+  pickSpawn(avoidIdxs = [], refPos = null, farN = 1) {
+    return pickSpawn(avoidIdxs, refPos, farN);
+  }
+
+  placeAtSpawn(p, idx) {
+    placeAtSpawn(p, idx);
+  }
+
+  assignRoundSpawns(pids) {
+    assignRoundSpawns(pids);
+  }
+
+  getInfo() {
+    return matchInfo();
+  }
+}

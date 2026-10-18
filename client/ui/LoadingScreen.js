@@ -36,7 +36,7 @@
        wiring — the animation starts as soon as the overlay fades in.
    ============================================================================ */
 
-import { initModels } from './models.js';
+import { initModels } from '../rendering/ModelFactory.js';
 
 export const FADE_MS = 300;              // 0.3 s per spec
 
@@ -363,9 +363,9 @@ export class LoadingScreen {
     function makeOne() {
       const player = createPlayerModel(0x4a86e8, 0, null);
       // Carry only the instagib — hide the other two mirror weapons.
-      player.userData.mirrorGun.visible = false;
-      player.userData.mirrorRocketGun.visible = false;
-      player.userData.mirrorInstagibGun.visible = true;
+      if (player.userData && player.userData.mirrorGun) player.userData.mirrorGun.visible = false;
+      if (player.userData && player.userData.mirrorRocketGun) player.userData.mirrorRocketGun.visible = false;
+      if (player.userData && player.userData.mirrorInstagibGun) player.userData.mirrorInstagibGun.visible = true;
 
       // Clone every material (the weapon parts are shared by reference
       // across instances) so each model can carry its own portal clip
@@ -402,7 +402,7 @@ export class LoadingScreen {
     this._setClip(B, leftClip);
     A.rig.position.set(-PORTAL_X, 0, 0);
     B.rig.position.set(-PORTAL_X, 0, 0);
-    B.rig.visible = false;                  // only A runs at first
+    if (B && B.rig) B.rig.visible = false;                  // only A runs at first
     return { A, B, isARunner: true, PORTAL_X };
   }
 
@@ -459,10 +459,10 @@ export class LoadingScreen {
       // Running bob + slight forward lean (toward the running direction)
       runner.rig.position.set(-PORTAL_X + p * SPAN, Math.abs(Math.sin(stride)) * 0.07, 0);
       runner.rig.rotation.z = -(0.09 + 0.05 * Math.sin(stride * 2));
-      runner.rig.visible = true;
+      if (runner && runner.rig) runner.rig.visible = true;
       // The other waits, invisible, at the left portal
       other.rig.position.set(-PORTAL_X, 0, 0);
-      other.rig.visible = false;
+      if (other && other.rig) other.rig.visible = false;
       runner.glow.intensity = 0.6 + 0.25 * Math.sin(ts * 0.007);
       other.glow.intensity = 0;
     } else {
@@ -478,13 +478,13 @@ export class LoadingScreen {
       // Entering: run forward into the right portal; its right edge clips it
       runner.rig.position.set(PORTAL_X + u * PW, 0, 0);
       runner.rig.rotation.z = 0;
-      runner.rig.visible = true;
+      if (runner && runner.rig) runner.rig.visible = true;
       runner.glow.intensity = flick;
 
       // Emerging: run forward out of the left portal; its left edge clips it
       other.rig.position.set(-PORTAL_X - PW + u * PW, 0, 0);
       other.rig.rotation.z = 0;
-      other.rig.visible = true;
+      if (other && other.rig) other.rig.visible = true;
       other.glow.intensity = flick;
     }
 

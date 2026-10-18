@@ -21,28 +21,35 @@ Each match takes place in a procedurally generated 50 × 50 m gothic duel arena:
 
 ## How to Play (Multiplayer)
 
-The game consists of a Node.js authoritative server and a web client. 
+The game consists of a Node.js authoritative server and a high-performance web client.
 
 ### 1. Install Dependencies
-You will need Node.js installed on your machine.
-Run the following command in the root directory to install required packages (like `ws` for WebSockets):
+Run in the root directory:
 ```bash
 npm install
 ```
 
-### 2. Launch the Server
-Start the multiplayer server which will listen on port 3001 for WebSocket connections:
+### 2. Launch (One Unified Command)
+Build the protected client bundle and launch the integrated server in a single step:
 ```bash
-node server/server.js
+npm start
 ```
+Open your browser and navigate to `http://localhost:3001`.
+The command automatically builds `dist/`, serves the protected client, and coordinates the WebSocket duel arena on the same port!
 
-### 3. Launch the Client
-Serve the web client with the `http-server` npm package (installed with the step 1 `npm install`). Run it from the project root directory:
-```bash
-npx http-server -p 3000
-```
-Open your browser and navigate to `http://localhost:3000/client/`. 
-To test multiplayer locally, simply open a second tab or window to the same address!
+### 3. Dedicated Modes (Optional)
+- **Server Only (Fast restart without rebuilding):**
+  ```bash
+  npm run server
+  ```
+- **Client Development (Instant Hot Module Replacement):**
+  ```bash
+  npm run dev
+  ```
+- **Client Production Preview (Static build only):**
+  ```bash
+  npm run preview
+  ```
 
 ### 4. Duel Rounds (Score System)
 
@@ -78,39 +85,75 @@ If a human player disconnects mid-round, the round is voided and the scores rese
 | N | New map |
 | M | Mute |
 
-## Project Structure
+## Project Structure & OOP Architecture
 
-- `server/` - Node.js authoritative server (`server.js`) and global state (`gamestate.js`)
-- `client/` - Web client (ES modules):
-  - `index.html` - UI shell (menu, HUD, panels)
-  - `main.js` - composition root: builds the shared game context `G` and initializes the modules below
-  - `engine.js` - renderer, scene, camera, sky
-  - `world.js` - map build, colliders, lava/hint zones, destructible walls
-  - `portals.js` - portal state, placement, A↔B pair transforms, portal visuals
-  - `weapons.js` - portal gun / rockets / instagib + pooled FX (smoke, scorch, gibs)
-  - `players.js` - local/remote players, movement stepping, death
-  - `input.js` - pointer lock, mouse/keyboard, menu controls
-  - `loop.js` - main animation frame
-  - `messages.js` - server → client message handling
-  - `render_portals.js` - mirrored portal view rendering (render targets)
-  - `models.js`, `textures.js`, `hud.js`, `audio.js`, `network.js` - supporting modules
-- `shared/` - Shared logic executed by both the server and client (`physics.js`, `constants.js`, `mapgen.js`)
+The codebase is organized into an Object-Oriented, modular architecture with secure production bundling and strict separation of concerns:
 
-## Development & LLM Guidelines
+- `dist/` - Production build directory (only this folder is served statically to web clients, preventing server or repository code exposure)
+- `server/` - Node.js authoritative server:
+  - `server.js` - Integrated HTTP static asset server and WebSocket server entry point (port 3001)
+  - `core/GameServer.js` - Server lifecycle management and network synchronization
+  - `match/MatchSession.js` - Duel match state machine, round timers, player registry, and scoring
+  - `bots/BotAgent.js` - AI bot navigation, state updates, combat behavior, and portal management
+- `client/` - Web client:
+  - `main.js` - `PortalClient`: Application orchestrator, composition root, loading screen coordination, and connection lifecycle
+  - `core/` - Foundational subsystems:
+    - `GameEngine.js` - Main animation frame loop coordinator and subsystem registry
+    - `EventBus.js` - Publish-subscribe event bus for decoupled communication
+    - `ObjectPool.js` - High-performance reusable object pool for particles and entities
+  - `entities/` - Entity hierarchy:
+    - `Entity.js` - Base game entity
+    - `EntityManager.js` - Lifecycle, updates, and spatial queries
+    - `PlayerController.js` - Local player movement, Quake/Warsow physics, and prediction
+    - `RemotePlayer.js` - Network interpolation and remote player rendering
+  - `weapons/` - Weapon Strategy pattern:
+    - `Weapon.js` - Base weapon class
+    - `WeaponManager.js` - Weapon slots, active switching, inventory, and weapon viewmodels
+    - `PortalGun.js` - Primary and secondary portal placement strategy
+    - `RocketLauncher.js` - Rocket firing, blast knockback, and wall destruction
+    - `InstagibRifle.js` - Hitscan railgun strategy with scorch marks and audio FX
+  - `projectiles/` - Dynamic physics projectiles:
+    - `RocketProjectile.js` - Server/client rocket trajectory and impact handling
+  - `portals/` - Portal mechanics:
+    - `PortalManager.js` - Portal placement validation, pair transformations, teleportation, and recursive camera rendering
+  - `world/` - Arena geography:
+    - `WorldManager.js` - Procedural map builder, destructible wall meshes, and oriented bounding boxes (OBBs)
+  - `rendering/` - Visual pipelines:
+    - `RenderManager.js` - Three.js WebGL renderer, perspective camera, and skybox
+    - `TextureFactory.js` - Procedural canvas textures and materials
+    - `ModelFactory.js` - Procedural gun and player 3D models
+  - `input/` - Hardware controls:
+    - `InputManager.js` - Pointer lock capture, keyboard/mouse input bindings, and menu controls
+  - `ui/` - Interface layer:
+    - `HUDController.js` - DOM-based HUD, crosshairs, speedometer, killfeed, and tab stats
+    - `LoadingScreen.js` - 3D gothic loading overlay with font and map readiness gating
+  - `audio/` - Positional sound:
+    - `AudioController.js` - Web Audio API spatial audio, portal sounds, and weapon SFX
+  - `network/` - Multiplayer client:
+    - `NetworkManager.js` - WebSocket client, snapshot interpolation, and message routing
+  - `state/` - State machines:
+    - `StateMachine.js` - Generic hierarchical state machine
+    - `MatchStateMachine.js` - Client duel match states (waiting, warmup, countdown, round, summary)
+- `shared/` - Shared deterministic logic:
+  - `constants.js` - Protocol messages, physics constants, dimensions, and limits
+  - `physics.js` - Shared deterministic Quake movement, friction, collision, and portal math
+  - `mapgen.js` - Shared deterministic seed-based arena geometry generator
 
-When working on this codebase (especially when collaborating with AI assistants), the codebase heavily leverages ES Modules and decoupled logic. To avoid subtle bugs, broken imports, or accidental logic deletions during complex refactors, please adhere to the following rule:
+## Build & Verification Workflow
 
-**Always run the static analyzer after making significant edits!**
+The project uses Vite 8 with Rolldown bundling and automated chunk splitting:
+- `vite.config.js`: Separates the `three` runtime into a cached vendor chunk (`dist/assets/three-*.js`), keeping application bundles lean and load times fast.
+
+When making modifications, always run both static verification gates:
 ```bash
 npm run lint
+npm run build
 ```
 
-ESLint is configured via `eslint.config.js` to strictly catch:
-- Undefined variables (`no-undef`)
-- Unused variables and useless assignments
-- Basic JavaScript syntax errors
+- **`npm run lint`**: Validates syntax, module imports, and code style via ESLint across `client/`, `server/`, and `shared/`.
+- **`npm run build`**: Validates Vite / Rolldown module resolution, asset pipelines, and production bundle generation into `dist/`.
 
-If ESLint returns any errors, you must fix them before attempting to start the client or server. Do not deploy untested code with active linter errors.
+Both commands must exit with code 0 before code is considered complete.
 
 ## AI Tooling
 
@@ -118,6 +161,6 @@ This project was designed and built with LLM assistance:
 
 - **Qwen3.8-Flash-Next** — the first outline of the project
 - **Qwen3.8-27B** — most of the development: adjustments and adding features
-- **agy CLI** with **Gemini 3.1 Pro** and **Claude Sonnet/Opus 4.6** — complex fixes, in particular physics edge cases and portal recursion
+- **agy CLI** with **Gemini 3.1 Pro** and **Claude Sonnet/Opus 4.6** — architecture refactoring, OOP migration, Quake physics fidelity, and portal recursion
 
 

@@ -1,9 +1,5 @@
-import { AudioSys } from './audio.js';
-
-/* ============================================================================
-   MESSAGES — server → client message handling: auth/init, state sync,
-   portal/weapon events, deaths, respawns, pings, round end.
-   ============================================================================ */
+import * as THREE from 'three';
+import { AudioSys } from '../audio/AudioController.js';
 
 function applyDestroyedWalls(G, V3, walls) {
   if (!walls || walls.length === 0) return;
@@ -22,6 +18,11 @@ function applyDestroyedWalls(G, V3, walls) {
   }
 }
 
+/**
+ * Handle incoming server network messages.
+ * @param {Object} G - Game state context
+ * @param {Object} data - Deserialized network packet
+ */
 export function onMessage(G, data) {
   const { TH, V3 } = G;
   if (data.type === 'init') {
@@ -35,7 +36,10 @@ export function onMessage(G, data) {
       const bMesh = G.playerModel.children.find(c => c.name === 'bodyMesh');
       if (bMesh) bMesh.material.color.setHex(localColor);
       const headGroup = G.playerModel.children.find(c => c.name === 'headGroup');
-      if (headGroup) { const hMesh = headGroup.children.find(c => c.name === 'headMesh'); if (hMesh) hMesh.material.color.setHex(localColor); }
+      if (headGroup) {
+        const hMesh = headGroup.children.find(c => c.name === 'headMesh');
+        if (hMesh) hMesh.material.color.setHex(localColor);
+      }
 
       G.gun.userData.core.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
       G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
@@ -54,12 +58,17 @@ export function onMessage(G, data) {
       G.specPitch = -0.2;
     }
 
-    G.started = true; G.startPanel.classList.add('hidden');
+    G.started = true;
+    G.startPanel.classList.add('hidden');
     G.loadMap(data.seed);
     G.destroyedWalls = [];
     G.destroyedWallObbs = [];
     applyDestroyedWalls(G, V3, data.destroyedWalls);
-    if (data.spawn && !G.isSpectator) { G.pl.pos.fromArray(data.spawn); G.pl.vel.set(0, 0, 0); G.pl.cp.copy(G.pl.pos); }
+    if (data.spawn && !G.isSpectator) {
+      G.pl.pos.fromArray(data.spawn);
+      G.pl.vel.set(0, 0, 0);
+      G.pl.cp.copy(G.pl.pos);
+    }
     G.isConnected = true;
     if (data.match) {
       G.match = data.match;
@@ -79,7 +88,10 @@ export function onMessage(G, data) {
     const bMesh = G.playerModel.children.find(c => c.name === 'bodyMesh');
     if (bMesh) bMesh.material.color.setHex(localColor);
     const headGroup = G.playerModel.children.find(c => c.name === 'headGroup');
-    if (headGroup) { const hMesh = headGroup.children.find(c => c.name === 'headMesh'); if (hMesh) hMesh.material.color.setHex(localColor); }
+    if (headGroup) {
+      const hMesh = headGroup.children.find(c => c.name === 'headMesh');
+      if (hMesh) hMesh.material.color.setHex(localColor);
+    }
 
     G.gun.userData.core.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
     G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
@@ -98,7 +110,8 @@ export function onMessage(G, data) {
       G.pl.pos.fromArray(data.spawn);
       G.pl.vel.set(0, 0, 0);
       G.pl.cp.copy(G.pl.pos);
-      G.pl.yaw = 0; G.pl.pitch = 0;
+      G.pl.yaw = 0;
+      G.pl.pitch = 0;
     }
     if (data.match) {
       G.match = data.match;
@@ -162,8 +175,11 @@ export function onMessage(G, data) {
       const me = G.match.players[G.localPlayerId];
       G.localReady = me ? !!me.ready : false;
       G.won = (G.match.phase === 'summary');
-      if (G.won) { if (G.winPanel.classList.contains('hidden') && !G.isSpectator) G.showSummary(); }
-      else if (!G.winPanel.classList.contains('hidden')) G.winPanel.classList.add('hidden');
+      if (G.won) {
+        if (G.winPanel.classList.contains('hidden') && !G.isSpectator) G.showSummary();
+      } else if (!G.winPanel.classList.contains('hidden')) {
+        G.winPanel.classList.add('hidden');
+      }
       if (data.match.phase === 'countdown') {
         if (!G.countdownActive) {
           G.countdownActive = true;
@@ -180,62 +196,65 @@ export function onMessage(G, data) {
       G.destroyedWallObbs = [];
     }
     for (const pid in data.players) {
-       if (pid === G.localPlayerId && !G.isSpectator) {
-         continue;
-       }
-       const oldRp = G.remotePlayers[pid];
-       G.remotePlayers[pid] = data.players[pid];
-       if (!G.remotePlayers[pid].name) {
-         if (data.match && data.match.players && data.match.players[pid] && data.match.players[pid].name) {
-           G.remotePlayers[pid].name = data.match.players[pid].name;
-         } else if (oldRp && oldRp.name) {
-           G.remotePlayers[pid].name = oldRp.name;
-         }
-       }
-       if (oldRp) {
-         if (data.players[pid].isDead) {
-           G.remotePlayers[pid].isDead = true;
-           if (oldRp.deathCamPos) G.remotePlayers[pid].deathCamPos = oldRp.deathCamPos;
-           if (oldRp.deathCamTarget) G.remotePlayers[pid].deathCamTarget = oldRp.deathCamTarget;
-           if (oldRp.lastShotOrigin) G.remotePlayers[pid].lastShotOrigin = oldRp.lastShotOrigin;
-           if (oldRp.lastKillerId) G.remotePlayers[pid].lastKillerId = oldRp.lastKillerId;
-         } else {
-           G.remotePlayers[pid].isDead = false;
-           G.remotePlayers[pid].deathCamPos = null;
-           G.remotePlayers[pid].deathCamTarget = null;
-           G.remotePlayers[pid].lastShotOrigin = null;
-           G.remotePlayers[pid].lastKillerId = null;
-           G.remotePlayers[pid].predictedDeadUntil = null;
-         }
-         if (oldRp.viewOffset) {
-           G.remotePlayers[pid].viewOffset = oldRp.viewOffset;
-         } else if (data.players[pid].viewOffset) {
-           const vo = data.players[pid].viewOffset;
-           G.remotePlayers[pid].viewOffset = new TH.Quaternion(vo[0], vo[1], vo[2], vo[3]);
-         }
-       } else if (data.players[pid].viewOffset) {
-         const vo = data.players[pid].viewOffset;
-         G.remotePlayers[pid].viewOffset = new TH.Quaternion(vo[0], vo[1], vo[2], vo[3]);
-       }
+      if (pid === G.localPlayerId && !G.isSpectator) {
+        continue;
+      }
+      const oldRp = G.remotePlayers[pid];
+      G.remotePlayers[pid] = data.players[pid];
+      if (!G.remotePlayers[pid].name) {
+        if (data.match && data.match.players && data.match.players[pid] && data.match.players[pid].name) {
+          G.remotePlayers[pid].name = data.match.players[pid].name;
+        } else if (oldRp && oldRp.name) {
+          G.remotePlayers[pid].name = oldRp.name;
+        }
+      }
+      if (oldRp) {
+        if (data.players[pid].isDead) {
+          G.remotePlayers[pid].isDead = true;
+          if (oldRp.deathCamPos) G.remotePlayers[pid].deathCamPos = oldRp.deathCamPos;
+          if (oldRp.deathCamTarget) G.remotePlayers[pid].deathCamTarget = oldRp.deathCamTarget;
+          if (oldRp.lastShotOrigin) G.remotePlayers[pid].lastShotOrigin = oldRp.lastShotOrigin;
+          if (oldRp.lastKillerId) G.remotePlayers[pid].lastKillerId = oldRp.lastKillerId;
+        } else {
+          G.remotePlayers[pid].isDead = false;
+          G.remotePlayers[pid].deathCamPos = null;
+          G.remotePlayers[pid].deathCamTarget = null;
+          G.remotePlayers[pid].lastShotOrigin = null;
+          G.remotePlayers[pid].lastKillerId = null;
+          G.remotePlayers[pid].predictedDeadUntil = null;
+        }
+        if (oldRp.viewOffset) {
+          G.remotePlayers[pid].viewOffset = oldRp.viewOffset;
+        } else if (data.players[pid].viewOffset) {
+          const vo = data.players[pid].viewOffset;
+          G.remotePlayers[pid].viewOffset = new TH.Quaternion(vo[0], vo[1], vo[2], vo[3]);
+        }
+      } else if (data.players[pid].viewOffset) {
+        const vo = data.players[pid].viewOffset;
+        G.remotePlayers[pid].viewOffset = new THREE.Quaternion(vo[0], vo[1], vo[2], vo[3]);
+      }
     }
     for (const pid in G.remotePlayers) {
-       if (!data.players[pid]) {
-           delete G.remotePlayers[pid];
-           if (G.remotePlayerMeshes[pid]) {
-               G.scene.remove(G.remotePlayerMeshes[pid]);
-               delete G.remotePlayerMeshes[pid];
-           }
-       }
+      if (!data.players[pid]) {
+        delete G.remotePlayers[pid];
+        if (G.remotePlayerMeshes[pid]) {
+          G.scene.remove(G.remotePlayerMeshes[pid]);
+          delete G.remotePlayerMeshes[pid];
+        }
+      }
     }
 
     for (let i = 0; i < 4; i++) {
       const sp = data.portals[i];
       const P = G.portals[i];
-      if (P.closing) continue; // close animation in progress; server already reflects the removal
+      if (P.closing) continue;
       const wasPlaced = P.placed;
       P.placed = sp.placed;
       if (P.placed) {
-        P.c.fromArray(sp.c); P.n.fromArray(sp.n); P.r.fromArray(sp.r); P.u.fromArray(sp.u);
+        P.c.fromArray(sp.c);
+        P.n.fromArray(sp.n);
+        P.r.fromArray(sp.r);
+        P.u.fromArray(sp.u);
         let onBadWall = false;
         if (G.isPortalOnDestroyedWall && G.isPortalOnDestroyedWall(P.c, P.n, P.r, P.u)) {
           onBadWall = true;
@@ -300,7 +319,7 @@ export function onMessage(G, data) {
     const rp = G.remotePlayers[data.playerId];
     if (rp) {
       if (data.viewOffset) {
-        rp.viewOffset = new TH.Quaternion(
+        rp.viewOffset = new THREE.Quaternion(
           data.viewOffset[0],
           data.viewOffset[1],
           data.viewOffset[2],
@@ -319,7 +338,9 @@ export function onMessage(G, data) {
       }
     }
   } else if (data.type === 'fire_beam') {
-    if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
+    if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) {
+      G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
+    }
     if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) {
       G.muzzleT = 1;
       const hex = G.portals[data.pi] ? G.portals[data.pi].color : 0x0affff;
@@ -329,8 +350,12 @@ export function onMessage(G, data) {
     G.spawnBeam(G.portals[data.pi].color, new V3(...data.start), new V3(...data.end));
   } else if (data.type === 'fire_rocket') {
     if (typeof document !== 'undefined' && document.hidden) return;
-    if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
-    if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) G.muzzleT = 1;
+    if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) {
+      G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
+    }
+    if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) {
+      G.muzzleT = 1;
+    }
     let spawnPos = new V3(...data.pos);
     const vel = new V3(...data.vel);
     const rDir = vel.clone().normalize();
@@ -350,13 +375,13 @@ export function onMessage(G, data) {
       }
     }
 
-    const rMesh = new TH.Group();
-    const bGeo = new TH.CylinderGeometry(0.06, 0.06, 0.4, 8);
-    const bMat = new TH.MeshStandardMaterial({ color: 0x222222 });
-    const body = new TH.Mesh(bGeo, bMat);
-    const tGeo = new TH.ConeGeometry(0.06, 0.2, 8);
-    const tMat = new TH.MeshStandardMaterial({ color: 0xff0000 });
-    const tip = new TH.Mesh(tGeo, tMat);
+    const rMesh = new THREE.Group();
+    const bGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.4, 8);
+    const bMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+    const body = new THREE.Mesh(bGeo, bMat);
+    const tGeo = new THREE.ConeGeometry(0.06, 0.2, 8);
+    const tMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    const tip = new THREE.Mesh(tGeo, tMat);
     tip.position.y = 0.3;
     rMesh.add(body, tip);
     if (rDir.lengthSq() > 0.0001) {
@@ -367,35 +392,39 @@ export function onMessage(G, data) {
     G.rockets.push({ pos: spawnPos.clone(), vel, mesh: rMesh, life: 5, isLocal: false, shooterId: data.playerId });
     AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1, 0, spawnPos);
   } else if (data.type === 'fire_instagib') {
-    if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
-    if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) G.muzzleT = 1;
+    if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) {
+      G.remotePlayerMeshes[data.playerId].userData.muzzleT = 1;
+    }
+    if (G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === data.playerId) {
+      G.muzzleT = 1;
+    }
     const pts = data.pts.map(a => new V3(...a));
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) {
-       const rm = G.remotePlayerMeshes[data.playerId];
-       if (rm.userData.mirrorInstagibGun) {
-         rm.updateMatrixWorld(true);
-         rm.userData.mirrorInstagibGun.updateMatrixWorld(true);
-         pts[0].set(0, 0, -0.4).applyMatrix4(rm.userData.mirrorInstagibGun.matrixWorld);
-       }
+      const rm = G.remotePlayerMeshes[data.playerId];
+      if (rm.userData.mirrorInstagibGun) {
+        rm.updateMatrixWorld(true);
+        rm.userData.mirrorInstagibGun.updateMatrixWorld(true);
+        pts[0].set(0, 0, -0.4).applyMatrix4(rm.userData.mirrorInstagibGun.matrixWorld);
+      }
     }
-    for (let i = 0; i < pts.length; i += 2) G.spawnInstagibBeam(pts[i], pts[i+1]);
+    for (let i = 0; i < pts.length; i += 2) G.spawnInstagibBeam(pts[i], pts[i + 1]);
     const shooter = G.remotePlayers[data.playerId];
     AudioSys.instagibShot(shooter && shooter.pos ? new V3(...shooter.pos) : pts[0]);
     if (data.scorch) {
-       const sp = new V3(...data.scorch.pos), sn = new V3(...data.scorch.n);
-       G.spawnScorch(sp, sn);
-       AudioSys.zap(sp, AudioSys.listenerPos ? sp.distanceTo(AudioSys.listenerPos) / 343 : 0);
+      const sp = new V3(...data.scorch.pos), sn = new V3(...data.scorch.n);
+      G.spawnScorch(sp, sn);
+      AudioSys.zap(sp, AudioSys.listenerPos ? sp.distanceTo(AudioSys.listenerPos) / 343 : 0);
     }
 
     if (data.hitPlayerId && G.remotePlayers[data.hitPlayerId]) {
-       const hitRp = G.remotePlayers[data.hitPlayerId];
-       hitRp.lastShotOrigin = pts && pts.length >= 2 ? pts[pts.length - 2].clone() : (shooter && shooter.pos ? new V3(...shooter.pos) : null);
-       hitRp.lastKillerId = data.playerId;
+      const hitRp = G.remotePlayers[data.hitPlayerId];
+      hitRp.lastShotOrigin = pts && pts.length >= 2 ? pts[pts.length - 2].clone() : (shooter && shooter.pos ? new V3(...shooter.pos) : null);
+      hitRp.lastKillerId = data.playerId;
     }
 
     if (data.hitPlayerId === G.localPlayerId && !G.isSpectator) {
-       const shotOrigin = pts && pts.length >= 2 ? pts[pts.length - 2].clone() : (shooter && shooter.pos ? new V3(...shooter.pos) : null);
-       G.die(data.playerId, data.pts.length > 2, 'instagib', shotOrigin);
+      const shotOrigin = pts && pts.length >= 2 ? pts[pts.length - 2].clone() : (shooter && shooter.pos ? new V3(...shooter.pos) : null);
+      G.die(data.playerId, data.pts.length > 2, 'instagib', shotOrigin);
     }
   } else if (data.type === 'player_died') {
     if (data.playerId !== G.localPlayerId || G.isSpectator) {
@@ -452,13 +481,17 @@ export function onMessage(G, data) {
     const isLocal = !G.isSpectator && (!data.playerId || data.playerId === G.localPlayerId);
     if (isLocal) {
       G.isDead = false;
+      if (G.playerController) G.playerController.isDead = false;
+      if (G.engine?.player) G.engine.player.isDead = false;
       G.playerModel.visible = true;
       if (G.activeWeapon === 1) G.gun.visible = true;
       if (G.activeWeapon === 2) G.rocketGun.visible = true;
       if (G.activeWeapon === 3) G.instagibGun.visible = true;
       if (data.pos) G.pl.pos.fromArray(data.pos);
       G.pl.vel.set(0, 0, 0);
-      G.pl.yaw = -Math.PI / 2; G.pl.pitch = 0; G.pl.viewOffset = null;
+      G.pl.yaw = -Math.PI / 2;
+      G.pl.pitch = 0;
+      G.pl.viewOffset = null;
       AudioSys.tone(120, 60, 0.4, 'sawtooth', 0.08);
     }
     const pid = data.playerId || (isLocal ? G.localPlayerId : null);
@@ -498,6 +531,10 @@ export function onMessage(G, data) {
   }
 }
 
+/**
+ * Handle network disconnect and automated reconnection logic.
+ * @param {Object} G - Game state context
+ */
 export function onNetworkClose(G) {
   G.isConnected = false;
   if (G.started) {
@@ -526,4 +563,128 @@ export function onNetworkClose(G) {
       }, 1500);
     }
   }
+}
+
+/**
+ * NetworkManager — Manages WebSocket connection lifecycle, authentication, and packet routing.
+ */
+export class NetworkManager {
+  constructor(engine = null) {
+    this.engine = engine;
+    this.ws = null;
+    this.isConnected = false;
+    this.isConnecting = false;
+    this.handlers = null;
+  }
+
+  /**
+   * Connect to server.
+   * @param {string} ip - Server host:port
+   * @param {string} password - Server password
+   * @param {string} name - Player handle
+   */
+  connect(ip, password, name) {
+    this.disconnect();
+    this.isConnecting = true;
+
+    try {
+      this.ws = new WebSocket('ws://' + ip);
+    } catch (err) {
+      this.isConnecting = false;
+      if (this.handlers && this.handlers.onError) {
+        this.handlers.onError(err);
+      }
+      if (this.engine && this.engine.eventBus) {
+        this.engine.eventBus.emit('NET_ERROR', { error: err });
+      }
+      return;
+    }
+
+    this.ws.onopen = () => {
+      this.isConnected = true;
+      this.isConnecting = false;
+      this.send({ type: 'auth', password, name });
+      if (this.engine && this.engine.eventBus) {
+        this.engine.eventBus.emit('NET_CONNECTED');
+      }
+    };
+
+    this.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (this.handlers && this.handlers.onMessage) {
+          this.handlers.onMessage(data);
+        }
+        if (this.engine && this.engine.eventBus) {
+          this.engine.eventBus.emit('NET_MESSAGE', data);
+          if (data.type) {
+            this.engine.eventBus.emit(`NET_${data.type.toUpperCase()}`, data);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse network packet:', err);
+      }
+    };
+
+    this.ws.onerror = (err) => {
+      if (this.handlers && this.handlers.onError) {
+        this.handlers.onError(err);
+      }
+      if (this.engine && this.engine.eventBus) {
+        this.engine.eventBus.emit('NET_ERROR', { error: err });
+      }
+    };
+
+    this.ws.onclose = () => {
+      this.isConnected = false;
+      this.isConnecting = false;
+      if (this.handlers && this.handlers.onClose) {
+        this.handlers.onClose();
+      }
+      if (this.engine && this.engine.eventBus) {
+        this.engine.eventBus.emit('NET_CLOSED');
+      }
+    };
+  }
+
+  /**
+   * Send JSON message object to server.
+   * @param {object} msgObj
+   */
+  send(msgObj) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msgObj));
+    }
+  }
+
+  /**
+   * Disconnect from server.
+   */
+  disconnect() {
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
+      try {
+        this.ws.close();
+      } catch (err) {
+        void err;
+      }
+      this.ws = null;
+    }
+    this.isConnected = false;
+    this.isConnecting = false;
+  }
+}
+
+export function initNetwork(handlers = {}) {
+  const manager = new NetworkManager(null);
+  manager.handlers = handlers;
+  return {
+    networkManager: manager,
+    connect: (ip, pass, name) => manager.connect(ip, pass, name),
+    send: (msg) => manager.send(msg),
+    disconnect: () => manager.disconnect()
+  };
 }

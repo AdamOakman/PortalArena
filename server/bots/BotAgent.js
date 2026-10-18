@@ -1,44 +1,107 @@
 /**
- * Server-side bot AI.
- *
- * Bots are regular entries in gameState.players with { isBot: true }.
- * Their movement is computed here each server tick by producing a fake
- * "keys + yaw/pitch" packet, then letting the standard physics step run
- * on them (so collision, portals, etc. all work identically).
- *
- * Behaviour (no rocket launcher, no instagib):
- *   - Wander around the map, preferring higher platforms
- *   - Jump whenever a platform edge or low obstacle is ahead, and on jumppads
- *   - Navigate smartly around tall walls without getting stuck or jumping in place
- *   - Fire a non-overlapping portal pair from time to time, then walk through them
+ * Server-side bot AI and Agent representation.
  */
 
 import * as TH from 'three';
-import { CFG, PORT, TICK_RATE } from '../shared/constants.js';
-import { initPhysics } from '../shared/physics.js';
-import { mapData, obbs, gameState, isPortalOnDestroyedWall } from './gamestate.js';
+import { CFG, PORT, TICK_RATE } from '../../shared/constants.js';
+import { initPhysics } from '../../shared/physics.js';
+import { mapData, obbs, gameState, isPortalOnDestroyedWall } from '../match/MatchSession.js';
 
 const physics = initPhysics(TH, CFG, PORT);
 
 // ------------------------------------------------------------------ constants
 
 const DT = 1 / TICK_RATE;
-const THINK_INTERVAL_MS = 350;               // how often to re-pick a goal
-const PORTAL_COOLDOWN_S = 4.5;               // minimum seconds between portal shots
-const PORTAL_CHANCE     = 0.55;              // probability to fire portals on a think tick
-const JUMP_COOLDOWN_S   = 0.35;              // minimum gap between jumps
-const ROCKET_COOLDOWN_S = 8.0;               // cooldown between bot rocket shots
-const INSTAGIB_COOLDOWN_S = 6.0;             // cooldown between bot instagib shots
-const INSTAGIB_HIT_CHANCE = 0.20;            // 20% hit chance for bot instagib shots
+const THINK_INTERVAL_MS = 350;
+const PORTAL_COOLDOWN_S = 4.5;
+const PORTAL_CHANCE = 0.55;
+const JUMP_COOLDOWN_S = 0.35;
+const ROCKET_COOLDOWN_S = 8.0;
+const INSTAGIB_COOLDOWN_S = 6.0;
+const INSTAGIB_HIT_CHANCE = 0.20;
+
+export const FUNNY_BOT_NAMES = [
+  'SirLagALot', 'AimBot9000', 'PotatoAim', 'GibMagnet', 'RocketClown',
+  'GlitchyMcFly', 'ToastLord', 'NoScopeGrandpa', 'OopsAllPortals', 'CampyMcCampface',
+  'CtrlAltDefeat', 'ByteMe', 'LavaEnthusiast', 'PanicJumper', 'YeetMaster',
+  'RoombaWithAGun', 'RubberBander', 'FragBait', 'DizzieRascal', 'WallHugger',
+  'PixelPusher', 'CaptainWhiff', 'SpawnCamper', 'BogoSort', 'Error404Skill',
+  'QuantumNoob', 'ClickHappy', 'Overclocker', 'PacketLoss', 'TriggerTroll'
+];
+
+/**
+ * BotAgent — Object-Oriented representation of an AI bot combatant.
+ */
+export class BotAgent {
+  static _nextBotId = 0;
+
+  static generateName(existingNames = new Set()) {
+    const available = FUNNY_BOT_NAMES.filter(n => !existingNames.has(n));
+    const pool = available.length > 0 ? available : FUNNY_BOT_NAMES;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  constructor(playerIndex, spawn, existingNames = new Set()) {
+    this.botId = 'bot_' + (BotAgent._nextBotId++);
+    this.isBot = true;
+    this.playerIndex = playerIndex;
+    this.name = BotAgent.generateName(existingNames);
+    this.ws = null;
+
+    this.pos = new TH.Vector3(spawn.x, spawn.y, spawn.z);
+    this.vel = new TH.Vector3();
+    this.yaw = 0;
+    this.pitch = 0;
+    this.grounded = false;
+    this.groundNormal = new TH.Vector3(0, 1, 0);
+    this.groundT = -1;
+    this.jumpBuf = -1;
+    this.maxSpeed = 0;
+    this.ping = 0;
+    this.shots = 0;
+    this.hits = 0;
+    this.inputBuffer = [];
+    this.spawnIdx = null;
+    this.activeWeapon = 1;
+    this.crouchT = 0;
+    this.isDead = false;
+  }
+
+  toPlayerState() {
+    return {
+      isBot: this.isBot,
+      playerIndex: this.playerIndex,
+      name: this.name,
+      ws: this.ws,
+      pos: this.pos,
+      vel: this.vel,
+      yaw: this.yaw,
+      pitch: this.pitch,
+      grounded: this.grounded,
+      groundNormal: this.groundNormal,
+      groundT: this.groundT,
+      jumpBuf: this.jumpBuf,
+      maxSpeed: this.maxSpeed,
+      ping: this.ping,
+      shots: this.shots,
+      hits: this.hits,
+      inputBuffer: this.inputBuffer,
+      spawnIdx: this.spawnIdx,
+      activeWeapon: this.activeWeapon,
+      crouchT: this.crouchT,
+      isDead: this.isDead
+    };
+  }
+}
 
 // ------------------------------------------------------------------ per-bot state
 
-const botState = new Map(); // botId -> { ... }
+const botState = new Map();
 
 function ensureState(pid) {
   if (!botState.has(pid)) {
     botState.set(pid, {
-      targetPos: null,         // Vector3 we're walking toward
+      targetPos: null,
       lastThinkT: 0,
       lastPortalT: -999,
       lastJumpT: -999,
@@ -49,9 +112,9 @@ function ensureState(pid) {
       lastInstagibT: -999,
       lastWeaponSwapT: 0,
       weaponHoldUntilT: 0,
-      portalPhase: 'none',     // 'none'|'aim_blue'|'aim_orange'|'walk_thru'
+      portalPhase: 'none',
       walkThruT: 0,
-      stuckT: 0,               // time we've been moving very slowly
+      stuckT: 0,
       prevPos: null,
       lastTickPos: null,
       avoidUntilT: 0,
@@ -69,7 +132,7 @@ function ensureState(pid) {
       instagibTargetPid: null,
       instagibAimStartT: 0,
       lastUnstuckT: 0,
-      waypoints: [],
+      waypoints: []
     });
   }
   return botState.get(pid);
@@ -78,7 +141,6 @@ function ensureState(pid) {
 // ------------------------------------------------------------------ helpers
 
 function getRampEndpoints(rm) {
-  // dir: 0 = +x, 1 = +z, 2 = -x, 3 = -z
   let fwdX = 1, fwdZ = 0;
   if (rm.dir === 1) { fwdX = 0; fwdZ = 1; }
   else if (rm.dir === 2) { fwdX = -1; fwdZ = 0; }
@@ -172,7 +234,6 @@ function pickBotTargetAndRoute(curPos, portals) {
     };
   }
 
-  // 25% chance to intentionally walk through an active portal pair if placed
   if (portals && Math.random() < 0.25) {
     const pairs = [];
     if (portals[0] && portals[1] && portals[0].placed && portals[1].placed) pairs.push([portals[0], portals[1]]);
@@ -191,12 +252,10 @@ function pickBotTargetAndRoute(curPos, portals) {
   }
 
   const ramps = mapData.ramps || [];
-  // 35% chance to try to reach the top of a platform via a ramp
   if (ramps.length > 0 && Math.random() < 0.35) {
     const rm = ramps[Math.floor(Math.random() * ramps.length)];
     const ep = getRampEndpoints(rm);
 
-    // Find elevated platform near the top of this ramp
     const elevated = (mapData.slabs || []).filter(s => s.kind === 'plat' && Math.hypot(s.c[0] - ep.high.x, s.c[2] - ep.high.z) < 14 && s.c[1] >= ep.high.y - 1.5);
     let finalTarget = ep.high.clone();
     if (elevated.length > 0) {
@@ -205,9 +264,7 @@ function pickBotTargetAndRoute(curPos, portals) {
     }
 
     if (pos.y < ep.high.y - 1.0) {
-      // Approach point 2.0m before the low end, aligned with ramp centerline
       const approachLow = ep.low.clone().addScaledVector(ep.fwd, -2.0);
-      // Entrance point 1.5m onto the ramp along centerline to ensure clean ramp entry
       const startRamp = ep.low.clone().addScaledVector(ep.fwd, 1.5);
       const midRamp = new TH.Vector3(rm.cx, rm.y0 + rm.rise * 0.5, rm.cz);
 
@@ -258,13 +315,12 @@ function pickBotTargetAndRoute(curPos, portals) {
   };
 }
 
-// Simple raycast downward to see if there's ground nearby ahead of the bot
 function hasGroundAhead(pos, yaw, obbs_) {
   const ahead = new TH.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
   const checkPos = pos.clone().addScaledVector(ahead, 0.8);
   checkPos.y += 0.5;
   const downDir = new TH.Vector3(0, -1, 0);
-  // Check if ground exists 1.5 m below the step-ahead position
+
   for (const obb of obbs_) {
     if (obb.kind === 'lava') continue;
     const dx = checkPos.x - obb.c.x, dy = checkPos.y - obb.c.y, dz = checkPos.z - obb.c.z;
@@ -277,8 +333,9 @@ function hasGroundAhead(pos, yaw, obbs_) {
       const a = obb.ax[k];
       const o = ox * a.x + oy * a.y + oz * a.z;
       const vd = downDir.dot(a);
-      if (Math.abs(vd) < 1e-7) { if (Math.abs(o) > obb.he[k]) { par = true; break; } }
-      else {
+      if (Math.abs(vd) < 1e-7) {
+        if (Math.abs(o) > obb.he[k]) { par = true; break; }
+      } else {
         let t0 = (-obb.he[k] - o) / vd, t1 = (obb.he[k] - o) / vd;
         if (t0 > t1) { const tt = t0; t0 = t1; t1 = tt; }
         if (t0 > tmin) tmin = t0;
@@ -290,8 +347,6 @@ function hasGroundAhead(pos, yaw, obbs_) {
   }
   return false;
 }
-
-// ------------------------------------------------------------------ wall raycast
 
 export function isLavaBlocked(c, PORT_) {
   if (!mapData.lava) return false;
@@ -321,8 +376,9 @@ function raycastWall(origin, dir, maxDist, obbs_) {
       const a = obb.ax[k];
       const o = ox * a.x + oy * a.y + oz * a.z;
       const vd = dir.dot(a);
-      if (Math.abs(vd) < 1e-7) { if (Math.abs(o) > obb.he[k]) { par = true; break; } }
-      else {
+      if (Math.abs(vd) < 1e-7) {
+        if (Math.abs(o) > obb.he[k]) { par = true; break; }
+      } else {
         let t0 = (-obb.he[k] - o) / vd, t1 = (obb.he[k] - o) / vd;
         if (t0 > t1) { const tt = t0; t0 = t1; t1 = tt; }
         if (t0 > tmin) { tmin = t0; hitAxis = k; hitSign = Math.sign(vd); }
@@ -340,18 +396,12 @@ function raycastWall(origin, dir, maxDist, obbs_) {
   return best;
 }
 
-// ------------------------------------------------------------------ portal overlap check
-
-/**
- * Checks whether placing a portal at (c, n, r, u) overlaps with any existing placed portal.
- */
 export function checkPortalOverlap(c, n, r, u, portals, excludeIdx, PORT_) {
   for (let i = 0; i < portals.length; i++) {
     if (i === excludeIdx) continue;
     const Q = portals[i];
     if (!Q || !Q.placed) continue;
 
-    // Check same plane/face
     const dotN = Math.abs(n.dot(Q.n));
     if (dotN > 0.98) {
       const planeDist = Math.abs(c.clone().sub(Q.c).dot(n));
@@ -365,7 +415,6 @@ export function checkPortalOverlap(c, n, r, u, portals, excludeIdx, PORT_) {
       }
     }
 
-    // Direct 3D distance between portal centers
     if (c.distanceTo(Q.c) < Math.max(PORT_.hw, PORT_.hh) * 1.5) {
       return true;
     }
@@ -373,12 +422,6 @@ export function checkPortalOverlap(c, n, r, u, portals, excludeIdx, PORT_) {
   return false;
 }
 
-// ------------------------------------------------------------------ portal placement helper
-
-/**
- * Try to shoot a portal at a flat wall in the direction the bot is facing.
- * Returns { c, n, r, u, eyePos } or null if no valid non-overlapping surface found.
- */
 function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, currentPi) {
   const dir = new TH.Vector3(
     -Math.sin(yaw) * Math.cos(pitch),
@@ -396,13 +439,11 @@ function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, curren
 
   const { point, normal, obb, hitAxis, hitSign } = hit;
 
-  // Build tangent frame for the portal
   const ref = Math.abs(normal.y) > 0.98 ? new TH.Vector3(0, 0, 1) : new TH.Vector3(0, 1, 0);
   const r = new TH.Vector3().crossVectors(ref, normal).normalize();
   if (r.lengthSq() < 1e-8) return null;
   const u = new TH.Vector3().crossVectors(normal, r);
 
-  // Check the face is big enough and clamp mouth inside face boundaries
   const ax1 = (hitAxis + 1) % 3;
   const ax2 = (hitAxis + 2) % 3;
   const ext1 = PORT_.hw * Math.abs(r.dot(obb.ax[ax1])) + PORT_.hh * Math.abs(u.dot(obb.ax[ax1]));
@@ -417,7 +458,6 @@ function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, curren
   let p2 = dvec.dot(obb.ax[ax2]);
   p2 = Math.max(-limit2, Math.min(limit2, p2));
 
-  // If wall is vertical, adjust portal height so portal base sits near floor level (pos.y + 0.05)
   if (Math.abs(normal.y) < 0.2) {
     const targetCenterY = pos.y + PORT_.hh + 0.05;
     if (Math.abs(obb.ax[ax1].y) > 0.8) {
@@ -488,9 +528,6 @@ function findOrangePortalSurface(pos, blueN, obbs_, portals, PORT_, currentPi) {
   return null;
 }
 
-
-// ------------------------------------------------------------------ destructible wall & opponent targeting
-
 function findDestructibleWall(eyePos, fwdDir, maxDist = 20) {
   let best = null;
   let bestScore = -1e9;
@@ -499,7 +536,7 @@ function findDestructibleWall(eyePos, fwdDir, maxDist = 20) {
     if (gameState.destroyedWallObbs && gameState.destroyedWallObbs.some(dob => dob.id === obb.id)) continue;
     const uIdx = obb.he[0] >= obb.he[2] ? 0 : 2;
     const tIdx = uIdx === 0 ? 2 : 0;
-    if (obb.he[tIdx] > 2.5) continue; // must be thin destructible wall
+    if (obb.he[tIdx] > 2.5) continue;
 
     const toCenter = obb.c.clone().sub(eyePos);
     const dist = toCenter.length();
@@ -543,12 +580,6 @@ function findOpponent(pid, eyePos, maxDist = 45) {
   return best;
 }
 
-// ------------------------------------------------------------------ main tick
-
-/**
- * Called once per physics tick for every bot player.
- * Mutates pl.yaw, pl.pitch, and returns a keys object for physStep.
- */
 export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   const onPortalPlaced = typeof actions === 'function' ? actions : (actions && actions.onPortalPlaced);
   const onFireRocket = actions && actions.onFireRocket;
@@ -560,7 +591,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   eyePos.y += CFG.H - 0.15;
   const fwdDir = new TH.Vector3(-Math.sin(pl.yaw), 0, -Math.cos(pl.yaw));
 
-  // ---- weapon swapping & tactical usage
   if (st.portalPhase !== 'none') {
     pl.activeWeapon = 1;
   } else if (nowT >= st.weaponHoldUntilT) {
@@ -568,10 +598,10 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     const opp = findOpponent(pid, eyePos, 35.0);
 
     if (destWall && nowT - st.lastRocketT > ROCKET_COOLDOWN_S && Math.random() < 0.45) {
-      pl.activeWeapon = 2; // Swap to rocket launcher to blow up wall!
+      pl.activeWeapon = 2;
       st.weaponHoldUntilT = nowT + 2.0;
     } else if (opp && nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && Math.random() < 0.45) {
-      pl.activeWeapon = 3; // Swap to instagib to take a shot!
+      pl.activeWeapon = 3;
       st.weaponHoldUntilT = nowT + 1.8;
     } else if (nowT - st.lastWeaponSwapT > 5.0) {
       st.lastWeaponSwapT = nowT;
@@ -583,7 +613,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     }
   }
 
-  // ---- tactical weapon firing & rocket jump
   const distToTarget = st.targetPos ? Math.hypot(st.targetPos.x - pl.pos.x, st.targetPos.z - pl.pos.z) : 0;
   const heightDiffToTarget = st.targetPos ? (st.targetPos.y - pl.pos.y) : 0;
   if (
@@ -614,7 +643,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
         st.instagibAimStartT = nowT;
       }
 
-      // Smooth aim convergence: yaw and pitch smoothly track opponent direction
       const targetYaw = Math.atan2(-opp.dir.x, -opp.dir.z);
       const targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, opp.dir.y)));
 
@@ -622,25 +650,20 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
       while (oppDyaw > Math.PI) oppDyaw -= Math.PI * 2;
       while (oppDyaw < -Math.PI) oppDyaw += Math.PI * 2;
 
-      // Allow shooting only when bot has smoothly aimed onto the target (aiming time > 0.28s and close angle)
       const aimAligned = Math.abs(oppDyaw) < 0.12 && Math.abs(targetPitch - pl.pitch) < 0.14;
       const aimDwellOk = (nowT - st.instagibAimStartT) > 0.28;
 
       if (nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && onFireInstagib && aimAligned && aimDwellOk) {
-        // Re-verify line of sight right at the moment of firing
         const losHit = raycastWall(eyePos, opp.dir, opp.dist, obbs);
         const hasClearLOS = !losHit || losHit.distance >= opp.dist - 0.5;
 
         if (hasClearLOS) {
           st.lastInstagibT = nowT;
-
-          // EXACT 5% CHANCE TO HIT OPPONENT
           const willHit = Math.random() < INSTAGIB_HIT_CHANCE;
           if (willHit) {
             const pts = [eyePos.clone(), opp.pos.clone()];
             onFireInstagib(pts, opp.id, null);
           } else {
-            // 95% intentional near-miss that scorches surrounding environment
             const right = new TH.Vector3(-Math.cos(pl.yaw), 0, Math.sin(pl.yaw));
             const up = new TH.Vector3(0, 1, 0);
             const randAng = Math.random() * Math.PI * 2;
@@ -663,7 +686,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     }
   }
 
-  // ---- advance waypoint along route
   if (st.waypoints && st.waypoints.length > 0) {
     const hDist = Math.hypot(st.targetPos.x - pl.pos.x, st.targetPos.z - pl.pos.z);
     if (hDist < 1.3 && Math.abs(st.targetPos.y - pl.pos.y) < 1.8) {
@@ -674,7 +696,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     }
   }
 
-  // ---- think: re-pick goal every THINK_INTERVAL_MS
   if (nowT - st.lastThinkT > THINK_INTERVAL_MS / 1000) {
     st.lastThinkT = nowT;
 
@@ -698,7 +719,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
       st.unstuckUntilT = 0;
     }
 
-    // Attempt portal shot occasionally (only when portal gun active)
     if (
       st.portalPhase === 'none' &&
       pl.activeWeapon === 1 &&
@@ -729,7 +749,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
 
   let desiredYaw = Math.atan2(-dx, -dz);
 
-  // ---- multi-whisker wall detection & smart obstacle avoidance
   const waistPos = new TH.Vector3(pl.pos.x, pl.pos.y + 0.65, pl.pos.z);
   const kneePos = new TH.Vector3(pl.pos.x, pl.pos.y + 0.25, pl.pos.z);
   const curFwd = new TH.Vector3(-Math.sin(pl.yaw), 0, -Math.cos(pl.yaw));
@@ -822,7 +841,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     }
   }
 
-  // Priority steering: instagib tracking > ramp escape > portal aim > wall avoidance > navigation
   let activeOpp = null;
   if (pl.activeWeapon === 3 && st.instagibTargetPid && gameState.players[st.instagibTargetPid] && !gameState.players[st.instagibTargetPid].isDead) {
     const oppPl = gameState.players[st.instagibTargetPid];
@@ -855,7 +873,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     desiredYaw = st.avoidYaw;
   }
 
-  // Smooth yaw rotation
   let dyaw = desiredYaw - pl.yaw;
   while (dyaw > Math.PI) dyaw -= Math.PI * 2;
   while (dyaw < -Math.PI) dyaw += Math.PI * 2;
@@ -870,7 +887,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   while (pl.yaw > Math.PI) pl.yaw -= Math.PI * 2;
   while (pl.yaw < -Math.PI) pl.yaw += Math.PI * 2;
 
-  // Smooth pitch
   let targetPitch;
   if (activeOpp) {
     targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, activeOpp.dir.y)));
@@ -909,7 +925,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     pl.pitch += (targetPitch - pl.pitch) * Math.min(1, pitchSpeed * DT);
   }
 
-  // ---- stuck tracking & active unstuck
   if (st.lastTickPos) {
     const dMoved = pl.pos.distanceTo(st.lastTickPos);
     if (dist > 0.8 && dMoved < 0.02) {
@@ -920,7 +935,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   }
   st.lastTickPos = pl.pos.clone();
 
-  // If blocked for > 0.3s:
   if (st.stuckT > 0.3) {
     if (!underNow && !onRamp && (canStepOver || (closestHit && closestHit.distance < 1.2 && pl.grounded))) {
       pl.jumpBuf = nowT;
@@ -941,7 +955,7 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     }
   }
 
-  let keys = {
+  const keys = {
     KeyW: (!isPortalAiming || Math.abs(dyaw) < 0.5) && Math.abs(dyaw) < 1.1 && (dist > 0.6 || st.portalPhase === 'walk_thru' || underNow != null || onRamp),
     KeyA: false,
     KeyS: false,
@@ -963,14 +977,12 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     }
   }
 
-  // If in unstuck maneuver: back up and strafe
   if (nowT < st.unstuckUntilT) {
     keys.KeyW = false;
     keys.KeyS = true;
     if (st.strafeDir) keys[st.strafeDir] = true;
   }
 
-  // If stuck for over 1.0s: pick new target, turn around, and jump
   if (st.stuckT > 1.0) {
     const route = pickBotTargetAndRoute(pl.pos, portals);
     st.targetPos = route.target;
@@ -987,7 +999,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     st.unstuckUntilT = 0;
   }
 
-  // ---- portal logic
   const botPortalBase = getBotPortalBase(pl);
 
   if (st.portalPhase === 'aim_blue') {
@@ -1009,7 +1020,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
 
       if (onPortalPlaced) onPortalPlaced(botPortalBase, surface, surface.eyePos);
 
-      // Immediately search for orange portal surface across the room
       const orangeFound = findOrangePortalSurface(pl.pos, surface.n, obbs, portals, PORT_, botPortalBase + 1);
       if (orangeFound) {
         st.orangeSurface = orangeFound.surface;
@@ -1077,7 +1087,6 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
     }
   }
 
-  // ---- jump decision:
   const jumpForLedge = !onRamp && heightDiffToTarget > 0.4 && heightDiffToTarget < 1.6 && dist < 3.5;
   const shouldJump = pl.grounded && !isTallWall && !onRamp && (
     canStepOver ||
@@ -1097,17 +1106,9 @@ export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
   return keys;
 }
 
-// ------------------------------------------------------------------ bot portal base index
-
-/**
- * Returns the portal pair base index (0 or 2) for the given bot.
- * playerIndex 0 uses pair 0 (portals 0 and 1), playerIndex 1 uses pair 1 (portals 2 and 3).
- */
 export function getBotPortalBase(pl) {
   return (pl && pl.playerIndex === 0) ? 0 : 2;
 }
-
-// ------------------------------------------------------------------ cleanup & reset
 
 export function resetBotState(pid) {
   const st = botState.get(pid);
