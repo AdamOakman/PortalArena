@@ -1,29 +1,8 @@
 import * as THREE from 'three';
 import { AudioSys } from '../audio/AudioController.js';
 import { CFG, PORT } from '../../shared/constants.js';
-
-function makePool(n, factory) {
-  const items = [];
-  for (let i = 0; i < n; i++) items.push(factory(i));
-  return {
-    items,
-    acquire() {
-      for (const it of items) {
-        if (!it.busy) {
-          it.busy = true;
-          return it;
-        }
-      }
-      return null;
-    },
-    release(it) {
-      it.busy = false;
-    },
-    releaseAll() {
-      for (const it of items) it.busy = false;
-    }
-  };
-}
+import { ObjectPool } from '../core/ObjectPool.js';
+import { RocketProjectile } from '../projectiles/RocketProjectile.js';
 
 /**
  * WeaponManager — Coordinates active weapons, delegates fire requests, and manages
@@ -81,7 +60,7 @@ export class WeaponManager {
     this._ibPool = null;
     this._scorchPool = null;
     this._gibPool = null;
-    this._smokePool = [];
+    this._smokePool = null;
     this._gibScratch = new THREE.Vector3();
 
     if (this.eventBus) {
@@ -97,7 +76,7 @@ export class WeaponManager {
    */
   initPools(scene) {
     const IB_MAX_PTS = 150;
-    this._ibPool = makePool(16, () => {
+    this._ibPool = new ObjectPool(() => {
       const group = new THREE.Group();
       const core = new THREE.Mesh(this._instagibCoreGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 }));
       group.add(core);
@@ -115,7 +94,7 @@ export class WeaponManager {
       group.visible = false;
       scene.add(group);
       return { busy: false, group, core, glow, points, pPos, vel };
-    });
+    }, null, 16);
 
     const _scorchTex = (() => {
       if (typeof document === 'undefined') return null;
@@ -144,7 +123,7 @@ export class WeaponManager {
     })();
 
     const _scorchGeo = new THREE.PlaneGeometry(1, 1);
-    this._scorchPool = makePool(64, () => {
+    this._scorchPool = new ObjectPool(() => {
       const mesh = new THREE.Mesh(_scorchGeo, new THREE.MeshBasicMaterial({
         map: _scorchTex,
         transparent: true,
@@ -156,43 +135,40 @@ export class WeaponManager {
       mesh.visible = false;
       scene.add(mesh);
       return { busy: false, mesh, life: 0 };
-    });
+    }, null, 64);
 
-    this._gibPool = makePool(80, () => {
+    this._gibPool = new ObjectPool(() => {
       const mat = new THREE.MeshStandardMaterial({ color: 0xaa0000, transparent: true, opacity: 1.0 });
       const mesh = new THREE.Mesh(this._gibGeo, mat);
       mesh.visible = false;
       scene.add(mesh);
       return { busy: false, mesh, mat, vel: new THREE.Vector3() };
-    });
+    }, null, 80);
 
     const SMOKE_POOL_SIZE = 80;
-    this._smokePool = [];
-    for (let si = 0; si < SMOKE_POOL_SIZE; si++) {
+    this._smokePool = new ObjectPool(() => {
       const _smesh = new THREE.Mesh(
         new THREE.BoxGeometry(0.3, 0.3, 0.3),
         new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.8 })
       );
       _smesh.visible = false;
       scene.add(_smesh);
-      this._smokePool.push({ mesh: _smesh, active: false });
-    }
+      return { mesh: _smesh, active: false };
+    }, (s) => {
+      s.active = false;
+      s.mesh.visible = false;
+    }, SMOKE_POOL_SIZE);
   }
 
   _acquireSmoke() {
-    for (const s of this._smokePool) {
-      if (!s.active) {
-        s.active = true;
-        s.mesh.visible = true;
-        return s;
-      }
-    }
-    return null;
+    const s = this._smokePool.acquire();
+    s.active = true;
+    s.mesh.visible = true;
+    return s;
   }
 
   _releaseSmoke(s) {
-    s.active = false;
-    s.mesh.visible = false;
+    this._smokePool.release(s);
   }
 
   /**
@@ -543,24 +519,11 @@ export class WeaponManager {
     }
 
     const vel = rocketDir.clone().multiplyScalar(70);
+    const rocket = new RocketProjectile(spawnPos, vel, G.localPlayerId, true);
+    G.scene.add(rocket.mesh);
 
-    const rMesh = new THREE.Group();
-    const bGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.4, 8);
-    const bMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-    const body = new THREE.Mesh(bGeo, bMat);
-    const tGeo = new THREE.ConeGeometry(0.06, 0.2, 8);
-    const tMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-    const tip = new THREE.Mesh(tGeo, tMat);
-    tip.position.y = 0.3;
-    rMesh.add(body, tip);
-
-    rMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), rocketDir);
-    rMesh.position.copy(spawnPos);
-    G.scene.add(rMesh);
-
-    const rocketData = { pos: spawnPos.clone(), vel, mesh: rMesh, life: 5, isLocal: true, shooterId: G.localPlayerId };
-    this.rockets.push(rocketData);
-    if (G && G.rockets && G.rockets !== this.rockets) G.rockets.push(rocketData);
+    this.rockets.push(rocket);
+    if (G && G.rockets && G.rockets !== this.rockets) G.rockets.push(rocket);
     G.Network.send({ type: 'fire_rocket', pos: spawnPos.toArray(), vel: vel.toArray() });
   }
 

@@ -144,23 +144,25 @@ The codebase is organized into an Object-Oriented, modular architecture with sec
 The project uses Vite 8 with Rolldown bundling and automated chunk splitting:
 - `vite.config.js`: Separates the `three` runtime into a cached vendor chunk (`dist/assets/three-*.js`), keeping application bundles lean and load times fast.
 
-When making modifications, always run both static verification gates:
+When making modifications, always run static verification gates:
 ```bash
 npm run lint
 npm run build
+npm run knip
 ```
 
 - **`npm run lint`**: Validates syntax, module imports, and code style via ESLint across `client/`, `server/`, and `shared/`.
 - **`npm run build`**: Validates Vite / Rolldown module resolution, asset pipelines, and production bundle generation into `dist/`.
+- **`npm run knip`**: Validates that there are no unused files, dependencies, or exports.
 
-Both commands must exit with code 0 before code is considered complete.
+All commands must exit with code 0 before code is considered complete.
 
 ## AI Tooling
 
 This project was designed and built with LLM assistance:
 
 - **Qwen3.8-Flash-Next** — the first outline of the project
-- **Qwen3.8-27B** — most of the development: adjustments and adding features
-- **agy CLI** with **Gemini 3.1 Pro** and **Claude Sonnet/Opus 4.6** — architecture refactoring, OOP migration, Quake physics fidelity, and portal recursion
+- **Qwen3.8-27B** and **Gemini 3.8 Flash** — most of the development: adjustments and adding features
+- **Gemini 3.1 Pro** and **Claude Sonnet/Opus 4.6** — architecture refactoring, OOP migration, Quake physics fidelity, and portal recursion
 
 

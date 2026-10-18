@@ -367,9 +367,10 @@ export class WorldManager {
         for (const s of G._scorchPool.items) s.mesh.visible = false;
       }
       if (G._smokePool) {
+        if (G._smokePool.releaseAll) G._smokePool.releaseAll();
         for (const s of G._smokePool) {
           s.active = false;
-          s.mesh.visible = false;
+          if (s.mesh) s.mesh.visible = false;
         }
       }
     }

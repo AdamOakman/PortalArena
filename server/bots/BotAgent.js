@@ -348,20 +348,6 @@ function hasGroundAhead(pos, yaw, obbs_) {
   return false;
 }
 
-export function isLavaBlocked(c, PORT_) {
-  if (!mapData.lava) return false;
-  const hw = PORT_ ? PORT_.hw : 1.44;
-  const hh = PORT_ ? PORT_.hh : 2.0;
-  for (const L of mapData.lava) {
-    const dx = c.x - L.x;
-    const dz = c.z - L.z;
-    const minSafeDist = L.r + hw + 0.3;
-    if (dx * dx + dz * dz < minSafeDist * minSafeDist && c.y <= (L.y || 0.1) + hh + 0.3) {
-      return true;
-    }
-  }
-  return false;
-}
 
 function raycastWall(origin, dir, maxDist, obbs_) {
   let bestT = maxDist;

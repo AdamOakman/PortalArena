@@ -349,6 +349,7 @@ export function initPlayers(G) {
         const mesh = G.createPlayerModel(remoteColor, 0);
         G.scene.add(mesh);
         G.remotePlayerMeshes[pid] = mesh;
+        if (rp) rp.mesh = mesh;
       }
       const m = G.remotePlayerMeshes[pid];
       if (rp.predictedDeadUntil && nowT < rp.predictedDeadUntil) rp.isDead = true;

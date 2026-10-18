@@ -1,6 +1,6 @@
 ---
 name: feature-dev-workflow
-description: Mandatory workflow whenever asked to develop a new feature or fix a bug in this repo. Run lint and build verification after code changes; static verification (lint + build) is the only gate (no smoke tests of any kind, no e2e/browser testing), and finish with a commit-message summary of all changes.
+description: Mandatory workflow whenever asked to develop a new feature or fix a bug in this repo. Run lint, build, and knip verification after code changes; static verification (lint + build + knip) is the only gate (no smoke tests of any kind, no e2e/browser testing), and finish with a commit-message summary of all changes.
 ---
 
 # Feature Development / Bug-Fix Workflow
@@ -35,28 +35,30 @@ Apply this workflow for **every** request to develop a feature or fix a bug in t
 
 ## Rules
 
-1. **Verify after code changes (`lint` + `build`)**
+1. **Verify after code changes (`lint` + `build` + `knip`)**
    - After editing files (or a batch of related edits), run:
      ```bash
      npm run lint
      npm run build
+     npm run knip
      ```
-     *(Note: On Windows PowerShell, execute via `cmd.exe /c "npm run lint"` and `cmd.exe /c "npm run build"` or `npm.cmd` to avoid PowerShell execution policy restrictions).*
-   - Both commands must exit with code 0:
+     *(Note: On Windows PowerShell, execute via `cmd.exe /c "npm run lint"`, `cmd.exe /c "npm run build"`, and `cmd.exe /c "npm run knip"` or `npm.cmd` to avoid PowerShell execution policy restrictions).*
+   - All three commands must exit with code 0:
      - `npm run lint`: Validates code style and syntax across `client/`, `server/`, and `shared/`.
      - `npm run build`: Validates Vite ES module resolution, bundling, and asset pipelines into `dist/`.
-   - If either command reports errors: fix them immediately, re-run, and only move on once both pass cleanly.
-   - Never leave a known violation or build break behind.
+     - `npm run knip`: Validates that there are no unused files, dependencies, or exports.
+   - If any command reports errors: fix them immediately, re-run, and only move on once all three pass cleanly.
+   - Never leave a known violation, build break, or dead/unused code behind.
 
 2. **No smoke tests of any kind — static verification is the only gate**
-   - `npm run lint` and `npm run build` are the **sole** verification gates for this workflow. Do not perform any runtime verification.
+   - `npm run lint`, `npm run build`, and `npm run knip` are the **sole** verification gates for this workflow. Do not perform any runtime verification.
    - Do **not** run the app, launch servers/clients, exercise the UI, or interact with a running build to "check it works".
    - Do **not** write or run throwaway/scratch scripts, one-off test harnesses, or ad-hoc smoke checks.
    - Do **not** spin up browser-based end-to-end tests (no Playwright, Puppeteer, or manual browser sessions).
-   - If a change is clean per `lint` and `build`, it is done — do not add extra verification to "be safe".
+   - If a change is clean per `lint`, `build`, and `knip`, it is done — do not add extra verification to "be safe".
 
 3. **Finish with a commit-message summary**
-   - When the whole task is done (all changes made, lint and build passing), present a commit-message-style summary of the work:
+   - When the whole task is done (all changes made, lint, build, and knip passing), present a commit-message-style summary of the work:
      - **Title**: a short, imperative summary of the change (e.g. `Add portal cooldown indicator`).
      - **Body**: a detailed description of exactly what was changed — which files, which classes/methods, and why — so the summary can be used verbatim as a commit message.
 
@@ -70,4 +72,5 @@ Fix portal cooldown desync between clients
 - shared/constants.js: add PORTAL_COOLDOWN_MS shared constant
 - npm run lint passes clean
 - npm run build passes clean
+- npm run knip passes clean
 ```

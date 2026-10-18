@@ -389,11 +389,33 @@ export function isPortalOnDestroyedWall(c, n, r, u, PORT_) {
  */
 export class MatchSession {
   constructor(seed = null) {
-    this.seedStr = seed || seedStr;
-    this.mapData = mapData;
-    this.gameState = gameState;
-    this.obbs = obbs;
-    this.match = match;
+    if (seed) {
+      updateMap(seed);
+    }
+  }
+
+  get seedStr() {
+    return seedStr;
+  }
+
+  set seedStr(val) {
+    seedStr = val;
+  }
+
+  get mapData() {
+    return mapData;
+  }
+
+  get gameState() {
+    return gameState;
+  }
+
+  get obbs() {
+    return obbs;
+  }
+
+  get match() {
+    return match;
   }
 
   beginWarmup(players = {}) {
@@ -432,5 +454,29 @@ export class MatchSession {
 
   getInfo() {
     return matchInfo();
+  }
+
+  matchInfo() {
+    return matchInfo();
+  }
+
+  resetDestructibleWalls() {
+    resetDestructibleWalls();
+  }
+
+  resetMapState() {
+    resetMapState();
+  }
+
+  updateMap(newSeed) {
+    updateMap(newSeed);
+  }
+
+  serverDestroyWall(wallId, wallCenter, point) {
+    return serverDestroyWall(wallId, wallCenter, point);
+  }
+
+  isPortalOnDestroyedWall(c, n, r, u, PORT_) {
+    return isPortalOnDestroyedWall(c, n, r, u, PORT_);
   }
 }

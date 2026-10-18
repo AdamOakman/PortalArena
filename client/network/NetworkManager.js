@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { AudioSys } from '../audio/AudioController.js';
+import { RemotePlayer } from '../entities/RemotePlayer.js';
+import { RocketProjectile } from '../projectiles/RocketProjectile.js';
 
 function applyDestroyedWalls(G, V3, walls) {
   if (!walls || walls.length === 0) return;
@@ -24,7 +26,7 @@ function applyDestroyedWalls(G, V3, walls) {
  * @param {Object} data - Deserialized network packet
  */
 export function onMessage(G, data) {
-  const { TH, V3 } = G;
+  const { V3 } = G;
   if (data.type === 'init') {
     if (G.onConnectionSuccess) G.onConnectionSuccess();
     G.localPlayerId = data.playerId;
@@ -199,39 +201,34 @@ export function onMessage(G, data) {
       if (pid === G.localPlayerId && !G.isSpectator) {
         continue;
       }
-      const oldRp = G.remotePlayers[pid];
-      G.remotePlayers[pid] = data.players[pid];
-      if (!G.remotePlayers[pid].name) {
-        if (data.match && data.match.players && data.match.players[pid] && data.match.players[pid].name) {
+      if (!G.remotePlayers[pid]) {
+        G.remotePlayers[pid] = new RemotePlayer(pid, data.players[pid]);
+        if (!G.remotePlayers[pid].name && data.match?.players?.[pid]?.name) {
           G.remotePlayers[pid].name = data.match.players[pid].name;
-        } else if (oldRp && oldRp.name) {
-          G.remotePlayers[pid].name = oldRp.name;
         }
-      }
-      if (oldRp) {
-        if (data.players[pid].isDead) {
-          G.remotePlayers[pid].isDead = true;
-          if (oldRp.deathCamPos) G.remotePlayers[pid].deathCamPos = oldRp.deathCamPos;
-          if (oldRp.deathCamTarget) G.remotePlayers[pid].deathCamTarget = oldRp.deathCamTarget;
-          if (oldRp.lastShotOrigin) G.remotePlayers[pid].lastShotOrigin = oldRp.lastShotOrigin;
-          if (oldRp.lastKillerId) G.remotePlayers[pid].lastKillerId = oldRp.lastKillerId;
+      } else {
+        const oldRp = G.remotePlayers[pid];
+        const prevDeathCamPos = oldRp.deathCamPos;
+        const prevDeathCamTarget = oldRp.deathCamTarget;
+        const prevLastShotOrigin = oldRp.lastShotOrigin;
+        const prevLastKillerId = oldRp.lastKillerId;
+        const prevViewOffset = oldRp.viewOffset;
+
+        if (oldRp.updateFromSnapshot) {
+          oldRp.updateFromSnapshot(data.players[pid], data.match);
         } else {
-          G.remotePlayers[pid].isDead = false;
-          G.remotePlayers[pid].deathCamPos = null;
-          G.remotePlayers[pid].deathCamTarget = null;
-          G.remotePlayers[pid].lastShotOrigin = null;
-          G.remotePlayers[pid].lastKillerId = null;
-          G.remotePlayers[pid].predictedDeadUntil = null;
+          G.remotePlayers[pid] = new RemotePlayer(pid, data.players[pid]);
         }
-        if (oldRp.viewOffset) {
-          G.remotePlayers[pid].viewOffset = oldRp.viewOffset;
-        } else if (data.players[pid].viewOffset) {
-          const vo = data.players[pid].viewOffset;
-          G.remotePlayers[pid].viewOffset = new TH.Quaternion(vo[0], vo[1], vo[2], vo[3]);
+
+        if (G.remotePlayers[pid].isDead) {
+          if (prevDeathCamPos) G.remotePlayers[pid].deathCamPos = prevDeathCamPos;
+          if (prevDeathCamTarget) G.remotePlayers[pid].deathCamTarget = prevDeathCamTarget;
+          if (prevLastShotOrigin) G.remotePlayers[pid].lastShotOrigin = prevLastShotOrigin;
+          if (prevLastKillerId) G.remotePlayers[pid].lastKillerId = prevLastKillerId;
         }
-      } else if (data.players[pid].viewOffset) {
-        const vo = data.players[pid].viewOffset;
-        G.remotePlayers[pid].viewOffset = new THREE.Quaternion(vo[0], vo[1], vo[2], vo[3]);
+        if (prevViewOffset && !G.remotePlayers[pid].viewOffset) {
+          G.remotePlayers[pid].viewOffset = prevViewOffset;
+        }
       }
     }
     for (const pid in G.remotePlayers) {
@@ -358,7 +355,6 @@ export function onMessage(G, data) {
     }
     let spawnPos = new V3(...data.pos);
     const vel = new V3(...data.vel);
-    const rDir = vel.clone().normalize();
 
     if (G.isSpectator && G.spectatorMode === 'follow' && G.followPerspective === 'pov' && G.spectateTargetPid === data.playerId) {
       G.camera.updateMatrixWorld(true);
@@ -375,21 +371,9 @@ export function onMessage(G, data) {
       }
     }
 
-    const rMesh = new THREE.Group();
-    const bGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.4, 8);
-    const bMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-    const body = new THREE.Mesh(bGeo, bMat);
-    const tGeo = new THREE.ConeGeometry(0.06, 0.2, 8);
-    const tMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-    const tip = new THREE.Mesh(tGeo, tMat);
-    tip.position.y = 0.3;
-    rMesh.add(body, tip);
-    if (rDir.lengthSq() > 0.0001) {
-      rMesh.quaternion.setFromUnitVectors(new V3(0, 1, 0), rDir);
-    }
-    rMesh.position.copy(spawnPos);
-    G.scene.add(rMesh);
-    G.rockets.push({ pos: spawnPos.clone(), vel, mesh: rMesh, life: 5, isLocal: false, shooterId: data.playerId });
+    const rocket = new RocketProjectile(spawnPos, vel, data.playerId, false);
+    G.scene.add(rocket.mesh);
+    G.rockets.push(rocket);
     AudioSys.tone(300, 150, 0.3, 'sawtooth', 0.1, 0, spawnPos);
   } else if (data.type === 'fire_instagib') {
     if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) {

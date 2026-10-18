@@ -10,10 +10,13 @@ export class ObjectPool {
   constructor(createFn, resetFn = null, initialSize = 10) {
     this.createFn = createFn;
     this.resetFn = resetFn;
+    this.items = [];
     this.pool = [];
 
     for (let i = 0; i < initialSize; i++) {
-      this.pool.push(this.createFn());
+      const item = this.createFn(i);
+      this.items.push(item);
+      this.pool.push(item);
     }
   }
 
@@ -22,7 +25,17 @@ export class ObjectPool {
    * @returns {any}
    */
   acquire() {
-    return this.pool.length > 0 ? this.pool.pop() : this.createFn();
+    let item;
+    if (this.pool.length > 0) {
+      item = this.pool.pop();
+    } else {
+      item = this.createFn(this.items.length);
+      this.items.push(item);
+    }
+    if (typeof item === 'object' && item !== null) {
+      item.busy = true;
+    }
+    return item;
   }
 
   /**
@@ -30,10 +43,46 @@ export class ObjectPool {
    * @param {any} obj
    */
   release(obj) {
+    if (!obj) return;
+    if (typeof obj === 'object') {
+      obj.busy = false;
+    }
     if (this.resetFn) {
       this.resetFn(obj);
     }
     this.pool.push(obj);
+  }
+
+  /**
+   * Release all tracked objects back into the pool.
+   */
+  releaseAll() {
+    this.pool = [];
+    for (const item of this.items) {
+      if (typeof item === 'object' && item !== null) {
+        item.busy = false;
+      }
+      if (this.resetFn) {
+        this.resetFn(item);
+      }
+      this.pool.push(item);
+    }
+  }
+
+  /**
+   * Iterate over all managed items in the pool.
+   */
+  [Symbol.iterator]() {
+    return this.items[Symbol.iterator]();
+  }
+
+  /**
+   * Execute a callback for each managed item in the pool.
+   * @param {Function} callback
+   * @param {any} [thisArg]
+   */
+  forEach(callback, thisArg) {
+    this.items.forEach(callback, thisArg);
   }
 
   /**

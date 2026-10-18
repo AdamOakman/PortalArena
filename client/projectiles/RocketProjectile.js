@@ -7,8 +7,21 @@ import { Entity } from '../entities/Entity.js';
 export class RocketProjectile extends Entity {
   constructor(position, velocity, shooterId, isLocal = false) {
     super('rocket');
-    this.position.copy(position);
-    this.velocity.copy(velocity);
+    if (Array.isArray(position)) {
+      this.position.fromArray(position);
+    } else {
+      this.position.copy(position);
+    }
+
+    if (Array.isArray(velocity)) {
+      this.velocity.fromArray(velocity);
+    } else {
+      this.velocity.copy(velocity);
+    }
+
+    // Aliases for seamless compatibility with game loop accessors
+    this.pos = this.position;
+    this.vel = this.velocity;
     this.shooterId = shooterId;
     this.isLocal = isLocal;
     this.life = 5.0; // 5 seconds lifetime max
@@ -45,6 +58,13 @@ export class RocketProjectile extends Entity {
     this.position.addScaledVector(this.velocity, dt);
     if (this.mesh) {
       this.mesh.position.copy(this.position);
+    }
+  }
+
+  destroy() {
+    super.destroy();
+    if (this.mesh && this.mesh.parent) {
+      this.mesh.parent.remove(this.mesh);
     }
   }
 }
