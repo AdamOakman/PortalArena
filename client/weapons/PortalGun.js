@@ -11,26 +11,47 @@ export class PortalGun extends Weapon {
   }
 
   equip() {
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    if (G?.gun) G.gun.visible = true;
     if (this.model) this.model.visible = true;
   }
 
   unequip() {
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    if (G?.gun) G.gun.visible = false;
     if (this.model) this.model.visible = false;
   }
 
   firePrimary() {
     if (!this.canFire()) return;
     this.triggerCooldown();
-    if (this.engine && this.engine.eventBus) {
-      this.engine.eventBus.emit('WEAPON_FIRE_PORTAL', { portalIndex: 0 });
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    const pi = G ? G.localPlayerIndex * 2 : 0;
+    const wm = this.engine?.weaponManager || G?.weaponManager;
+    if (wm?.firePortal) {
+      wm.firePortal(pi, G);
+    } else if (G?.firePortal) {
+      G.firePortal(pi);
+    }
+    if (this.engine?.eventBus) {
+      this.engine.eventBus.emit('WEAPON_FIRE_PORTAL', { portalIndex: pi });
     }
   }
 
-  fireSecondary() {
+  fireSecondary(active = true) {
+    if (!active) return;
     if (!this.canFire()) return;
     this.triggerCooldown();
-    if (this.engine && this.engine.eventBus) {
-      this.engine.eventBus.emit('WEAPON_FIRE_PORTAL', { portalIndex: 1 });
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    const pi = G ? G.localPlayerIndex * 2 + 1 : 1;
+    const wm = this.engine?.weaponManager || G?.weaponManager;
+    if (wm?.firePortal) {
+      wm.firePortal(pi, G);
+    } else if (G?.firePortal) {
+      G.firePortal(pi);
+    }
+    if (this.engine?.eventBus) {
+      this.engine.eventBus.emit('WEAPON_FIRE_PORTAL', { portalIndex: pi });
     }
   }
 }

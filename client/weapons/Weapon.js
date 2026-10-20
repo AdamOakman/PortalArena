@@ -40,8 +40,11 @@ export class Weapon {
 
   /**
    * Secondary fire action.
+   * @param {boolean} [active=true]
    */
-  fireSecondary() {}
+  fireSecondary(active = true) {
+    void active;
+  }
 
   /**
    * Called when weapon is equipped.

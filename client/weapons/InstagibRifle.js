@@ -11,24 +11,39 @@ export class InstagibRifle extends Weapon {
   }
 
   equip() {
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    if (G?.instagibGun) G.instagibGun.visible = true;
     if (this.model) this.model.visible = true;
   }
 
   unequip() {
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    if (G?.instagibGun) G.instagibGun.visible = false;
     if (this.model) this.model.visible = false;
   }
 
   firePrimary() {
     if (!this.canFire()) return;
     this.triggerCooldown();
-    if (this.engine && this.engine.eventBus) {
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    const wm = this.engine?.weaponManager || G?.weaponManager;
+    if (wm?.fireInstagib) {
+      wm.fireInstagib(G);
+    } else if (G?.fireInstagib) {
+      G.fireInstagib();
+    }
+    if (this.engine?.eventBus) {
       this.engine.eventBus.emit('WEAPON_FIRE_INSTAGIB');
     }
   }
 
-  fireSecondary() {
-    if (this.engine && this.engine.eventBus) {
-      this.engine.eventBus.emit('WEAPON_ALT_AIM');
+  fireSecondary(active = true) {
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    if (G) {
+      G.isZooming = !!active;
+    }
+    if (this.engine?.eventBus) {
+      this.engine.eventBus.emit('WEAPON_ALT_AIM', { active });
     }
   }
 }

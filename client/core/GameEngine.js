@@ -48,6 +48,10 @@ export class GameEngine {
     this.inputManager = context?.inputManager || new InputManager(this, canvas, context);
     this.network = context?.network || context?.Network || new NetworkManager(this);
     this.weaponManager = context?.weaponManager || new WeaponManager(this.eventBus, this);
+    if (this.weaponManager) {
+      if (!this.weaponManager.engine) this.weaponManager.engine = this;
+      if (!this.weaponManager.eventBus) this.weaponManager.eventBus = this.eventBus;
+    }
     this.matchState = new MatchStateMachine(this);
 
     // Register weapon strategies into slots

@@ -134,13 +134,21 @@ export class InputManager {
             });
           }
           G.grabbedCube = null;
-        } else if (G) {
-          if (G.activeWeapon === 1 && G.firePortal) G.firePortal(G.localPlayerIndex * 2);
-          else if (G.activeWeapon === 2 && G.fireRocket) G.fireRocket();
-          else if (G.activeWeapon === 3 && G.fireInstagib) G.fireInstagib();
+        } else {
+          const wm = this.engine?.weaponManager || G?.weaponManager;
+          if (wm) {
+            wm.firePrimary();
+          } else if (G) {
+            if (G.activeWeapon === 1 && G.firePortal) G.firePortal(G.localPlayerIndex * 2);
+            else if (G.activeWeapon === 2 && G.fireRocket) G.fireRocket();
+            else if (G.activeWeapon === 3 && G.fireInstagib) G.fireInstagib();
+          }
         }
       } else if (e.button === 2) {
-        if (G) {
+        const wm = this.engine?.weaponManager || G?.weaponManager;
+        if (wm) {
+          wm.fireSecondary(true);
+        } else if (G) {
           if (G.activeWeapon === 1 && !G.grabbedCube && G.firePortal) {
             G.firePortal(G.localPlayerIndex * 2 + 1);
           } else if (G.activeWeapon === 2 || G.activeWeapon === 3) {
@@ -151,8 +159,13 @@ export class InputManager {
     });
 
     document.addEventListener('mouseup', (e) => {
-      if (e.button === 2 && this.context) {
-        this.context.isZooming = false;
+      if (e.button === 2) {
+        const wm = this.engine?.weaponManager || this.context?.weaponManager;
+        if (wm) {
+          wm.fireSecondary(false);
+        } else if (this.context) {
+          this.context.isZooming = false;
+        }
       }
     });
 
@@ -165,14 +178,20 @@ export class InputManager {
         if (G.cycleSpectatorTarget) G.cycleSpectatorTarget(e.deltaY > 0 ? 1 : -1);
         return;
       }
-      G.activeWeapon = (G.activeWeapon === 1) ? 2 : 1;
-      if (G.gun && G.rocketGun) {
-        if (G.activeWeapon === 1) {
-          G.gun.visible = true;
-          G.rocketGun.visible = false;
-        } else {
-          G.gun.visible = false;
-          G.rocketGun.visible = true;
+      const nextWeapon = (G.activeWeapon === 1) ? 2 : 1;
+      const wm = this.engine?.weaponManager || G?.weaponManager;
+      if (wm) {
+        wm.select(nextWeapon);
+      } else {
+        G.activeWeapon = nextWeapon;
+        if (G.gun && G.rocketGun) {
+          if (G.activeWeapon === 1) {
+            G.gun.visible = true;
+            G.rocketGun.visible = false;
+          } else {
+            G.gun.visible = false;
+            G.rocketGun.visible = true;
+          }
         }
       }
     });
@@ -235,23 +254,36 @@ export class InputManager {
 
       if (G.isSpectator || G.isDead) return;
 
+      const wm = this.engine?.weaponManager || G.weaponManager;
       if (c === 'Digit1') {
-        G.activeWeapon = 1;
-        if (G.gun) G.gun.visible = true;
-        if (G.rocketGun) G.rocketGun.visible = false;
-        if (G.instagibGun) G.instagibGun.visible = false;
+        if (wm) {
+          wm.select(1);
+        } else {
+          G.activeWeapon = 1;
+          if (G.gun) G.gun.visible = true;
+          if (G.rocketGun) G.rocketGun.visible = false;
+          if (G.instagibGun) G.instagibGun.visible = false;
+        }
       }
       if (c === 'Digit2') {
-        G.activeWeapon = 2;
-        if (G.gun) G.gun.visible = false;
-        if (G.rocketGun) G.rocketGun.visible = true;
-        if (G.instagibGun) G.instagibGun.visible = false;
+        if (wm) {
+          wm.select(2);
+        } else {
+          G.activeWeapon = 2;
+          if (G.gun) G.gun.visible = false;
+          if (G.rocketGun) G.rocketGun.visible = true;
+          if (G.instagibGun) G.instagibGun.visible = false;
+        }
       }
       if (c === 'Digit3') {
-        G.activeWeapon = 3;
-        if (G.gun) G.gun.visible = false;
-        if (G.rocketGun) G.rocketGun.visible = false;
-        if (G.instagibGun) G.instagibGun.visible = true;
+        if (wm) {
+          wm.select(3);
+        } else {
+          G.activeWeapon = 3;
+          if (G.gun) G.gun.visible = false;
+          if (G.rocketGun) G.rocketGun.visible = false;
+          if (G.instagibGun) G.instagibGun.visible = true;
+        }
       }
 
       if (G.countdownActive || (G.match && G.match.phase === 'countdown')) {

@@ -62,12 +62,6 @@ export class WeaponManager {
     this._gibPool = null;
     this._smokePool = null;
     this._gibScratch = new THREE.Vector3();
-
-    if (this.eventBus) {
-      this.eventBus.on('WEAPON_FIRE_PORTAL', (e) => this.firePortal(e.portalIndex));
-      this.eventBus.on('WEAPON_FIRE_ROCKET', () => this.fireRocket());
-      this.eventBus.on('WEAPON_FIRE_INSTAGIB', () => this.fireInstagib());
-    }
   }
 
   /**
@@ -185,7 +179,7 @@ export class WeaponManager {
   }
 
   select(slot) {
-    if (!this.weapons.has(slot) || slot === this.activeSlot) return;
+    if (!this.weapons.has(slot)) return;
 
     if (this.activeWeapon) {
       this.activeWeapon.unequip();
@@ -195,6 +189,14 @@ export class WeaponManager {
     const nextWeapon = this.activeWeapon;
     if (nextWeapon) {
       nextWeapon.equip();
+    }
+
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    if (G) {
+      G.activeWeapon = slot;
+      if (G.gun) G.gun.visible = (slot === 1);
+      if (G.rocketGun) G.rocketGun.visible = (slot === 2);
+      if (G.instagibGun) G.instagibGun.visible = (slot === 3);
     }
 
     if (this.eventBus) {
@@ -215,10 +217,10 @@ export class WeaponManager {
     }
   }
 
-  fireSecondary() {
+  fireSecondary(active = true) {
     const weapon = this.activeWeapon;
-    if (weapon && weapon.canFire()) {
-      weapon.fireSecondary();
+    if (weapon) {
+      weapon.fireSecondary(active);
     }
   }
 
