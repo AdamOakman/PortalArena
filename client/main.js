@@ -41,6 +41,7 @@ import { PlayerController } from './entities/PlayerController.js';
 import { InputManager } from './input/InputManager.js';
 import { LoadingScreen } from './ui/LoadingScreen.js';
 import { GameEngine } from './core/GameEngine.js';
+import { MenuController } from './ui/MenuController.js';
 
 /**
  * PortalClient — Root Application orchestrator and composition coordinator.
@@ -154,7 +155,16 @@ export class PortalClient {
       dom: (id) => (typeof document !== 'undefined' ? document.getElementById(id) : null),
 
       // --- Session state ---
-      baseFov: 115,
+      baseFov: (() => {
+        try {
+          const saved = localStorage.getItem('portal_fov');
+          if (saved !== null) {
+            const p = parseInt(saved, 10);
+            if (!isNaN(p) && p >= 90 && p <= 135) return p;
+          }
+        } catch { /* ignore */ }
+        return 115;
+      })(),
       started: false,
       won: false,
       isDead: false,
@@ -251,6 +261,14 @@ export class PortalClient {
     };
     G.updateLocalView = (dt, now) => playerController.updateLocalView(dt, now, G);
 
+    // Menu Controller
+    G.menuController = new MenuController(G);
+    G.menuController.init();
+    G.showMainMenu = () => G.menuController.showMainMenu();
+    G.showInGameMenu = () => G.menuController.showInGameMenu();
+    G.hideInGameMenu = () => G.menuController.hideInGameMenu();
+    G.toggleInGameMenu = () => G.menuController.toggleInGameMenu();
+
     // Input subsystem
     G.inputManager = new InputManager(G.engine || null, G.canvas, G);
     G.keys = G.inputManager.keys;
@@ -327,6 +345,7 @@ export class PortalClient {
       this.loading.onHide = () => {
         if (G.canvas) G.canvas.style.opacity = '1';
         if (G.startPanel) G.startPanel.style.opacity = '1';
+        if (G.menuController) G.menuController.showMainMenu();
       };
     }
   }
@@ -471,6 +490,7 @@ export class PortalClient {
     }
 
     this.hideConnectOverlay();
+    if (G.menuController) G.menuController.hideInGameMenu();
   }
 
   /**
@@ -498,6 +518,7 @@ export class PortalClient {
     G.isReconnecting = false;
     if (G.Network && G.Network.disconnect) G.Network.disconnect();
     this.hideConnectOverlay();
+    if (G.menuController) G.menuController.hideInGameMenu();
 
     if (typeof document !== 'undefined' && document.exitPointerLock) {
       document.exitPointerLock();
@@ -520,6 +541,17 @@ export class PortalClient {
         p.placed = false;
         p.closing = false;
       }
+    }
+
+    if (G.loadMap) {
+      G.loadMap(String(Math.floor(Math.random() * 1e9)));
+    }
+    if (G.canvas) {
+      G.canvas.style.opacity = '1';
+    }
+    if (G.camera) {
+      G.camera.fov = G.baseFov || 115;
+      G.camera.updateProjectionMatrix();
     }
 
     if (G.remotePlayerMeshes) {
@@ -547,16 +579,22 @@ export class PortalClient {
       if (startPanel) {
         startPanel.classList.remove('hidden');
         startPanel.style.opacity = '1';
+        if (G.menuController) G.menuController.showMainMenu();
       }
       const connStatus = document.getElementById('connstatus');
       if (connStatus) {
-        connStatus.textContent = msg || 'Connection timed out after 30 seconds';
-        connStatus.classList.remove('hidden');
+        if (msg) {
+          connStatus.textContent = msg;
+          connStatus.classList.remove('hidden');
+        } else {
+          connStatus.textContent = '';
+          connStatus.classList.add('hidden');
+        }
       }
     }
 
-    if (G.addEventLog) {
-      G.addEventLog(msg || 'Connection timed out after 30 seconds', true);
+    if (msg && G.addEventLog) {
+      G.addEventLog(msg, true);
     }
   }
 

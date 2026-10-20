@@ -47,17 +47,22 @@ export class InputManager {
     if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
     document.addEventListener('pointerlockchange', () => {
+      const wasLocked = this.pointerLocked;
       this.pointerLocked = document.pointerLockElement === this.canvas;
       if (this.context) this.context.pointerLocked = this.pointerLocked;
 
-      const menuPanel = this.context?.menuPanel || document.getElementById('menupanel');
-      if (menuPanel) {
-        if (this.pointerLocked) {
-          menuPanel.classList.add('hidden');
-        } else {
-          const switchBtn = this.context?.dom ? this.context.dom('btnswitchmode') : document.getElementById('btnswitchmode');
-          if (switchBtn) {
-            switchBtn.textContent = this.context?.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
+      if (this.context?.menuController) {
+        this.context.menuController.onPointerLockChange(this.pointerLocked, wasLocked);
+      } else {
+        const menuPanel = this.context?.menuPanel || document.getElementById('menupanel');
+        if (menuPanel) {
+          if (this.pointerLocked) {
+            menuPanel.classList.add('hidden');
+          } else {
+            const switchBtn = this.context?.dom ? this.context.dom('btnswitchmode') : document.getElementById('btnswitchmode');
+            if (switchBtn) {
+              switchBtn.textContent = this.context?.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
+            }
           }
         }
       }
@@ -72,6 +77,9 @@ export class InputManager {
         AudioSys.ensure();
         const G = this.context;
         if (G && G.started && !this.pointerLocked && !G.won) {
+          if (G.menuController && G.menuController.isMenuOpen()) {
+            return;
+          }
           this.requestPointerLock();
         }
       });
@@ -198,6 +206,11 @@ export class InputManager {
 
     document.addEventListener('keydown', (e) => {
       const G = this.context;
+
+      if (G?.menuController?.handleKeyDown(e)) {
+        return;
+      }
+
       if (e.code === 'Enter') {
         const startPanel = G?.startPanel || document.getElementById('startpanel');
         if (G && !G.started && startPanel && !startPanel.classList.contains('hidden')) {
@@ -224,6 +237,9 @@ export class InputManager {
 
       if (c === 'KeyJ' && !e.repeat) {
         if (G.isSpectator && G.requestJoin) {
+          if (G.menuController) G.menuController.hideInGameMenu();
+          const mp = document.getElementById('menupanel');
+          if (mp) mp.classList.add('hidden');
           G.requestJoin();
           return;
         }
@@ -244,9 +260,16 @@ export class InputManager {
 
       if (c === 'KeyM') {
         AudioSys.toggleMute();
+        try {
+          localStorage.setItem('portal_sound', AudioSys.muted ? 'off' : 'on');
+        } catch { /* ignore */ }
         const muteInf = G.dom ? G.dom('muteinf') : document.getElementById('muteinf');
         if (muteInf) muteInf.textContent = AudioSys.muted ? 'off' : 'on';
-        this.syncMuteBtn();
+        if (G?.menuController) {
+          G.menuController.syncSoundButtons();
+        } else {
+          this.syncMuteBtn();
+        }
       }
 
       if (c === 'BracketLeft') this.setFov((G.baseFov || 115) - 5);
@@ -343,6 +366,12 @@ export class InputManager {
     const G = this.context;
     if (!G || typeof document === 'undefined') return;
 
+    ['click', 'keydown', 'pointerdown'].forEach((evt) => {
+      window.addEventListener(evt, () => AudioSys.ensure(), { passive: true });
+    });
+
+    if (G.menuController) return;
+
     const fovSlider = G.dom ? G.dom('fovslider') : document.getElementById('fovslider');
     const fovSlider2 = G.dom ? G.dom('fovslider2') : document.getElementById('fovslider2');
     if (fovSlider) fovSlider.addEventListener('input', (e) => this.setFov(+e.target.value));
@@ -361,10 +390,6 @@ export class InputManager {
 
     const ipInput = G.dom ? G.dom('ipinput') : document.getElementById('ipinput');
     if (ipInput) ipInput.placeholder = defaultServer();
-
-    ['click', 'keydown', 'pointerdown'].forEach((evt) => {
-      window.addEventListener(evt, () => AudioSys.ensure(), { passive: true });
-    });
 
     const btnStart = G.dom ? G.dom('btnstart') : document.getElementById('btnstart');
     if (btnStart) {
@@ -465,7 +490,14 @@ export class InputManager {
   setFov(f) {
     const G = this.context;
     if (!G) return;
+    if (G.menuController) {
+      G.menuController.setFov(f);
+      return;
+    }
     G.baseFov = Math.max(90, Math.min(135, Math.round(f)));
+    try {
+      localStorage.setItem('portal_fov', String(G.baseFov));
+    } catch { /* ignore */ }
     const ids = ['fovinf', 'fovslider', 'fovval', 'fovslider2', 'fovval2'];
     ids.forEach((id) => {
       const el = G.dom ? G.dom(id) : (typeof document !== 'undefined' ? document.getElementById(id) : null);
@@ -488,6 +520,10 @@ export class InputManager {
   syncMuteBtn() {
     const G = this.context;
     if (!G) return;
+    if (G.menuController) {
+      G.menuController.syncSoundButtons();
+      return;
+    }
     const b = G.dom ? G.dom('btnmute') : document.getElementById('btnmute');
     if (b) b.textContent = 'SOUND: ' + (AudioSys.muted ? 'OFF' : 'ON');
     const i = G.dom ? G.dom('muteinf') : document.getElementById('muteinf');

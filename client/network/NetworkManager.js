@@ -62,6 +62,16 @@ export function onMessage(G, data) {
 
     G.started = true;
     G.startPanel.classList.add('hidden');
+    if (G.menuController) {
+      G.menuController.updateSpectateBtn(G.isSpectator);
+    }
+    if (G.requestedSeed && G.Network?.send) {
+      const reqSeed = G.requestedSeed;
+      G.requestedSeed = null;
+      if (reqSeed !== data.seed) {
+        G.Network.send({ type: 'new_map', seed: reqSeed });
+      }
+    }
     G.loadMap(data.seed);
     G.destroyedWalls = [];
     G.destroyedWallObbs = [];
@@ -122,6 +132,12 @@ export function onMessage(G, data) {
     }
     const switchBtn = document.getElementById('btnswitchmode');
     if (switchBtn) switchBtn.textContent = 'SPECTATE';
+    if (G.menuController) {
+      G.menuController.updateSpectateBtn(false);
+      G.menuController.hideInGameMenu();
+    }
+    const mp = document.getElementById('menupanel');
+    if (mp) mp.classList.add('hidden');
     G.addEventLog('Joined game as active player', true);
     if (!G.pointerLocked) G.requestLock();
   } else if (data.type === 'join_denied') {
@@ -146,6 +162,12 @@ export function onMessage(G, data) {
     if (data.match) G.match = data.match;
     const switchBtn = document.getElementById('btnswitchmode');
     if (switchBtn) switchBtn.textContent = 'JOIN GAME (J)';
+    if (G.menuController) {
+      G.menuController.updateSpectateBtn(true);
+      G.menuController.hideInGameMenu();
+    }
+    const mp = document.getElementById('menupanel');
+    if (mp) mp.classList.add('hidden');
     G.addEventLog('Switched to spectator mode', false);
     if (!G.pointerLocked) G.requestLock();
   } else if (data.type === 'spectate_denied') {

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Portal Arena — momentum is a promise</title>
+<title>Portal Arena</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -95,48 +95,95 @@
     100%{ transform:translate(-50%,-50%) scale(.85); opacity:0; filter:blur(2px); }
   }
 
-  /* ---------- overlays ---------- */
+  /* ---------- Retro Diablo 1 / Quake 1 Gothic-Slipgate Overlay Styling ---------- */
   .overlay{ position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
-    background:radial-gradient(ellipse at 50% 38%, rgba(34,14,10,.85), rgba(8,5,6,.96)); }
-  /* Main menu: invisible until the loading screen has faded out, then
-     fades in (0.3 s) when the app flips its opacity to 1 */
+    background:radial-gradient(ellipse at 50% 38%, rgba(24,12,10,.62), rgba(6,4,5,.82)); }
   #startpanel{ opacity:0; transition:opacity .3s ease; }
-  .panel{ position:relative; width:min(680px, 92vw); padding:38px 44px; border-radius:4px; text-align:center;
-    background:linear-gradient(165deg, rgba(42,20,14,.93), rgba(16,9,9,.96));
-    border:1px solid rgba(255,122,34,.35); outline:1px solid rgba(255,122,34,.16); outline-offset:5px;
-    box-shadow:0 0 60px rgba(130,42,12,.28), 0 0 24px rgba(255,122,34,.10) inset; }
-  /* wrought-iron corner brackets */
-  .panel::before, .panel::after{ content:''; position:absolute; width:26px; height:26px;
-    border-style:solid; border-color:rgba(255,122,34,.85); filter:drop-shadow(0 0 6px rgba(255,122,34,.5)); }
-  .panel::before{ top:9px; left:9px; border-width:2px 0 0 2px; }
-  .panel::after{ bottom:9px; right:9px; border-width:0 2px 2px 0; }
+
+  /* Retro Panel Container */
+  .panel{ position:relative; width:min(740px, 94vw); min-height:480px; padding:38px 46px; border-radius:3px; text-align:center;
+    background:radial-gradient(circle at 50% 28%, rgba(38,18,14,.96), rgba(12,7,8,.98));
+    border:2px solid #5a3822; outline:1px solid rgba(255,122,34,.22); outline-offset:5px;
+    box-shadow:0 0 80px rgba(0,0,0,.95), 0 0 35px rgba(180,50,10,.25), 0 0 25px rgba(255,100,20,.12) inset; }
+  /* wrought-iron corner brackets with slipgate rivets */
+  .panel::before, .panel::after{ content:''; position:absolute; width:30px; height:30px;
+    border-style:solid; border-color:rgba(255,140,40,.9); filter:drop-shadow(0 0 8px rgba(255,122,34,.6)); }
+  .panel::before{ top:8px; left:8px; border-width:3px 0 0 3px; }
+  .panel::after{ bottom:8px; right:8px; border-width:0 3px 3px 0; }
+
+  /* 3D decorator overlay canvas */
+  .menu-decorator-canvas{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; }
+
   /* gothic ornament divider */
-  .divider{ display:flex; align-items:center; gap:14px; margin:20px 8px; color:var(--ember); }
-  .divider::before{ content:''; flex:1; height:1px;
-    background:linear-gradient(90deg, transparent, rgba(255,122,34,.55)); }
-  .divider::after{ content:''; flex:1; height:1px;
-    background:linear-gradient(90deg, rgba(255,122,34,.55), transparent); }
-  .divider span{ font-size:13px; text-shadow:0 0 10px rgba(255,122,34,.8); }
-  .panel h1{ font-family:var(--display); font-size:40px; letter-spacing:.18em; color:var(--bone); text-shadow:0 0 24px rgba(255,122,34,.85); margin-bottom:2px; }
-  .panel h1 em{ font-style:normal; color:var(--ember); text-shadow:0 0 24px rgba(255,154,61,.8); }
-  .panel .sub{ color:var(--ash); font-family:var(--display); font-size:14px; letter-spacing:.28em; margin-bottom:26px; }
-  .keys{ display:grid; grid-template-columns:auto auto; gap:5px 26px; justify-content:center; text-align:left;
-    font-size:13.5px; color:var(--bone-dim); margin-bottom:24px; }
-  .keys b{ font-family:var(--display); color:var(--bone); font-weight:600; }
-  .btnrow{ display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-top:8px; }
-  button{ pointer-events:auto; cursor:pointer; font-family:var(--display); font-size:14px; letter-spacing:.12em;
-    color:#ffe9d4; background:rgba(255,122,34,.08); border:1px solid rgba(255,122,34,.5);
-    padding:11px 22px; border-radius:2px; transition:.15s; }
-  button:hover{ background:rgba(255,122,34,.22); box-shadow:0 0 18px rgba(255,122,34,.45); }
-  button.warm{ border-color:rgba(190,55,40,.55); color:#ffe0d4; background:rgba(150,40,28,.10); }
-  button.warm:hover{ background:rgba(190,55,40,.22); box-shadow:0 0 18px rgba(190,55,40,.4); }
-  .row{ display:flex; gap:12px; justify-content:center; align-items:center; margin-top:18px; font-size:13px; color:var(--ash); flex-wrap:wrap; }
-  input[type=text]{ background:rgba(0,0,0,.45); border:1px solid rgba(255,122,34,.3); color:var(--bone);
-    font-family:inherit; padding:7px 10px; width:130px; border-radius:2px; text-align:center; }
-  .row label{ display:flex; align-items:center; gap:8px; }
-  .row label.grow{ flex:1 1 200px; }
-  #ipinput{ flex:1 1 0; width:100%; min-width:0; text-align:left; }
-  input[type=range]{ accent-color:var(--fire); pointer-events:auto; }
+  .divider{ display:flex; align-items:center; gap:16px; margin:18px auto; color:var(--ember); max-width:420px; }
+  .divider::before{ content:''; flex:1; height:2px;
+    background:linear-gradient(90deg, transparent, rgba(255,122,34,.65)); }
+  .divider::after{ content:''; flex:1; height:2px;
+    background:linear-gradient(90deg, rgba(255,122,34,.65), transparent); }
+  .divider span{ font-size:15px; letter-spacing:.3em; text-shadow:0 0 12px rgba(255,122,34,.85); }
+
+  .panel h1{ font-family:var(--display); font-size:38px; font-weight:800; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--bone); text-shadow:0 0 22px rgba(255,100,10,.85), 0 0 45px rgba(160,25,0,.7); margin-bottom:4px; }
+  .panel h1 em{ font-style:normal; color:var(--ember); text-shadow:0 0 24px rgba(255,154,61,.95); }
+  .panel .sub{ color:var(--ash); font-family:var(--display); font-size:13px; font-weight:600; letter-spacing:.28em; text-transform:uppercase; margin-bottom:20px; }
+
+  /* Retro menu positions */
+  .retro-menu-list{ display:flex; flex-direction:column; align-items:center; gap:16px; margin:28px auto 16px; width:100%; max-width:360px; position:relative; z-index:10; }
+  .retro-menu-item{ width:100%; padding:14px 24px; font-family:var(--display); font-size:16px; font-weight:700; letter-spacing:.22em;
+    text-transform:uppercase; text-align:center; border-radius:2px; cursor:pointer; pointer-events:auto; position:relative;
+    background:linear-gradient(180deg, rgba(32,20,22,.9), rgba(15,9,11,.95));
+    border:1px solid rgba(175,95,45,.4); color:#cfc4ad;
+    box-shadow:inset 0 1px 0 rgba(255,180,100,.12), 0 4px 12px rgba(0,0,0,.7);
+    transition:all .12s ease-out; }
+  .retro-menu-item:hover, .retro-menu-item.selected{
+    background:radial-gradient(ellipse at center, rgba(185,60,15,.45), rgba(45,15,12,.9));
+    border-color:#ff9d3b; color:#fff4d0;
+    box-shadow:0 0 24px rgba(255,120,30,.75), inset 0 0 16px rgba(255,120,30,.3);
+    text-shadow:0 0 12px #ff8822, 0 0 24px #ff3300;
+    transform:scale(1.02); }
+  .retro-menu-item.selected::before{ content:'« '; color:#ffb34d; margin-right:6px; text-shadow:0 0 8px #ff7a22; }
+  .retro-menu-item.selected::after{ content:' »'; color:#ffb34d; margin-left:6px; text-shadow:0 0 8px #ff7a22; }
+
+  /* Retro Form Inputs */
+  .retro-form{ display:flex; flex-direction:column; gap:10px; width:100%; max-width:360px; margin:0 auto; position:relative; z-index:10; }
+  .retro-form-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; text-align:left;
+    padding:6px 12px; border:1px solid transparent; border-radius:2px; transition:all .12s ease-out; cursor:pointer; }
+  .retro-form-row.selected{
+    background:radial-gradient(ellipse at center, rgba(185,60,15,.35), rgba(45,15,12,.8));
+    border-color:#ff9d3b; box-shadow:0 0 18px rgba(255,120,30,.6), inset 0 0 10px rgba(255,120,30,.2); }
+  .retro-form-row.selected label{ color:#fff2c8; text-shadow:0 0 10px #ff7a22; }
+  .retro-form-row label{ flex:0 0 110px; font-family:var(--display); font-size:11.5px; font-weight:700; letter-spacing:.16em; color:var(--ash); text-transform:uppercase; transition:color .12s; }
+  .retro-form-row input[type=text], .retro-form-row input[type=password]{
+    flex:1; min-width:0; background:rgba(8,5,6,.85); border:1px solid rgba(255,122,34,.35); color:#fff4d0;
+    font-family:var(--display); font-size:13.5px; letter-spacing:.06em; padding:8px 10px; border-radius:2px;
+    box-shadow:inset 0 2px 6px rgba(0,0,0,.7); transition:border-color .15s, box-shadow .15s; }
+  .retro-form-row input[type=text]:focus, .retro-form-row input[type=password]:focus{
+    border-color:#ff9a3c; box-shadow:0 0 14px rgba(255,122,34,.6), inset 0 2px 6px rgba(0,0,0,.7); outline:none; }
+
+  /* Vertical Action Buttons Column */
+  .retro-btn-col{ display:flex; flex-direction:column; align-items:center; gap:12px; margin:20px auto 0; width:100%; max-width:360px; position:relative; z-index:10; }
+  .retro-action-btn{ width:100%; font-family:var(--display); font-size:14px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
+    color:#ffe0c4; background:rgba(30,16,14,.9); border:1px solid rgba(255,122,34,.45);
+    padding:12px 24px; border-radius:2px; cursor:pointer; pointer-events:auto; text-align:center; transition:all .15s; }
+  .retro-action-btn:hover, .retro-action-btn.selected{
+    background:rgba(255,122,34,.26); border-color:#ff9a3c; color:#fff4d0;
+    box-shadow:0 0 20px rgba(255,122,34,.55); }
+  .retro-action-btn.hot{
+    background:rgba(180,45,20,.35); border-color:rgba(255,120,40,.8); color:#ffe8d0; }
+  .retro-action-btn.hot:hover, .retro-action-btn.hot.selected{
+    background:rgba(220,55,20,.55); border-color:#ffaa44; box-shadow:0 0 26px rgba(255,100,20,.7); }
+
+  /* Assigned Controls Stone Slate */
+  .retro-controls-grid{ display:grid; grid-template-columns:1fr 1fr; gap:6px 24px; text-align:left;
+    padding:16px 20px; background:rgba(12,7,8,.75); border:1px solid rgba(255,122,34,.22); border-radius:2px;
+    font-size:13px; color:var(--bone-dim); max-width:540px; margin:0 auto 16px; position:relative; z-index:10; }
+  .retro-controls-grid b{ font-family:var(--display); font-size:12px; font-weight:700; color:#ffd9a8; letter-spacing:.12em; margin-right:4px; }
+
+  /* FOV Control */
+  .retro-fov-box{ display:flex; align-items:center; justify-content:center; gap:16px; margin:16px auto; width:100%; max-width:360px; font-family:var(--display); font-size:13px; font-weight:700; letter-spacing:.15em; color:var(--ash); position:relative; z-index:10; }
+  .retro-fov-box span.val{ font-size:18px; color:#ffe0b0; text-shadow:0 0 10px rgba(255,179,77,.6); min-width:34px; text-align:right; }
+  input[type=range]{ accent-color:var(--fire); cursor:pointer; }
+
   #winpanel h1{ color:#ffe9c8; text-shadow:0 0 26px rgba(255,180,80,.9); }
   #winstats{ font-size:15px; color:#d8d0c0; line-height:2; margin-bottom:10px; }
   #winstats b{ font-family:var(--display); color:#ffd9a8; }
@@ -221,50 +268,152 @@
   <div id="flash"></div>
 </div>
 
+<!-- ==================== MAIN MENU OVERLAY ==================== -->
 <div class="overlay" id="startpanel">
   <div class="panel">
-    <h1>PORTAL <em>ARENA</em></h1>
-    <div class="divider"><span>⚔</span></div>
-    <div class="sub">MOMENTUM IS A PROMISE — COLLECT IT ON THE OTHER SIDE</div>
-    <div class="keys">
-      <span><b>WASD</b> — move (yaw-relative)</span><span><b>SPACE</b> — jump · hold to bunnyhop</span>
-      <span><b>MOUSE</b> — look · circle-jump to gain speed</span><span><b>LMB / RMB</b> — fire / action</span>
-      <span><b>1 / 2</b> or <b>SCROLL</b> — change weapons</span><span><b>E</b> — grab / drop cubes</span>
-      <span><b>Z / L-SHIFT</b> (hold) — zoom (all weapons)</span><span><b>J</b> — join game as active player</span>
-      <span><b>[ ]</b> — FOV · <b>F</b> — fullscreen</span><span><b>R</b> — ready up · <b>N</b> — new map · <b>TAB</b> — stats · <b>ESC</b> — menu</span>
+    <canvas id="main-decorator-canvas" class="menu-decorator-canvas"></canvas>
+
+    <!-- Sub-view 1: Root Main Menu (Exactly 3 positions) -->
+    <div id="main-menu-root">
+      <h1>PORTAL <em>ARENA</em></h1>
+      <div class="divider"><span>✠ ◈ ✠</span></div>
+      <div class="retro-menu-list" id="main-menu-list">
+        <button class="retro-menu-item selected" data-action="open_start_game">START GAME</button>
+        <button class="retro-menu-item" data-action="open_main_options">OPTIONS</button>
+        <button class="retro-menu-item" data-action="exit_game">EXIT GAME</button>
+      </div>
+      <div id="connstatus" class="hidden" style="color:#ff8877;font-size:13px;margin-top:14px;letter-spacing:.05em;text-align:center;"></div>
     </div>
-    <div class="btnrow"><button id="btnstart">▶ ENTER THE CHAMBER</button></div>
-    <div id="connstatus" class="hidden" style="color:#ff8877;font-size:13px;margin-top:10px;letter-spacing:.05em;text-align:center;"></div>
-    <div class="row">
-      <label class="grow">Player Name <input type="text" id="nameinput" placeholder="Guest" value="Guest"></label>
+
+    <!-- Sub-view 2: Start Game Screen (Consecutive options walked by 3D models) -->
+    <div id="start-game-view" class="hidden">
+      <h1>ENTER <em>CHAMBER</em></h1>
+      <div class="divider"><span>✠ ◈ ✠</span></div>
+      <div class="sub">CONFIGURE MULTIPLAYER GATEWAY</div>
+      <div class="retro-form" id="start-game-form">
+        <div class="retro-form-row retro-menu-item-row" data-action="focus_input" data-input-id="nameinput">
+          <label for="nameinput">PLAYER NAME</label>
+          <input type="text" id="nameinput" placeholder="Guest" value="Guest" autocomplete="off" />
+        </div>
+        <div class="retro-form-row retro-menu-item-row" data-action="focus_input" data-input-id="ipinput">
+          <label for="ipinput">SERVER IP</label>
+          <input type="text" id="ipinput" placeholder="host:3001" autocomplete="off" />
+        </div>
+        <div class="retro-form-row retro-menu-item-row" data-action="focus_input" data-input-id="passinput">
+          <label for="passinput">PASSWORD</label>
+          <input type="password" id="passinput" placeholder="secret" autocomplete="off" />
+        </div>
+        <div class="retro-form-row retro-menu-item-row" data-action="focus_input" data-input-id="seedinput">
+          <label for="seedinput">SEED</label>
+          <input type="text" id="seedinput" placeholder="random" autocomplete="off" />
+        </div>
+      </div>
+      <div class="retro-btn-col">
+        <button class="retro-action-btn hot retro-menu-item-row" id="btnstart" data-action="enter_chamber">▶ ENTER CHAMBER</button>
+        <button class="retro-action-btn retro-menu-item-row" id="btnstartback" data-action="back_to_main">« BACK</button>
+      </div>
+      <div style="color:#7f93a2;font-size:12px;margin-top:16px;letter-spacing:.05em;">
+        Default mode: Spectator. Press J in-game or use Chamber Menu to join active combat.
+      </div>
     </div>
-    <div class="row">
-      <label class="grow">Server IP <input type="text" id="ipinput" placeholder="host:3001"></label>
-      <label>Password <input type="text" id="passinput" placeholder="secret"></label>
+
+    <!-- Sub-view 3: Main Options Screen -->
+    <div id="main-options-view" class="hidden">
+      <h1>CHAMBER <em>SETTINGS</em></h1>
+      <div class="divider"><span>✠ ◈ ✠</span></div>
+      <div class="sub">ASSIGNED CONTROLS & FIELD OF VIEW</div>
+      <div class="retro-controls-grid">
+        <span><b>WASD</b> — Move / Strafe</span>
+        <span><b>SPACE</b> — Jump / Bunnyhop</span>
+        <span><b>MOUSE</b> — Look & Aim</span>
+        <span><b>LMB</b> — Fire Blue Portal / Shot</span>
+        <span><b>RMB</b> — Fire Orange Portal / Shot</span>
+        <span><b>Z / SHIFT</b> — Zoom (Hold)</span>
+        <span><b>1 · 2 · 3 / SCROLL</b> — Weapon Select</span>
+        <span><b>E</b> — Grab / Throw Cube</span>
+        <span><b>J</b> — Join Game / Spectate</span>
+        <span><b>TAB</b> — Scoreboard (Hold)</span>
+        <span><b>ESC</b> — Chamber Menu</span>
+        <span><b>F</b> — Fullscreen</span>
+      </div>
+      <div class="retro-fov-box">
+        <label for="fovslider">FIELD OF VIEW (FOV)</label>
+        <input type="range" id="fovslider" min="90" max="135" value="115">
+        <span class="val" id="fovval">115</span>
+      </div>
+      <div class="retro-btn-col">
+        <button class="retro-action-btn" id="btnmutemain" data-action="toggle_sound">SOUND: ON</button>
+        <button class="retro-action-btn" id="btnfsmain" data-action="toggle_fullscreen">FULLSCREEN (F)</button>
+        <button class="retro-action-btn" id="btnoptionsback" data-action="back_to_main">« BACK</button>
+      </div>
     </div>
-    <div class="row"><label>seed <input type="text" id="seedinput" placeholder="random"></label>
-      <label>FOV <input type="range" id="fovslider" min="90" max="135" value="115"> <span id="fovval">115</span></label></div>
-    <div class="row" style="color:#6f93b2;font-size:12px">You join as spectator by default. Press J or use the Pause Menu to join active game.
-      Spectator: LMB cycles freefly/players, RMB toggles 1st/3rd person, Space/C moves up/down.</div>
   </div>
 </div>
 
+<!-- ==================== IN-GAME CHAMBER MENU OVERLAY ==================== -->
 <div class="overlay hidden" id="menupanel">
   <div class="panel">
-    <h1>PAUSED</h1>
-    <div class="sub">THE CHAMBER WAITS</div>
-    <div class="divider"><span>✠</span></div>
-    <div class="btnrow">
-      <button id="btnresume">RESUME</button>
-      <button id="btnswitchmode">JOIN GAME (J)</button>
-      <button id="btnnewmap" class="warm">NEW UNIVERSE (N)</button>
-      <button id="btnfs">FULLSCREEN (F)</button>
+    <canvas id="ingame-decorator-canvas" class="menu-decorator-canvas"></canvas>
+
+    <!-- Sub-view 1: Root In-Game Menu -->
+    <div id="ingame-menu-root">
+      <h1>CHAMBER <em>MENU</em></h1>
+      <div class="divider"><span>✠ ◈ ✠</span></div>
+      <div class="retro-menu-list" id="ingame-menu-list">
+        <button class="retro-menu-item selected" id="btnresume" data-action="resume_game">RESUME GAME</button>
+        <button class="retro-menu-item" id="btnswitchmode" data-action="toggle_join_spectate">JOIN GAME (J)</button>
+        <button class="retro-menu-item" id="btningameoptions" data-action="open_ingame_options">OPTIONS</button>
+        <button class="retro-menu-item" id="btnbacktomain" data-action="disconnect_to_main">BACK TO MAIN MENU</button>
+        <button class="retro-menu-item" id="btningameexit" data-action="exit_game">EXIT GAME</button>
+      </div>
     </div>
-    <div class="row">
-      <label>FOV <input type="range" id="fovslider2" min="90" max="135" value="115"> <span id="fovval2">115</span></label>
-      <button id="btnmute">SOUND: ON</button>
+
+    <!-- Sub-view 2: In-Game Options Screen -->
+    <div id="ingame-options-view" class="hidden">
+      <h1>CHAMBER <em>SETTINGS</em></h1>
+      <div class="divider"><span>✠ ◈ ✠</span></div>
+      <div class="sub">ASSIGNED CONTROLS & FIELD OF VIEW</div>
+      <div class="retro-controls-grid">
+        <span><b>WASD</b> — Move / Strafe</span>
+        <span><b>SPACE</b> — Jump / Bunnyhop</span>
+        <span><b>MOUSE</b> — Look & Aim</span>
+        <span><b>LMB</b> — Fire Blue Portal / Shot</span>
+        <span><b>RMB</b> — Fire Orange Portal / Shot</span>
+        <span><b>Z / SHIFT</b> — Zoom (Hold)</span>
+        <span><b>1 · 2 · 3 / SCROLL</b> — Weapon Select</span>
+        <span><b>E</b> — Grab / Throw Cube</span>
+        <span><b>J</b> — Join Game / Spectate</span>
+        <span><b>TAB</b> — Scoreboard (Hold)</span>
+        <span><b>ESC</b> — Return to Game</span>
+        <span><b>F</b> — Fullscreen</span>
+      </div>
+      <div class="retro-fov-box">
+        <label for="fovslider2">FIELD OF VIEW (FOV)</label>
+        <input type="range" id="fovslider2" min="90" max="135" value="115">
+        <span class="val" id="fovval2">115</span>
+      </div>
+      <div class="retro-btn-col">
+        <button class="retro-action-btn" id="btnmute" data-action="toggle_sound">SOUND: ON</button>
+        <button class="retro-action-btn" id="btnfs" data-action="toggle_fullscreen">FULLSCREEN (F)</button>
+        <button class="retro-action-btn" id="btningameoptionsback" data-action="back_to_ingame">« BACK</button>
+      </div>
     </div>
-    <div class="row"><label>seed <input type="text" id="seedinput2" placeholder="random"></label></div>
+  </div>
+</div>
+
+<!-- ==================== GRACEFUL EXIT FALLBACK MODAL ==================== -->
+<div class="overlay hidden" id="exit-modal" style="z-index:999999;">
+  <div class="panel" style="min-height:auto;max-width:520px;">
+    <h1>CHAMBER <em>CLOSED</em></h1>
+    <div class="divider"><span>✠ ◈ ✠</span></div>
+    <div class="sub">BROWSER SECURITY NOTICE</div>
+    <p style="font-size:14px;color:var(--bone-dim);line-height:1.8;margin:18px 0;">
+      Your browser prevented automatic tab closure.<br>
+      You may now safely close this browser tab or return to the menu.
+    </p>
+    <div class="retro-btn-col">
+      <button class="retro-action-btn hot" id="btnexitreturn">RETURN TO MENU</button>
+    </div>
   </div>
 </div>
 
@@ -274,21 +423,15 @@
     <div class="sub" id="winSub">THE CHAMBER DECIDES</div>
     <div class="divider"><span>✠</span></div>
     <div id="winstats"></div>
-    <div class="btnrow"><button id="btnagain" class="warm">NEW UNIVERSE (N)</button><button id="btnsame">REPLAY THIS SEED</button></div>
+    <div class="retro-btn-col"><button id="btnagain" class="retro-action-btn hot">NEW UNIVERSE (N)</button><button id="btnsame" class="retro-action-btn">REPLAY THIS SEED</button></div>
   </div>
 </div>
 
 <div id="connect-overlay" class="hidden">
   <div id="connect-overlay-title">Connecting...</div>
-  <button id="connect-overlay-cancel" class="warm" style="margin-top:24px;padding:8px 22px;font-size:12px;letter-spacing:.15em;">CANCEL</button>
+  <button id="connect-overlay-cancel" class="retro-action-btn hot" style="margin-top:24px;padding:8px 22px;font-size:12px;letter-spacing:.15em;">CANCEL</button>
 </div>
 
 <script type="module" src="./main.js"></script>
 </body>
 </html>
-
-
-
-
-
-

@@ -29,6 +29,7 @@ export const AudioSys = {
   _buildBuses() {
     const ac = this.ac;
     this._master = ac.createGain();
+    this._master.gain.setValueAtTime(this.muted ? 0 : 1, ac.currentTime);
     this._dry = ac.createGain();
     this._wet = ac.createGain();
     this._conv = ac.createConvolver();
@@ -188,9 +189,17 @@ export const AudioSys = {
   jumppad(pos = null) {
     this.tone(200, 600, 0.4, 'sine', 0.15, 0, pos);
   },
-  toggleMute() {
-    this.muted = !this.muted;
+  setMuted(muted) {
+    this.muted = !!muted;
+    if (this._master && this.ac) {
+      try {
+        this._master.gain.setValueAtTime(this.muted ? 0 : 1, this.ac.currentTime);
+      } catch { /* ignore */ }
+    }
     return this.muted;
+  },
+  toggleMute() {
+    return this.setMuted(!this.muted);
   }
 };
 
