@@ -5,7 +5,6 @@
 import * as TH from 'three';
 import { CFG, PORT, TICK_RATE } from '../../shared/constants.js';
 import { initPhysics } from '../../shared/physics.js';
-import { mapData, obbs, gameState, isPortalOnDestroyedWall } from '../match/MatchSession.js';
 
 const physics = initPhysics(TH, CFG, PORT);
 
@@ -29,116 +28,7 @@ export const FUNNY_BOT_NAMES = [
   'QuantumNoob', 'ClickHappy', 'Overclocker', 'PacketLoss', 'TriggerTroll'
 ];
 
-/**
- * BotAgent — Object-Oriented representation of an AI bot combatant.
- */
-export class BotAgent {
-  static _nextBotId = 0;
-
-  static generateName(existingNames = new Set()) {
-    const available = FUNNY_BOT_NAMES.filter(n => !existingNames.has(n));
-    const pool = available.length > 0 ? available : FUNNY_BOT_NAMES;
-    return pool[Math.floor(Math.random() * pool.length)];
-  }
-
-  constructor(playerIndex, spawn, existingNames = new Set()) {
-    this.botId = 'bot_' + (BotAgent._nextBotId++);
-    this.isBot = true;
-    this.playerIndex = playerIndex;
-    this.name = BotAgent.generateName(existingNames);
-    this.ws = null;
-
-    this.pos = new TH.Vector3(spawn.x, spawn.y, spawn.z);
-    this.vel = new TH.Vector3();
-    this.yaw = 0;
-    this.pitch = 0;
-    this.grounded = false;
-    this.groundNormal = new TH.Vector3(0, 1, 0);
-    this.groundT = -1;
-    this.jumpBuf = -1;
-    this.maxSpeed = 0;
-    this.ping = 0;
-    this.shots = 0;
-    this.hits = 0;
-    this.inputBuffer = [];
-    this.spawnIdx = null;
-    this.activeWeapon = 1;
-    this.crouchT = 0;
-    this.isDead = false;
-  }
-
-  toPlayerState() {
-    return {
-      isBot: this.isBot,
-      playerIndex: this.playerIndex,
-      name: this.name,
-      ws: this.ws,
-      pos: this.pos,
-      vel: this.vel,
-      yaw: this.yaw,
-      pitch: this.pitch,
-      grounded: this.grounded,
-      groundNormal: this.groundNormal,
-      groundT: this.groundT,
-      jumpBuf: this.jumpBuf,
-      maxSpeed: this.maxSpeed,
-      ping: this.ping,
-      shots: this.shots,
-      hits: this.hits,
-      inputBuffer: this.inputBuffer,
-      spawnIdx: this.spawnIdx,
-      activeWeapon: this.activeWeapon,
-      crouchT: this.crouchT,
-      isDead: this.isDead
-    };
-  }
-}
-
-// ------------------------------------------------------------------ per-bot state
-
-const botState = new Map();
-
-function ensureState(pid) {
-  if (!botState.has(pid)) {
-    botState.set(pid, {
-      targetPos: null,
-      lastThinkT: 0,
-      lastPortalT: -999,
-      lastJumpT: -999,
-      lastRocketT: -999,
-      lastRocketJumpT: -999,
-      rocketJumpPhase: 'none',
-      rocketJumpT: 0,
-      lastInstagibT: -999,
-      lastWeaponSwapT: 0,
-      weaponHoldUntilT: 0,
-      portalPhase: 'none',
-      walkThruT: 0,
-      stuckT: 0,
-      prevPos: null,
-      lastTickPos: null,
-      avoidUntilT: 0,
-      avoidYaw: 0,
-      blueSurface: null,
-      blueAimYaw: 0,
-      blueAimPitch: 0,
-      blueAimT: 0,
-      orangeSurface: null,
-      orangeAimYaw: 0,
-      orangeAimPitch: 0,
-      orangeAimT: 0,
-      unstuckUntilT: 0,
-      strafeDir: null,
-      instagibTargetPid: null,
-      instagibAimStartT: 0,
-      lastUnstuckT: 0,
-      waypoints: []
-    });
-  }
-  return botState.get(pid);
-}
-
-// ------------------------------------------------------------------ helpers
+// ------------------------------------------------------------------ pure helpers
 
 function getRampEndpoints(rm) {
   let fwdX = 1, fwdZ = 0;
@@ -159,8 +49,8 @@ function getRampEndpoints(rm) {
   };
 }
 
-export function getRampUnderState(pos) {
-  const ramps = mapData.ramps || [];
+function getRampUnderState(pos, mapData) {
+  const ramps = mapData?.ramps || [];
   for (const rm of ramps) {
     let fwdX = 1, fwdZ = 0, rightX = 0, rightZ = 1;
     if (rm.dir === 1) { fwdX = 0; fwdZ = 1; rightX = -1; rightZ = 0; }
@@ -190,8 +80,8 @@ export function getRampUnderState(pos) {
   return null;
 }
 
-export function getRampAtPos(pos) {
-  const ramps = mapData.ramps || [];
+function getRampAtPos(pos, mapData) {
+  const ramps = mapData?.ramps || [];
   for (const rm of ramps) {
     let fwdX = 1, fwdZ = 0, rightX = 0, rightZ = 1;
     if (rm.dir === 1) { fwdX = 0; fwdZ = 1; rightX = -1; rightZ = 0; }
@@ -221,9 +111,9 @@ export function getRampAtPos(pos) {
   return null;
 }
 
-function pickBotTargetAndRoute(curPos, portals) {
+function pickBotTargetAndRoute(curPos, portals, mapData) {
   const pos = curPos || new TH.Vector3();
-  const underAtPick = getRampUnderState(pos);
+  const underAtPick = getRampUnderState(pos, mapData);
   if (underAtPick && underAtPick.clearance < 2.5) {
     const toCenter = new TH.Vector3(-pos.x, 0, -pos.z).normalize();
     const escTarget = pos.clone().addScaledVector(toCenter, 8.0);
@@ -251,7 +141,7 @@ function pickBotTargetAndRoute(curPos, portals) {
     }
   }
 
-  const ramps = mapData.ramps || [];
+  const ramps = mapData?.ramps || [];
   if (ramps.length > 0 && Math.random() < 0.35) {
     const rm = ramps[Math.floor(Math.random() * ramps.length)];
     const ep = getRampEndpoints(rm);
@@ -294,13 +184,13 @@ function pickBotTargetAndRoute(curPos, portals) {
     }
   }
 
-  const spawns = (mapData.spawns || []).filter(sp => {
-    const u = getRampUnderState(new TH.Vector3(sp.x, sp.y, sp.z));
+  const spawns = (mapData?.spawns || []).filter(sp => {
+    const u = getRampUnderState(new TH.Vector3(sp.x, sp.y, sp.z), mapData);
     return !u || u.clearance >= 2.2;
   });
-  const validSpawns = spawns.length > 0 ? spawns : mapData.spawns;
+  const validSpawns = spawns.length > 0 ? spawns : (mapData?.spawns || []);
 
-  const elevated = (mapData.slabs || []).filter(s => s.kind === 'plat' && s.c[1] > 0.5);
+  const elevated = (mapData?.slabs || []).filter(s => s.kind === 'plat' && s.c[1] > 0.5);
   if (elevated.length > 0 && Math.random() < 0.25) {
     const plat = elevated[Math.floor(Math.random() * elevated.length)];
     return {
@@ -308,7 +198,7 @@ function pickBotTargetAndRoute(curPos, portals) {
       waypoints: []
     };
   }
-  const sp = validSpawns[Math.floor(Math.random() * validSpawns.length)];
+  const sp = validSpawns[Math.floor(Math.random() * validSpawns.length)] || { x: 0, y: 0, z: 0 };
   return {
     target: new TH.Vector3(sp.x, sp.y, sp.z),
     waypoints: []
@@ -348,7 +238,6 @@ function hasGroundAhead(pos, yaw, obbs_) {
   return false;
 }
 
-
 function raycastWall(origin, dir, maxDist, obbs_) {
   let bestT = maxDist;
   let best = null;
@@ -382,7 +271,7 @@ function raycastWall(origin, dir, maxDist, obbs_) {
   return best;
 }
 
-export function checkPortalOverlap(c, n, r, u, portals, excludeIdx, PORT_) {
+function checkPortalOverlap(c, n, r, u, portals, excludeIdx, PORT_) {
   for (let i = 0; i < portals.length; i++) {
     if (i === excludeIdx) continue;
     const Q = portals[i];
@@ -408,7 +297,7 @@ export function checkPortalOverlap(c, n, r, u, portals, excludeIdx, PORT_) {
   return false;
 }
 
-function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, currentPi) {
+function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, currentPi, session) {
   const dir = new TH.Vector3(
     -Math.sin(yaw) * Math.cos(pitch),
     Math.sin(pitch),
@@ -421,7 +310,7 @@ function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, curren
   const hit = raycastWall(eyePos, dir, 35, obbs_);
   if (!hit) return null;
   if (hit.obb.destroyed || hit.obb.noPortal || hit.obb.kind === 'ramp' || hit.obb.kind === 'lava') return null;
-  if (gameState.destroyedWallObbs && gameState.destroyedWallObbs.some(dob => dob.id === hit.obb.id)) return null;
+  if (session?.gameState?.destroyedWallObbs && session.gameState.destroyedWallObbs.some(dob => dob.id === hit.obb.id)) return null;
 
   const { point, normal, obb, hitAxis, hitSign } = hit;
 
@@ -463,7 +352,7 @@ function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, curren
 
   const valid = physics.findClosestValidPortalPos(
     adjustedC, normal, r, u, obb, currentPi,
-    obbs_, portals, mapData.lava, gameState.destroyedWallObbs, gameState.destroyedWalls
+    obbs_, portals, session?.mapData?.lava, session?.gameState?.destroyedWallObbs, session?.gameState?.destroyedWalls
   );
   if (!valid) {
     return null;
@@ -472,14 +361,14 @@ function findPortalSurfaceAtPitch(pos, yaw, pitch, obbs_, portals, PORT_, curren
   return { c: valid.c, n: normal, r, u, eyePos };
 }
 
-function findPortalSurfaceInCone(pos, baseYaw, obbs_, portals, PORT_, currentPi) {
+function findPortalSurfaceInCone(pos, baseYaw, obbs_, portals, PORT_, currentPi, session) {
   const yawOffsets = [0, -0.25, 0.25, -0.5, 0.5];
   const testPitches = [0.05, 0.15, -0.05, 0.25, -0.15];
   for (const yOff of yawOffsets) {
     const y = baseYaw + yOff;
     for (const p of testPitches) {
-      const res = findPortalSurfaceAtPitch(pos, y, p, obbs_, portals, PORT_, currentPi);
-      if (res && !isPortalOnDestroyedWall(res.c, res.n, res.r, res.u, PORT_)) {
+      const res = findPortalSurfaceAtPitch(pos, y, p, obbs_, portals, PORT_, currentPi, session);
+      if (res && (!session || !session.isPortalOnDestroyedWall(res.c, res.n, res.r, res.u, PORT_))) {
         const eyePos = pos.clone();
         eyePos.y += CFG.H - 0.12;
         const toSpot = res.c.clone().sub(eyePos);
@@ -492,15 +381,15 @@ function findPortalSurfaceInCone(pos, baseYaw, obbs_, portals, PORT_, currentPi)
   return null;
 }
 
-function findOrangePortalSurface(pos, blueN, obbs_, portals, PORT_, currentPi) {
+function findOrangePortalSurface(pos, blueN, obbs_, portals, PORT_, currentPi, session) {
   const angleSpreads = [Math.PI * 0.5, -Math.PI * 0.5, Math.PI * 0.8, -Math.PI * 0.8, Math.PI, 0];
   const testPitches = [0.05, 0.2, -0.05, 0.35, -0.15];
   const baseAngle = Math.atan2(blueN.x, blueN.z);
   for (const ang of angleSpreads) {
     const y = baseAngle + ang;
     for (const p of testPitches) {
-      const res = findPortalSurfaceAtPitch(pos, y, p, obbs_, portals, PORT_, currentPi);
-      if (res && !isPortalOnDestroyedWall(res.c, res.n, res.r, res.u, PORT_)) {
+      const res = findPortalSurfaceAtPitch(pos, y, p, obbs_, portals, PORT_, currentPi, session);
+      if (res && (!session || !session.isPortalOnDestroyedWall(res.c, res.n, res.r, res.u, PORT_))) {
         if (checkPortalOverlap(res.c, res.n, res.r, res.u, portals, currentPi, PORT_)) continue;
         const eyePos = pos.clone();
         eyePos.y += CFG.H - 0.12;
@@ -514,12 +403,12 @@ function findOrangePortalSurface(pos, blueN, obbs_, portals, PORT_, currentPi) {
   return null;
 }
 
-function findDestructibleWall(eyePos, fwdDir, maxDist = 20) {
+function findDestructibleWall(eyePos, fwdDir, obbs, session, maxDist = 20) {
   let best = null;
   let bestScore = -1e9;
   for (const obb of obbs) {
     if (obb.kind !== 'wall' || obb.boundary || obb.destroyed) continue;
-    if (gameState.destroyedWallObbs && gameState.destroyedWallObbs.some(dob => dob.id === obb.id)) continue;
+    if (session?.gameState?.destroyedWallObbs && session.gameState.destroyedWallObbs.some(dob => dob.id === obb.id)) continue;
     const uIdx = obb.he[0] >= obb.he[2] ? 0 : 2;
     const tIdx = uIdx === 0 ? 2 : 0;
     if (obb.he[tIdx] > 2.5) continue;
@@ -542,12 +431,12 @@ function findDestructibleWall(eyePos, fwdDir, maxDist = 20) {
   return best;
 }
 
-function findOpponent(pid, eyePos, maxDist = 45) {
+function findOpponent(pid, eyePos, players, obbs, maxDist = 45) {
   let best = null;
   let bestDist = maxDist;
-  for (const id in gameState.players) {
+  for (const id in players) {
     if (id === pid) continue;
-    const pl = gameState.players[id];
+    const pl = players[id];
     if (!pl || pl.isDead) continue;
     const oppPos = pl.pos.clone();
     oppPos.y += CFG.H * 0.6;
@@ -566,579 +455,656 @@ function findOpponent(pid, eyePos, maxDist = 45) {
   return best;
 }
 
-export function tickBot(pid, pl, nowT, portals, PORT_, actions) {
-  const onPortalPlaced = typeof actions === 'function' ? actions : (actions && actions.onPortalPlaced);
-  const onFireRocket = actions && actions.onFireRocket;
-  const onFireInstagib = actions && actions.onFireInstagib;
+/**
+ * BotAgent — Encapsulates an authoritative AI bot combatant and its steering/combat behaviors.
+ */
+export class BotAgent {
+  static _nextBotId = 0;
 
-  const st = ensureState(pid);
-
-  const eyePos = pl.pos.clone();
-  eyePos.y += CFG.H - 0.15;
-  const fwdDir = new TH.Vector3(-Math.sin(pl.yaw), 0, -Math.cos(pl.yaw));
-
-  if (st.portalPhase !== 'none') {
-    pl.activeWeapon = 1;
-  } else if (nowT >= st.weaponHoldUntilT) {
-    const destWall = findDestructibleWall(eyePos, fwdDir, 16.0);
-    const opp = findOpponent(pid, eyePos, 35.0);
-
-    if (destWall && nowT - st.lastRocketT > ROCKET_COOLDOWN_S && Math.random() < 0.45) {
-      pl.activeWeapon = 2;
-      st.weaponHoldUntilT = nowT + 2.0;
-    } else if (opp && nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && Math.random() < 0.45) {
-      pl.activeWeapon = 3;
-      st.weaponHoldUntilT = nowT + 1.8;
-    } else if (nowT - st.lastWeaponSwapT > 5.0) {
-      st.lastWeaponSwapT = nowT;
-      const r = Math.random();
-      if (r < 0.5) pl.activeWeapon = 1;
-      else if (r < 0.75) pl.activeWeapon = 2;
-      else pl.activeWeapon = 3;
-      st.weaponHoldUntilT = nowT + 3.0 + Math.random() * 3.0;
-    }
+  static generateName(existingNames = new Set()) {
+    const available = FUNNY_BOT_NAMES.filter(n => !existingNames.has(n));
+    const pool = available.length > 0 ? available : FUNNY_BOT_NAMES;
+    return pool[Math.floor(Math.random() * pool.length)];
   }
 
-  const distToTarget = st.targetPos ? Math.hypot(st.targetPos.x - pl.pos.x, st.targetPos.z - pl.pos.z) : 0;
-  const heightDiffToTarget = st.targetPos ? (st.targetPos.y - pl.pos.y) : 0;
-  if (
-    pl.activeWeapon === 2 &&
-    st.rocketJumpPhase === 'none' &&
-    pl.grounded &&
-    nowT - st.lastRocketJumpT > 10.0 &&
-    (distToTarget > 5.0 || heightDiffToTarget > 1.0) &&
-    Math.random() < 0.2
-  ) {
-    st.rocketJumpPhase = 'aim_down';
-    st.rocketJumpT = nowT;
-    st.lastRocketJumpT = nowT;
-    st.weaponHoldUntilT = nowT + 3.0;
-  } else if (pl.activeWeapon === 2 && nowT - st.lastRocketT > ROCKET_COOLDOWN_S && onFireRocket && st.rocketJumpPhase === 'none') {
-    const destWall = findDestructibleWall(eyePos, fwdDir, 18.0);
-    if (destWall) {
-      st.lastRocketT = nowT;
-      pl.pitch = Math.asin(Math.max(-0.99, Math.min(0.99, destWall.dir.y)));
-      onFireRocket(eyePos, destWall.dir.clone().multiplyScalar(70), destWall);
-      st.weaponHoldUntilT = nowT + 1.5;
+  /**
+   * @param {Object|number} [arg1]
+   * @param {Object} [arg2]
+   * @param {Set<string>} [arg3]
+   */
+  constructor(arg1, arg2, arg3) {
+    let botId, playerIndex, name, spawn, spawnIdx;
+    if (typeof arg1 === 'object' && arg1 !== null && ('botId' in arg1 || 'spawn' in arg1)) {
+      ({ botId, playerIndex = 0, name = '', spawn = { x: 0, y: 0, z: 0 }, spawnIdx = null } = arg1);
+      if (!botId) botId = 'bot_' + (BotAgent._nextBotId++);
+      if (!name) name = BotAgent.generateName();
+    } else {
+      playerIndex = arg1 || 0;
+      spawn = arg2 || { x: 0, y: 0, z: 0 };
+      const existingNames = arg3 instanceof Set ? arg3 : new Set();
+      botId = 'bot_' + (BotAgent._nextBotId++);
+      name = BotAgent.generateName(existingNames);
+      spawnIdx = null;
     }
-  } else if (pl.activeWeapon === 3) {
-    const opp = findOpponent(pid, eyePos, 40.0);
-    if (opp) {
-      if (st.instagibTargetPid !== opp.id) {
-        st.instagibTargetPid = opp.id;
-        st.instagibAimStartT = nowT;
+
+    this.botId = botId;
+    this.isBot = true;
+    this.playerIndex = playerIndex;
+    this.name = name;
+    this.ws = null;
+
+    this.pos = new TH.Vector3(spawn.x, spawn.y, spawn.z);
+    this.vel = new TH.Vector3();
+    this.yaw = 0;
+    this.pitch = 0;
+    this.grounded = false;
+    this.groundNormal = new TH.Vector3(0, 1, 0);
+    this.groundT = -1;
+    this.jumpBuf = -1;
+    this.maxSpeed = 0;
+    this.ping = 0;
+    this.shots = 0;
+    this.hits = 0;
+    this.inputBuffer = [];
+    this.spawnIdx = spawnIdx;
+    this.activeWeapon = 1;
+    this.crouchT = 0;
+    this.isDead = false;
+    this.viewOffset = null;
+
+    this.aiState = this._createInitialAIState();
+  }
+
+  get portalBaseIndex() {
+    return this.playerIndex === 0 ? 0 : 2;
+  }
+
+  _createInitialAIState() {
+    return {
+      targetPos: null,
+      lastThinkT: 0,
+      lastPortalT: -999,
+      lastJumpT: -999,
+      lastRocketT: -999,
+      lastRocketJumpT: -999,
+      rocketJumpPhase: 'none',
+      rocketJumpT: 0,
+      lastInstagibT: -999,
+      lastWeaponSwapT: 0,
+      weaponHoldUntilT: 0,
+      portalPhase: 'none',
+      walkThruT: 0,
+      stuckT: 0,
+      prevPos: null,
+      lastTickPos: null,
+      avoidUntilT: 0,
+      avoidYaw: 0,
+      blueSurface: null,
+      blueAimYaw: 0,
+      blueAimPitch: 0,
+      blueAimT: 0,
+      orangeSurface: null,
+      orangeAimYaw: 0,
+      orangeAimPitch: 0,
+      orangeAimT: 0,
+      unstuckUntilT: 0,
+      strafeDir: null,
+      instagibTargetPid: null,
+      instagibAimStartT: 0,
+      lastUnstuckT: 0,
+      waypoints: []
+    };
+  }
+
+  resetAI() {
+    this.aiState = this._createInitialAIState();
+    this.aiState.lastPortalT = Date.now() / 1000;
+    this.crouchT = 0;
+  }
+
+  cleanupPortals(portals) {
+    const base = this.portalBaseIndex;
+    if (portals[base]) portals[base].placed = false;
+    if (portals[base + 1]) portals[base + 1].placed = false;
+  }
+
+  /**
+   * Execute bot decision-making, aiming, weapon selection, and steering.
+   * @param {number} nowT - Server timestamp in seconds
+   * @param {import('../match/MatchSession.js').MatchSession} session - Active match session
+   * @param {Object} [actions={}] - Callbacks for actions (portal, rocket, instagib)
+   * @param {Object} [PORT_=PORT] - Portal sizing configuration
+   * @returns {Record<string, boolean>} Active keys for this tick
+   */
+  tick(nowT, session, actions = {}, PORT_ = PORT) {
+    const onPortalPlaced = typeof actions === 'function' ? actions : (actions && actions.onPortalPlaced);
+    const onFireRocket = actions && actions.onFireRocket;
+    const onFireInstagib = actions && actions.onFireInstagib;
+
+    const st = this.aiState;
+    const obbs = session?.obbs || [];
+    const portals = session?.gameState?.portals || [];
+    const players = session?.gameState?.players || {};
+    const mapData = session?.mapData;
+
+    const eyePos = this.pos.clone();
+    eyePos.y += CFG.H - 0.15;
+    const fwdDir = new TH.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+
+    if (st.portalPhase !== 'none') {
+      this.activeWeapon = 1;
+    } else if (nowT >= st.weaponHoldUntilT) {
+      const destWall = findDestructibleWall(eyePos, fwdDir, obbs, session, 16.0);
+      const opp = findOpponent(this.botId, eyePos, players, obbs, 35.0);
+
+      if (destWall && nowT - st.lastRocketT > ROCKET_COOLDOWN_S && Math.random() < 0.45) {
+        this.activeWeapon = 2;
+        st.weaponHoldUntilT = nowT + 2.0;
+      } else if (opp && nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && Math.random() < 0.45) {
+        this.activeWeapon = 3;
+        st.weaponHoldUntilT = nowT + 1.8;
+      } else if (nowT - st.lastWeaponSwapT > 5.0) {
+        st.lastWeaponSwapT = nowT;
+        const r = Math.random();
+        if (r < 0.5) this.activeWeapon = 1;
+        else if (r < 0.75) this.activeWeapon = 2;
+        else this.activeWeapon = 3;
+        st.weaponHoldUntilT = nowT + 3.0 + Math.random() * 3.0;
+      }
+    }
+
+    const distToTarget = st.targetPos ? Math.hypot(st.targetPos.x - this.pos.x, st.targetPos.z - this.pos.z) : 0;
+    const heightDiffToTarget = st.targetPos ? (st.targetPos.y - this.pos.y) : 0;
+    if (
+      this.activeWeapon === 2 &&
+      st.rocketJumpPhase === 'none' &&
+      this.grounded &&
+      nowT - st.lastRocketJumpT > 10.0 &&
+      (distToTarget > 5.0 || heightDiffToTarget > 1.0) &&
+      Math.random() < 0.2
+    ) {
+      st.rocketJumpPhase = 'aim_down';
+      st.rocketJumpT = nowT;
+      st.lastRocketJumpT = nowT;
+      st.weaponHoldUntilT = nowT + 3.0;
+    } else if (this.activeWeapon === 2 && nowT - st.lastRocketT > ROCKET_COOLDOWN_S && onFireRocket && st.rocketJumpPhase === 'none') {
+      const destWall = findDestructibleWall(eyePos, fwdDir, obbs, session, 18.0);
+      if (destWall) {
+        st.lastRocketT = nowT;
+        this.pitch = Math.asin(Math.max(-0.99, Math.min(0.99, destWall.dir.y)));
+        onFireRocket(eyePos, destWall.dir.clone().multiplyScalar(70), destWall);
+        st.weaponHoldUntilT = nowT + 1.5;
+      }
+    } else if (this.activeWeapon === 3) {
+      const opp = findOpponent(this.botId, eyePos, players, obbs, 40.0);
+      if (opp) {
+        if (st.instagibTargetPid !== opp.id) {
+          st.instagibTargetPid = opp.id;
+          st.instagibAimStartT = nowT;
+        }
+
+        const targetYaw = Math.atan2(-opp.dir.x, -opp.dir.z);
+        const targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, opp.dir.y)));
+
+        let oppDyaw = targetYaw - this.yaw;
+        while (oppDyaw > Math.PI) oppDyaw -= Math.PI * 2;
+        while (oppDyaw < -Math.PI) oppDyaw += Math.PI * 2;
+
+        const aimAligned = Math.abs(oppDyaw) < 0.12 && Math.abs(targetPitch - this.pitch) < 0.14;
+        const aimDwellOk = (nowT - st.instagibAimStartT) > 0.28;
+
+        if (nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && onFireInstagib && aimAligned && aimDwellOk) {
+          const losHit = raycastWall(eyePos, opp.dir, opp.dist, obbs);
+          const hasClearLOS = !losHit || losHit.distance >= opp.dist - 0.5;
+
+          if (hasClearLOS) {
+            st.lastInstagibT = nowT;
+            const willHit = Math.random() < INSTAGIB_HIT_CHANCE;
+            if (willHit) {
+              const pts = [eyePos.clone(), opp.pos.clone()];
+              onFireInstagib(pts, opp.id, null);
+            } else {
+              const right = new TH.Vector3(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
+              const up = new TH.Vector3(0, 1, 0);
+              const randAng = Math.random() * Math.PI * 2;
+              const offsetMag = 0.08 + Math.random() * 0.12;
+              const missDir = opp.dir.clone()
+                .addScaledVector(right, Math.cos(randAng) * offsetMag)
+                .addScaledVector(up, Math.sin(randAng) * offsetMag)
+                .normalize();
+              const hit = raycastWall(eyePos, missDir, 80, obbs);
+              const endPt = hit ? hit.point : eyePos.clone().addScaledVector(missDir, 50);
+              const scorch = hit ? { pos: endPt.toArray(), n: hit.normal.toArray() } : null;
+              const pts = [eyePos.clone(), endPt];
+              onFireInstagib(pts, null, scorch);
+            }
+            st.weaponHoldUntilT = nowT + 1.2;
+          }
+        }
+      } else {
+        st.instagibTargetPid = null;
+      }
+    }
+
+    if (st.waypoints && st.waypoints.length > 0) {
+      const hDist = Math.hypot(st.targetPos.x - this.pos.x, st.targetPos.z - this.pos.z);
+      if (hDist < 1.3 && Math.abs(st.targetPos.y - this.pos.y) < 1.8) {
+        st.targetPos = st.waypoints.shift();
+        st.stuckT = 0;
+        st.avoidUntilT = 0;
+        st.unstuckUntilT = 0;
+      }
+    }
+
+    if (nowT - st.lastThinkT > THINK_INTERVAL_MS / 1000) {
+      st.lastThinkT = nowT;
+
+      const hDistToTarget = st.targetPos ? Math.hypot(st.targetPos.x - this.pos.x, st.targetPos.z - this.pos.z) : 0;
+      const reachedTarget = st.targetPos && (hDistToTarget < 1.3 && Math.abs(st.targetPos.y - this.pos.y) < 1.8);
+
+      const needNewTarget = !st.targetPos
+        || (reachedTarget && (!st.waypoints || st.waypoints.length === 0))
+        || st.stuckT > 1.8;
+
+      if (needNewTarget) {
+        if (st.waypoints && st.waypoints.length > 0) {
+          st.targetPos = st.waypoints.shift();
+        } else {
+          const route = pickBotTargetAndRoute(this.pos, portals, mapData);
+          st.targetPos = route.target;
+          st.waypoints = route.waypoints;
+        }
+        st.stuckT = 0;
+        st.avoidUntilT = 0;
+        st.unstuckUntilT = 0;
       }
 
-      const targetYaw = Math.atan2(-opp.dir.x, -opp.dir.z);
-      const targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, opp.dir.y)));
-
-      let oppDyaw = targetYaw - pl.yaw;
-      while (oppDyaw > Math.PI) oppDyaw -= Math.PI * 2;
-      while (oppDyaw < -Math.PI) oppDyaw += Math.PI * 2;
-
-      const aimAligned = Math.abs(oppDyaw) < 0.12 && Math.abs(targetPitch - pl.pitch) < 0.14;
-      const aimDwellOk = (nowT - st.instagibAimStartT) > 0.28;
-
-      if (nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && onFireInstagib && aimAligned && aimDwellOk) {
-        const losHit = raycastWall(eyePos, opp.dir, opp.dist, obbs);
-        const hasClearLOS = !losHit || losHit.distance >= opp.dist - 0.5;
-
-        if (hasClearLOS) {
-          st.lastInstagibT = nowT;
-          const willHit = Math.random() < INSTAGIB_HIT_CHANCE;
-          if (willHit) {
-            const pts = [eyePos.clone(), opp.pos.clone()];
-            onFireInstagib(pts, opp.id, null);
-          } else {
-            const right = new TH.Vector3(-Math.cos(pl.yaw), 0, Math.sin(pl.yaw));
-            const up = new TH.Vector3(0, 1, 0);
-            const randAng = Math.random() * Math.PI * 2;
-            const offsetMag = 0.08 + Math.random() * 0.12;
-            const missDir = opp.dir.clone()
-              .addScaledVector(right, Math.cos(randAng) * offsetMag)
-              .addScaledVector(up, Math.sin(randAng) * offsetMag)
-              .normalize();
-            const hit = raycastWall(eyePos, missDir, 80, obbs);
-            const endPt = hit ? hit.point : eyePos.clone().addScaledVector(missDir, 50);
-            const scorch = hit ? { pos: endPt.toArray(), n: hit.normal.toArray() } : null;
-            const pts = [eyePos.clone(), endPt];
-            onFireInstagib(pts, null, scorch);
-          }
-          st.weaponHoldUntilT = nowT + 1.2;
+      if (
+        st.portalPhase === 'none' &&
+        this.activeWeapon === 1 &&
+        nowT - st.lastPortalT > PORTAL_COOLDOWN_S &&
+        Math.random() < PORTAL_CHANCE
+      ) {
+        const botPortalBase = this.portalBaseIndex;
+        const blueFound = findPortalSurfaceInCone(this.pos, this.yaw, obbs, portals, PORT_, botPortalBase, session);
+        if (blueFound) {
+          st.blueSurface = blueFound.surface;
+          st.blueAimYaw = blueFound.aimYaw;
+          st.blueAimPitch = blueFound.aimPitch;
+          st.blueAimT = nowT;
+          st.portalPhase = 'aim_blue';
+        } else {
+          st.lastPortalT = nowT + 2.0;
         }
       }
-    } else {
-      st.instagibTargetPid = null;
-    }
-  }
-
-  if (st.waypoints && st.waypoints.length > 0) {
-    const hDist = Math.hypot(st.targetPos.x - pl.pos.x, st.targetPos.z - pl.pos.z);
-    if (hDist < 1.3 && Math.abs(st.targetPos.y - pl.pos.y) < 1.8) {
-      st.targetPos = st.waypoints.shift();
-      st.stuckT = 0;
-      st.avoidUntilT = 0;
-      st.unstuckUntilT = 0;
-    }
-  }
-
-  if (nowT - st.lastThinkT > THINK_INTERVAL_MS / 1000) {
-    st.lastThinkT = nowT;
-
-    const hDistToTarget = st.targetPos ? Math.hypot(st.targetPos.x - pl.pos.x, st.targetPos.z - pl.pos.z) : 0;
-    const reachedTarget = st.targetPos && (hDistToTarget < 1.3 && Math.abs(st.targetPos.y - pl.pos.y) < 1.8);
-
-    const needNewTarget = !st.targetPos
-      || (reachedTarget && (!st.waypoints || st.waypoints.length === 0))
-      || st.stuckT > 1.8;
-
-    if (needNewTarget) {
-      if (st.waypoints && st.waypoints.length > 0) {
-        st.targetPos = st.waypoints.shift();
-      } else {
-        const route = pickBotTargetAndRoute(pl.pos, portals);
-        st.targetPos = route.target;
-        st.waypoints = route.waypoints;
-      }
-      st.stuckT = 0;
-      st.avoidUntilT = 0;
-      st.unstuckUntilT = 0;
     }
 
-    if (
-      st.portalPhase === 'none' &&
-      pl.activeWeapon === 1 &&
-      nowT - st.lastPortalT > PORTAL_COOLDOWN_S &&
-      Math.random() < PORTAL_CHANCE
-    ) {
-      const botPortalBase = getBotPortalBase(pl);
-      const blueFound = findPortalSurfaceInCone(pl.pos, pl.yaw, obbs, portals, PORT_, botPortalBase);
-      if (blueFound) {
-        st.blueSurface = blueFound.surface;
-        st.blueAimYaw = blueFound.aimYaw;
-        st.blueAimPitch = blueFound.aimPitch;
-        st.blueAimT = nowT;
-        st.portalPhase = 'aim_blue';
-      } else {
-        st.lastPortalT = nowT + 2.0;
+    if (!st.targetPos) {
+      return { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false };
+    }
+
+    const dx = st.targetPos.x - this.pos.x;
+    const dz = st.targetPos.z - this.pos.z;
+    const dist = Math.hypot(dx, dz);
+
+    let desiredYaw = Math.atan2(-dx, -dz);
+
+    const waistPos = new TH.Vector3(this.pos.x, this.pos.y + 0.65, this.pos.z);
+    const kneePos = new TH.Vector3(this.pos.x, this.pos.y + 0.25, this.pos.z);
+    const curFwd = new TH.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const curRight = new TH.Vector3(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
+
+    const leftWaist = waistPos.clone().addScaledVector(curRight, -0.32);
+    const rightWaist = waistPos.clone().addScaledVector(curRight, 0.32);
+
+    const hitCenter = raycastWall(waistPos, curFwd, 2.2, obbs);
+    const hitLeft = raycastWall(leftWaist, curFwd, 1.8, obbs);
+    const hitRight = raycastWall(rightWaist, curFwd, 1.8, obbs);
+    const hitLow = raycastWall(kneePos, curFwd, 1.6, obbs);
+
+    let closestHit = hitCenter;
+    for (const h of [hitLeft, hitRight, hitLow]) {
+      if (h && (!closestHit || h.distance < closestHit.distance)) {
+        closestHit = h;
       }
     }
-  }
 
-  if (!st.targetPos) {
-    return { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false };
-  }
+    let isTallWall = false;
+    let canStepOver = false;
 
-  const dx = st.targetPos.x - pl.pos.x;
-  const dz = st.targetPos.z - pl.pos.z;
-  const dist = Math.hypot(dx, dz);
+    if (closestHit) {
+      if (closestHit.obb.kind === 'ramp') {
+        isTallWall = false;
+        canStepOver = false;
+        closestHit = null;
+      } else {
+        const maxY = closestHit.obb.c.y
+          + Math.abs(closestHit.obb.ax[0].y * closestHit.obb.he[0])
+          + Math.abs(closestHit.obb.ax[1].y * closestHit.obb.he[1])
+          + Math.abs(closestHit.obb.ax[2].y * closestHit.obb.he[2]);
+        const stepHeight = maxY - this.pos.y;
+        isTallWall = stepHeight > 1.35;
+        canStepOver = stepHeight > 0.35 && stepHeight <= 1.35;
+      }
 
-  let desiredYaw = Math.atan2(-dx, -dz);
+      if (isTallWall) {
+        const toTarget = new TH.Vector3(dx, 0, dz).normalize();
+        const testAngles = [
+          0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.3, -2.3, Math.PI
+        ];
+        let bestAngleYaw = null;
+        let bestScore = -1e9;
 
-  const waistPos = new TH.Vector3(pl.pos.x, pl.pos.y + 0.65, pl.pos.z);
-  const kneePos = new TH.Vector3(pl.pos.x, pl.pos.y + 0.25, pl.pos.z);
-  const curFwd = new TH.Vector3(-Math.sin(pl.yaw), 0, -Math.cos(pl.yaw));
-  const curRight = new TH.Vector3(-Math.cos(pl.yaw), 0, Math.sin(pl.yaw));
+        for (const ang of testAngles) {
+          const testYaw = this.yaw + ang;
+          const testDir = new TH.Vector3(-Math.sin(testYaw), 0, -Math.cos(testYaw));
+          const lTest = waistPos.clone().addScaledVector(new TH.Vector3(-Math.cos(testYaw), 0, Math.sin(testYaw)), -0.28);
+          const rTest = waistPos.clone().addScaledVector(new TH.Vector3(-Math.cos(testYaw), 0, Math.sin(testYaw)), 0.28);
 
-  const leftWaist = waistPos.clone().addScaledVector(curRight, -0.32);
-  const rightWaist = waistPos.clone().addScaledVector(curRight, 0.32);
+          const chH = raycastWall(waistPos, testDir, 2.0, obbs);
+          const lH = raycastWall(lTest, testDir, 1.6, obbs);
+          const rH = raycastWall(rTest, testDir, 1.6, obbs);
 
-  const hitCenter = raycastWall(waistPos, curFwd, 2.2, obbs);
-  const hitLeft = raycastWall(leftWaist, curFwd, 1.8, obbs);
-  const hitRight = raycastWall(rightWaist, curFwd, 1.8, obbs);
-  const hitLow = raycastWall(kneePos, curFwd, 1.6, obbs);
+          const isRampWalkable = (h) => h && h.obb.kind === 'ramp';
+          const chBlocked = chH && !isRampWalkable(chH);
+          const lBlocked = lH && !isRampWalkable(lH);
+          const rBlocked = rH && !isRampWalkable(rH);
 
-  let closestHit = hitCenter;
-  for (const h of [hitLeft, hitRight, hitLow]) {
-    if (h && (!closestHit || h.distance < closestHit.distance)) {
-      closestHit = h;
+          const testNextPos = this.pos.clone().addScaledVector(testDir, 1.6);
+          const testUnder = getRampUnderState(testNextPos, mapData);
+          const underBlocked = testUnder && testUnder.clearance < 2.2;
+
+          if (!chBlocked && !lBlocked && !rBlocked && !underBlocked && hasGroundAhead(this.pos, testYaw, obbs)) {
+            const dot = testDir.dot(toTarget);
+            const score = dot - Math.abs(ang) * 0.15;
+            if (score > bestScore) {
+              bestScore = score;
+              bestAngleYaw = testYaw;
+            }
+          }
+        }
+
+        if (bestAngleYaw !== null) {
+          st.avoidYaw = bestAngleYaw;
+          st.avoidUntilT = nowT + 0.65;
+        } else if (closestHit && closestHit.normal) {
+          const nx = closestHit.normal.x, nz = closestHit.normal.z;
+          const nLen = Math.hypot(nx, nz);
+          if (nLen > 0.05) {
+            const tLeft = new TH.Vector3(-nz / nLen, 0, nx / nLen);
+            const tRight = new TH.Vector3(nz / nLen, 0, -nx / nLen);
+            const chosen = (tLeft.dot(toTarget) >= tRight.dot(toTarget)) ? tLeft : tRight;
+            st.avoidYaw = Math.atan2(-chosen.x, -chosen.z);
+            st.avoidUntilT = nowT + 0.65;
+          }
+        }
+      }
     }
-  }
 
-  let isTallWall = false;
-  let canStepOver = false;
+    let activeOpp = null;
+    if (this.activeWeapon === 3 && st.instagibTargetPid && players[st.instagibTargetPid] && !players[st.instagibTargetPid].isDead) {
+      const oppPl = players[st.instagibTargetPid];
+      const oppHead = oppPl.pos.clone();
+      oppHead.y += CFG.H * 0.6;
+      const toOpp = oppHead.sub(eyePos);
+      activeOpp = { dir: toOpp.clone().normalize(), dist: toOpp.length() };
+    }
 
-  if (closestHit) {
-    if (closestHit.obb.kind === 'ramp') {
+    const underNow = getRampUnderState(this.pos, mapData);
+    const rampState = getRampAtPos(this.pos, mapData);
+    const onRamp = rampState && rampState.onRamp;
+
+    if (activeOpp) {
+      desiredYaw = Math.atan2(-activeOpp.dir.x, -activeOpp.dir.z);
+    } else if (underNow && underNow.clearance < 2.5) {
+      const toCenter = new TH.Vector3(-this.pos.x, 0, -this.pos.z).normalize();
+      const escX = underNow.fwdX * 0.6 + toCenter.x * 0.8;
+      const escZ = underNow.fwdZ * 0.6 + toCenter.z * 0.8;
+      desiredYaw = Math.atan2(-escX, -escZ);
+      st.avoidYaw = desiredYaw;
+      st.avoidUntilT = nowT + 0.6;
       isTallWall = false;
       canStepOver = false;
-      closestHit = null;
+    } else if (st.portalPhase === 'aim_blue') {
+      desiredYaw = st.blueAimYaw;
+    } else if (st.portalPhase === 'aim_orange') {
+      desiredYaw = st.orangeAimYaw;
+    } else if (nowT < st.avoidUntilT) {
+      desiredYaw = st.avoidYaw;
+    }
+
+    let dyaw = desiredYaw - this.yaw;
+    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+
+    const isPortalAiming = st.portalPhase === 'aim_blue' || st.portalPhase === 'aim_orange';
+    const maxTurn = (isPortalAiming ? 10.0 : (activeOpp ? 4.2 : 4.8)) * DT;
+    if (Math.abs(dyaw) > maxTurn) {
+      this.yaw += Math.sign(dyaw) * maxTurn;
     } else {
-      const maxY = closestHit.obb.c.y
-        + Math.abs(closestHit.obb.ax[0].y * closestHit.obb.he[0])
-        + Math.abs(closestHit.obb.ax[1].y * closestHit.obb.he[1])
-        + Math.abs(closestHit.obb.ax[2].y * closestHit.obb.he[2]);
-      const stepHeight = maxY - pl.pos.y;
-      isTallWall = stepHeight > 1.35;
-      canStepOver = stepHeight > 0.35 && stepHeight <= 1.35;
+      this.yaw += dyaw;
+    }
+    while (this.yaw > Math.PI) this.yaw -= Math.PI * 2;
+    while (this.yaw < -Math.PI) this.yaw += Math.PI * 2;
+
+    let targetPitch;
+    if (activeOpp) {
+      targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, activeOpp.dir.y)));
+    } else if (st.portalPhase === 'aim_blue') {
+      targetPitch = st.blueAimPitch;
+    } else if (st.portalPhase === 'aim_orange') {
+      targetPitch = st.orangeAimPitch;
+    } else {
+      targetPitch = Math.max(-0.25, Math.min(0.25, ((st.targetPos.y - this.pos.y) - 1.5) * 0.04));
     }
 
-    if (isTallWall) {
-      const toTarget = new TH.Vector3(dx, 0, dz).normalize();
-      const testAngles = [
-        0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.3, -2.3, Math.PI
-      ];
-      let bestAngleYaw = null;
-      let bestScore = -1e9;
+    if (st.rocketJumpPhase === 'aim_down') {
+      const rjPitch = -1.35;
+      this.pitch += (rjPitch - this.pitch) * Math.min(1, 14.0 * DT);
 
-      for (const ang of testAngles) {
-        const testYaw = pl.yaw + ang;
-        const testDir = new TH.Vector3(-Math.sin(testYaw), 0, -Math.cos(testYaw));
-        const lTest = waistPos.clone().addScaledVector(new TH.Vector3(-Math.cos(testYaw), 0, Math.sin(testYaw)), -0.28);
-        const rTest = waistPos.clone().addScaledVector(new TH.Vector3(-Math.cos(testYaw), 0, Math.sin(testYaw)), 0.28);
-
-        const chH = raycastWall(waistPos, testDir, 2.0, obbs);
-        const lH = raycastWall(lTest, testDir, 1.6, obbs);
-        const rH = raycastWall(rTest, testDir, 1.6, obbs);
-
-        const isRampWalkable = (h) => h && h.obb.kind === 'ramp';
-        const chBlocked = chH && !isRampWalkable(chH);
-        const lBlocked = lH && !isRampWalkable(lH);
-        const rBlocked = rH && !isRampWalkable(rH);
-
-        const testNextPos = pl.pos.clone().addScaledVector(testDir, 1.6);
-        const testUnder = getRampUnderState(testNextPos);
-        const underBlocked = testUnder && testUnder.clearance < 2.2;
-
-        if (!chBlocked && !lBlocked && !rBlocked && !underBlocked && hasGroundAhead(pl.pos, testYaw, obbs)) {
-          const dot = testDir.dot(toTarget);
-          const score = dot - Math.abs(ang) * 0.15;
-          if (score > bestScore) {
-            bestScore = score;
-            bestAngleYaw = testYaw;
-          }
+      if (this.pitch <= -1.15 || nowT - st.rocketJumpT > 0.22) {
+        this.jumpBuf = nowT;
+        const rjPos = this.pos.clone();
+        rjPos.y += 0.35;
+        const rjDir = new TH.Vector3(-Math.sin(this.yaw) * 0.15, -0.98, -Math.cos(this.yaw) * 0.15).normalize();
+        const rjHit = { point: this.pos.clone(), normal: new TH.Vector3(0, 1, 0) };
+        if (onFireRocket) {
+          onFireRocket(rjPos, rjDir.multiplyScalar(70), rjHit);
         }
-      }
-
-      if (bestAngleYaw !== null) {
-        st.avoidYaw = bestAngleYaw;
-        st.avoidUntilT = nowT + 0.65;
-      } else if (closestHit && closestHit.normal) {
-        const nx = closestHit.normal.x, nz = closestHit.normal.z;
-        const nLen = Math.hypot(nx, nz);
-        if (nLen > 0.05) {
-          const tLeft = new TH.Vector3(-nz / nLen, 0, nx / nLen);
-          const tRight = new TH.Vector3(nz / nLen, 0, -nx / nLen);
-          const chosen = (tLeft.dot(toTarget) >= tRight.dot(toTarget)) ? tLeft : tRight;
-          st.avoidYaw = Math.atan2(-chosen.x, -chosen.z);
-          st.avoidUntilT = nowT + 0.65;
-        }
-      }
-    }
-  }
-
-  let activeOpp = null;
-  if (pl.activeWeapon === 3 && st.instagibTargetPid && gameState.players[st.instagibTargetPid] && !gameState.players[st.instagibTargetPid].isDead) {
-    const oppPl = gameState.players[st.instagibTargetPid];
-    const oppHead = oppPl.pos.clone();
-    oppHead.y += CFG.H * 0.6;
-    const toOpp = oppHead.sub(eyePos);
-    activeOpp = { dir: toOpp.clone().normalize(), dist: toOpp.length() };
-  }
-
-  const underNow = getRampUnderState(pl.pos);
-  const rampState = getRampAtPos(pl.pos);
-  const onRamp = rampState && rampState.onRamp;
-
-  if (activeOpp) {
-    desiredYaw = Math.atan2(-activeOpp.dir.x, -activeOpp.dir.z);
-  } else if (underNow && underNow.clearance < 2.5) {
-    const toCenter = new TH.Vector3(-pl.pos.x, 0, -pl.pos.z).normalize();
-    const escX = underNow.fwdX * 0.6 + toCenter.x * 0.8;
-    const escZ = underNow.fwdZ * 0.6 + toCenter.z * 0.8;
-    desiredYaw = Math.atan2(-escX, -escZ);
-    st.avoidYaw = desiredYaw;
-    st.avoidUntilT = nowT + 0.6;
-    isTallWall = false;
-    canStepOver = false;
-  } else if (st.portalPhase === 'aim_blue') {
-    desiredYaw = st.blueAimYaw;
-  } else if (st.portalPhase === 'aim_orange') {
-    desiredYaw = st.orangeAimYaw;
-  } else if (nowT < st.avoidUntilT) {
-    desiredYaw = st.avoidYaw;
-  }
-
-  let dyaw = desiredYaw - pl.yaw;
-  while (dyaw > Math.PI) dyaw -= Math.PI * 2;
-  while (dyaw < -Math.PI) dyaw += Math.PI * 2;
-
-  const isPortalAiming = st.portalPhase === 'aim_blue' || st.portalPhase === 'aim_orange';
-  const maxTurn = (isPortalAiming ? 10.0 : (activeOpp ? 4.2 : 4.8)) * DT;
-  if (Math.abs(dyaw) > maxTurn) {
-    pl.yaw += Math.sign(dyaw) * maxTurn;
-  } else {
-    pl.yaw += dyaw;
-  }
-  while (pl.yaw > Math.PI) pl.yaw -= Math.PI * 2;
-  while (pl.yaw < -Math.PI) pl.yaw += Math.PI * 2;
-
-  let targetPitch;
-  if (activeOpp) {
-    targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, activeOpp.dir.y)));
-  } else if (st.portalPhase === 'aim_blue') {
-    targetPitch = st.blueAimPitch;
-  } else if (st.portalPhase === 'aim_orange') {
-    targetPitch = st.orangeAimPitch;
-  } else {
-    targetPitch = Math.max(-0.25, Math.min(0.25, ((st.targetPos.y - pl.pos.y) - 1.5) * 0.04));
-  }
-
-  if (st.rocketJumpPhase === 'aim_down') {
-    const rjPitch = -1.35;
-    pl.pitch += (rjPitch - pl.pitch) * Math.min(1, 14.0 * DT);
-
-    if (pl.pitch <= -1.15 || nowT - st.rocketJumpT > 0.22) {
-      pl.jumpBuf = nowT;
-      const rjPos = pl.pos.clone();
-      rjPos.y += 0.35;
-      const rjDir = new TH.Vector3(-Math.sin(pl.yaw) * 0.15, -0.98, -Math.cos(pl.yaw) * 0.15).normalize();
-      const rjHit = { point: pl.pos.clone(), normal: new TH.Vector3(0, 1, 0) };
-      if (onFireRocket) {
-        onFireRocket(rjPos, rjDir.multiplyScalar(70), rjHit);
-      }
-      st.lastRocketT = nowT;
-      st.rocketJumpPhase = 'recover';
-      st.rocketJumpT = nowT;
-    }
-  } else if (st.rocketJumpPhase === 'recover') {
-    pl.pitch += (targetPitch - pl.pitch) * Math.min(1, 8.0 * DT);
-    if (nowT - st.rocketJumpT > 0.4) {
-      st.rocketJumpPhase = 'none';
-    }
-  } else {
-    const pitchSpeed = isPortalAiming ? 12.0 : (activeOpp ? 4.5 : 6.0);
-    pl.pitch += (targetPitch - pl.pitch) * Math.min(1, pitchSpeed * DT);
-  }
-
-  if (st.lastTickPos) {
-    const dMoved = pl.pos.distanceTo(st.lastTickPos);
-    if (dist > 0.8 && dMoved < 0.02) {
-      st.stuckT += DT;
-    } else if (dMoved > 0.05) {
-      st.stuckT = Math.max(0, st.stuckT - DT * 3.0);
-    }
-  }
-  st.lastTickPos = pl.pos.clone();
-
-  if (st.stuckT > 0.3) {
-    if (!underNow && !onRamp && (canStepOver || (closestHit && closestHit.distance < 1.2 && pl.grounded))) {
-      pl.jumpBuf = nowT;
-    }
-    if (isTallWall) {
-      const destWall = findDestructibleWall(eyePos, curFwd, 6.0);
-      if (destWall && nowT - st.lastRocketT > 5.0 && onFireRocket) {
-        pl.activeWeapon = 2;
         st.lastRocketT = nowT;
-        st.weaponHoldUntilT = nowT + 1.5;
-        onFireRocket(eyePos, destWall.dir.clone().multiplyScalar(70), destWall);
+        st.rocketJumpPhase = 'recover';
+        st.rocketJumpT = nowT;
       }
-      if (nowT > st.unstuckUntilT && nowT - st.lastUnstuckT > 0.8) {
-        st.unstuckUntilT = nowT + 0.45;
-        st.lastUnstuckT = nowT;
-        st.strafeDir = Math.random() < 0.5 ? 'KeyA' : 'KeyD';
+    } else if (st.rocketJumpPhase === 'recover') {
+      this.pitch += (targetPitch - this.pitch) * Math.min(1, 8.0 * DT);
+      if (nowT - st.rocketJumpT > 0.4) {
+        st.rocketJumpPhase = 'none';
       }
-    }
-  }
-
-  const keys = {
-    KeyW: (!isPortalAiming || Math.abs(dyaw) < 0.5) && Math.abs(dyaw) < 1.1 && (dist > 0.6 || st.portalPhase === 'walk_thru' || underNow != null || onRamp),
-    KeyA: false,
-    KeyS: false,
-    KeyD: false,
-    Space: false,
-    ShiftLeft: false
-  };
-
-  if (underNow && underNow.clearance < 2.2) {
-    keys.Space = false;
-    keys.KeyW = true;
-    keys.KeyS = false;
-  }
-
-  if (st.rocketJumpPhase === 'aim_down' || st.rocketJumpPhase === 'recover') {
-    keys.KeyW = true;
-    if (st.rocketJumpPhase === 'aim_down' && (pl.pitch <= -1.15 || nowT - st.rocketJumpT > 0.2)) {
-      keys.Space = true;
-    }
-  }
-
-  if (nowT < st.unstuckUntilT) {
-    keys.KeyW = false;
-    keys.KeyS = true;
-    if (st.strafeDir) keys[st.strafeDir] = true;
-  }
-
-  if (st.stuckT > 1.0) {
-    const route = pickBotTargetAndRoute(pl.pos, portals);
-    st.targetPos = route.target;
-    st.waypoints = route.waypoints;
-    if (underNow) {
-      const toCenter = new TH.Vector3(-pl.pos.x, 0, -pl.pos.z).normalize();
-      st.avoidYaw = Math.atan2(-toCenter.x, -toCenter.z);
     } else {
-      st.avoidYaw = pl.yaw + Math.PI * (0.8 + Math.random() * 0.4);
-      pl.jumpBuf = nowT;
+      const pitchSpeed = isPortalAiming ? 12.0 : (activeOpp ? 4.5 : 6.0);
+      this.pitch += (targetPitch - this.pitch) * Math.min(1, pitchSpeed * DT);
     }
-    st.avoidUntilT = nowT + 0.9;
-    st.stuckT = 0;
-    st.unstuckUntilT = 0;
-  }
 
-  const botPortalBase = getBotPortalBase(pl);
+    if (st.lastTickPos) {
+      const dMoved = this.pos.distanceTo(st.lastTickPos);
+      if (dist > 0.8 && dMoved < 0.02) {
+        st.stuckT += DT;
+      } else if (dMoved > 0.05) {
+        st.stuckT = Math.max(0, st.stuckT - DT * 3.0);
+      }
+    }
+    st.lastTickPos = this.pos.clone();
 
-  if (st.portalPhase === 'aim_blue') {
-    let aimDyaw = st.blueAimYaw - pl.yaw;
-    while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
-    while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
-    const aimDpitch = Math.abs(st.blueAimPitch - pl.pitch);
-    const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
-    const timedOut = nowT - st.blueAimT > 0.35;
+    if (st.stuckT > 0.3) {
+      if (!underNow && !onRamp && (canStepOver || (closestHit && closestHit.distance < 1.2 && this.grounded))) {
+        this.jumpBuf = nowT;
+      }
+      if (isTallWall) {
+        const destWall = findDestructibleWall(eyePos, curFwd, obbs, session, 6.0);
+        if (destWall && nowT - st.lastRocketT > 5.0 && onFireRocket) {
+          this.activeWeapon = 2;
+          st.lastRocketT = nowT;
+          st.weaponHoldUntilT = nowT + 1.5;
+          onFireRocket(eyePos, destWall.dir.clone().multiplyScalar(70), destWall);
+        }
+        if (nowT > st.unstuckUntilT && nowT - st.lastUnstuckT > 0.8) {
+          st.unstuckUntilT = nowT + 0.45;
+          st.lastUnstuckT = nowT;
+          st.strafeDir = Math.random() < 0.5 ? 'KeyA' : 'KeyD';
+        }
+      }
+    }
 
-    if (st.blueSurface && (aligned || timedOut)) {
-      const surface = st.blueSurface;
-      const P = portals[botPortalBase];
-      P.placed = true;
-      P.c.copy(surface.c);
-      P.n.copy(surface.n);
-      P.r.copy(surface.r);
-      P.u.copy(surface.u);
+    const keys = {
+      KeyW: (!isPortalAiming || Math.abs(dyaw) < 0.5) && Math.abs(dyaw) < 1.1 && (dist > 0.6 || st.portalPhase === 'walk_thru' || underNow != null || onRamp),
+      KeyA: false,
+      KeyS: false,
+      KeyD: false,
+      Space: false,
+      ShiftLeft: false
+    };
 
-      if (onPortalPlaced) onPortalPlaced(botPortalBase, surface, surface.eyePos);
+    if (underNow && underNow.clearance < 2.2) {
+      keys.Space = false;
+      keys.KeyW = true;
+      keys.KeyS = false;
+    }
 
-      const orangeFound = findOrangePortalSurface(pl.pos, surface.n, obbs, portals, PORT_, botPortalBase + 1);
-      if (orangeFound) {
-        st.orangeSurface = orangeFound.surface;
-        st.orangeAimYaw = orangeFound.aimYaw;
-        st.orangeAimPitch = orangeFound.aimPitch;
-        st.orangeAimT = nowT;
-        st.portalPhase = 'aim_orange';
+    if (st.rocketJumpPhase === 'aim_down' || st.rocketJumpPhase === 'recover') {
+      keys.KeyW = true;
+      if (st.rocketJumpPhase === 'aim_down' && (this.pitch <= -1.15 || nowT - st.rocketJumpT > 0.2)) {
+        keys.Space = true;
+      }
+    }
+
+    if (nowT < st.unstuckUntilT) {
+      keys.KeyW = false;
+      keys.KeyS = true;
+      if (st.strafeDir) keys[st.strafeDir] = true;
+    }
+
+    if (st.stuckT > 1.0) {
+      const route = pickBotTargetAndRoute(this.pos, portals, mapData);
+      st.targetPos = route.target;
+      st.waypoints = route.waypoints;
+      if (underNow) {
+        const toCenter = new TH.Vector3(-this.pos.x, 0, -this.pos.z).normalize();
+        st.avoidYaw = Math.atan2(-toCenter.x, -toCenter.z);
       } else {
+        st.avoidYaw = this.yaw + Math.PI * (0.8 + Math.random() * 0.4);
+        this.jumpBuf = nowT;
+      }
+      st.avoidUntilT = nowT + 0.9;
+      st.stuckT = 0;
+      st.unstuckUntilT = 0;
+    }
+
+    const botPortalBase = this.portalBaseIndex;
+
+    if (st.portalPhase === 'aim_blue') {
+      let aimDyaw = st.blueAimYaw - this.yaw;
+      while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
+      while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
+      const aimDpitch = Math.abs(st.blueAimPitch - this.pitch);
+      const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
+      const timedOut = nowT - st.blueAimT > 0.35;
+
+      if (st.blueSurface && (aligned || timedOut)) {
+        const surface = st.blueSurface;
+        const P = portals[botPortalBase];
+        P.placed = true;
+        P.c.copy(surface.c);
+        P.n.copy(surface.n);
+        P.r.copy(surface.r);
+        P.u.copy(surface.u);
+
+        if (onPortalPlaced) onPortalPlaced(botPortalBase, surface, surface.eyePos);
+
+        const orangeFound = findOrangePortalSurface(this.pos, surface.n, obbs, portals, PORT_, botPortalBase + 1, session);
+        if (orangeFound) {
+          st.orangeSurface = orangeFound.surface;
+          st.orangeAimYaw = orangeFound.aimYaw;
+          st.orangeAimPitch = orangeFound.aimPitch;
+          st.orangeAimT = nowT;
+          st.portalPhase = 'aim_orange';
+        } else {
+          st.portalPhase = 'none';
+          st.lastPortalT = nowT + 3.0;
+        }
+      } else if (nowT - st.blueAimT > 0.8) {
+        st.portalPhase = 'none';
+        st.lastPortalT = nowT + 2.0;
+      }
+    } else if (st.portalPhase === 'aim_orange') {
+      let aimDyaw = st.orangeAimYaw - this.yaw;
+      while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
+      while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
+      const aimDpitch = Math.abs(st.orangeAimPitch - this.pitch);
+      const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
+      const timedOut = nowT - st.orangeAimT > 0.45;
+
+      if (st.orangeSurface && (aligned || timedOut)) {
+        const pIdx = botPortalBase + 1;
+        const surface = st.orangeSurface;
+        const P = portals[pIdx];
+        P.placed = true;
+        P.c.copy(surface.c);
+        P.n.copy(surface.n);
+        P.r.copy(surface.r);
+        P.u.copy(surface.u);
+
+        if (onPortalPlaced) onPortalPlaced(pIdx, surface, surface.eyePos);
+
+        st.portalPhase = 'walk_thru';
+        st.lastPortalT = nowT;
+        st.walkThruT = nowT;
+      } else if (nowT - st.orangeAimT > 1.2) {
         st.portalPhase = 'none';
         st.lastPortalT = nowT + 3.0;
       }
-    } else if (nowT - st.blueAimT > 0.8) {
-      st.portalPhase = 'none';
-      st.lastPortalT = nowT + 2.0;
-    }
-  } else if (st.portalPhase === 'aim_orange') {
-    let aimDyaw = st.orangeAimYaw - pl.yaw;
-    while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
-    while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
-    const aimDpitch = Math.abs(st.orangeAimPitch - pl.pitch);
-    const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
-    const timedOut = nowT - st.orangeAimT > 0.45;
+    } else if (st.portalPhase === 'walk_thru') {
+      const bluePortal = portals[botPortalBase];
+      const orangePortal = portals[botPortalBase + 1];
 
-    if (st.orangeSurface && (aligned || timedOut)) {
-      const pIdx = botPortalBase + 1;
-      const surface = st.orangeSurface;
-      const P = portals[pIdx];
-      P.placed = true;
-      P.c.copy(surface.c);
-      P.n.copy(surface.n);
-      P.r.copy(surface.r);
-      P.u.copy(surface.u);
+      if (bluePortal.placed) {
+        st.targetPos = bluePortal.c.clone().addScaledVector(bluePortal.n, -0.6);
+        const portalBottomY = bluePortal.c.y - PORT_.hh;
+        if (this.pos.distanceTo(bluePortal.c) < 2.5 && portalBottomY > this.pos.y + 0.35) {
+          this.jumpBuf = nowT;
+        }
+      }
 
-      if (onPortalPlaced) onPortalPlaced(pIdx, surface, surface.eyePos);
+      const passedThrough = orangePortal.placed && this.pos.distanceTo(orangePortal.c) < 2.5 && (nowT - st.walkThruT > 0.25);
+      const reachedBlue = bluePortal.placed && this.pos.distanceTo(bluePortal.c) < 0.9;
+      const timedOut = nowT - st.walkThruT > 6.0;
 
-      st.portalPhase = 'walk_thru';
-      st.lastPortalT = nowT;
-      st.walkThruT = nowT;
-    } else if (nowT - st.orangeAimT > 1.2) {
-      st.portalPhase = 'none';
-      st.lastPortalT = nowT + 3.0;
-    }
-  } else if (st.portalPhase === 'walk_thru') {
-    const bluePortal = portals[botPortalBase];
-    const orangePortal = portals[botPortalBase + 1];
-
-    if (bluePortal.placed) {
-      st.targetPos = bluePortal.c.clone().addScaledVector(bluePortal.n, -0.6);
-      const portalBottomY = bluePortal.c.y - PORT_.hh;
-      if (pl.pos.distanceTo(bluePortal.c) < 2.5 && portalBottomY > pl.pos.y + 0.35) {
-        pl.jumpBuf = nowT;
+      if (passedThrough || reachedBlue || timedOut) {
+        st.portalPhase = 'none';
+        const route = pickBotTargetAndRoute(this.pos, portals, mapData);
+        st.targetPos = route.target;
+        st.waypoints = route.waypoints;
+        st.lastPortalT = nowT;
       }
     }
 
-    const passedThrough = orangePortal.placed && pl.pos.distanceTo(orangePortal.c) < 2.5 && (nowT - st.walkThruT > 0.25);
-    const reachedBlue = bluePortal.placed && pl.pos.distanceTo(bluePortal.c) < 0.9;
-    const timedOut = nowT - st.walkThruT > 6.0;
+    const jumpForLedge = !onRamp && heightDiffToTarget > 0.4 && heightDiffToTarget < 1.6 && dist < 3.5;
+    const shouldJump = this.grounded && !isTallWall && !onRamp && (
+      canStepOver ||
+      jumpForLedge ||
+      !hasGroundAhead(this.pos, this.yaw, obbs)
+    );
 
-    if (passedThrough || reachedBlue || timedOut) {
-      st.portalPhase = 'none';
-      const route = pickBotTargetAndRoute(pl.pos, portals);
-      st.targetPos = route.target;
-      st.waypoints = route.waypoints;
-      st.lastPortalT = nowT;
+    if (shouldJump && nowT - st.lastJumpT > JUMP_COOLDOWN_S) {
+      this.jumpBuf = nowT;
+      st.lastJumpT = nowT;
     }
-  }
 
-  const jumpForLedge = !onRamp && heightDiffToTarget > 0.4 && heightDiffToTarget < 1.6 && dist < 3.5;
-  const shouldJump = pl.grounded && !isTallWall && !onRamp && (
-    canStepOver ||
-    jumpForLedge ||
-    !hasGroundAhead(pl.pos, pl.yaw, obbs)
-  );
+    if (dist < 0.5 && st.portalPhase !== 'walk_thru' && (!st.waypoints || st.waypoints.length === 0)) {
+      keys.KeyW = false;
+    }
 
-  if (shouldJump && nowT - st.lastJumpT > JUMP_COOLDOWN_S) {
-    pl.jumpBuf = nowT;
-    st.lastJumpT = nowT;
-  }
-
-  if (dist < 0.5 && st.portalPhase !== 'walk_thru' && (!st.waypoints || st.waypoints.length === 0)) {
-    keys.KeyW = false;
-  }
-
-  return keys;
-}
-
-export function getBotPortalBase(pl) {
-  return (pl && pl.playerIndex === 0) ? 0 : 2;
-}
-
-export function resetBotState(pid) {
-  const st = botState.get(pid);
-  if (st) {
-    st.targetPos = null;
-    st.portalPhase = 'none';
-    st.rocketJumpPhase = 'none';
-    st.lastPortalT = Date.now() / 1000;
-    st.lastRocketT = -999;
-    st.lastRocketJumpT = -999;
-    st.lastInstagibT = -999;
-    st.lastWeaponSwapT = 0;
-    st.weaponHoldUntilT = 0;
-    st.stuckT = 0;
-    st.prevPos = null;
-    st.lastTickPos = null;
-    st.avoidUntilT = 0;
-    st.avoidYaw = 0;
-    st.blueSurface = null;
-    st.blueAimYaw = 0;
-    st.blueAimPitch = 0;
-    st.blueAimT = 0;
-    st.orangeSurface = null;
-    st.orangeAimYaw = 0;
-    st.orangeAimPitch = 0;
-    st.orangeAimT = 0;
-    st.unstuckUntilT = 0;
-    st.strafeDir = null;
-    st.instagibTargetPid = null;
-    st.instagibAimStartT = 0;
-    st.lastUnstuckT = 0;
-    st.waypoints = [];
-  }
-  if (gameState.players[pid]) {
-    gameState.players[pid].crouchT = 0;
+    return keys;
   }
 }
 
-export function removeBot(pid) {
-  botState.delete(pid);
-}
 
-export function cleanupBotPortals(pid, pl, portals) {
-  const base = getBotPortalBase(pl);
-  if (portals[base]) portals[base].placed = false;
-  if (portals[base + 1]) portals[base + 1].placed = false;
-}

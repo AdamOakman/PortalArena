@@ -6,8 +6,8 @@ import { WebSocketServer } from 'ws';
 import * as TH from 'three';
 import { CFG, PORT, TICK_RATE, MAX_PLAYERS, MAX_SPECTATORS } from '../../shared/constants.js';
 import { initPhysics } from '../../shared/physics.js';
-import { tickBot, removeBot, cleanupBotPortals, resetBotState, getBotPortalBase } from '../bots/BotAgent.js';
-import { MatchSession, isPortalOnDestroyedWall } from '../match/MatchSession.js';
+import { BotAgent } from '../bots/BotAgent.js';
+import { MatchSession } from '../match/MatchSession.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,15 +26,6 @@ const MIME_TYPES = {
 
 const SERVER_PASSWORD = 'secret';
 const BOT_COUNT = 2;
-
-const FUNNY_BOT_NAMES = [
-  'SirLagALot', 'AimBot9000', 'PotatoAim', 'GibMagnet', 'RocketClown',
-  'GlitchyMcFly', 'ToastLord', 'NoScopeGrandpa', 'OopsAllPortals', 'CampyMcCampface',
-  'CtrlAltDefeat', 'ByteMe', 'LavaEnthusiast', 'PanicJumper', 'YeetMaster',
-  'RoombaWithAGun', 'RubberBander', 'FragBait', 'DizzieRascal', 'WallHugger',
-  'PixelPusher', 'CaptainWhiff', 'SpawnCamper', 'BogoSort', 'Error404Skill',
-  'QuantumNoob', 'ClickHappy', 'Overclocker', 'PacketLoss', 'TriggerTroll'
-];
 
 const KILL_MSGS = [
   '{k} fragged {v}',
@@ -180,9 +171,7 @@ export class GameServer {
 
   pickFunnyBotName() {
     const existingNames = new Set(Object.values(this.gameState.players).map(p => p.name));
-    const available = FUNNY_BOT_NAMES.filter(n => !existingNames.has(n));
-    const pool = available.length > 0 ? available : FUNNY_BOT_NAMES;
-    return pool[Math.floor(Math.random() * pool.length)];
+    return BotAgent.generateName(existingNames);
   }
 
   addBot() {
@@ -193,28 +182,13 @@ export class GameServer {
     const spawnIdx = this.matchSession.pickSpawn(usedIdxs);
     const spawn = this.mapData.spawns[spawnIdx];
     const botName = this.pickFunnyBotName();
-    this.gameState.players[botId] = {
-      isBot: true,
+    this.gameState.players[botId] = new BotAgent({
+      botId,
       playerIndex,
       name: botName,
-      ws: null,
-      pos: new TH.Vector3(spawn.x, spawn.y, spawn.z),
-      vel: new TH.Vector3(),
-      yaw: 0,
-      pitch: 0,
-      grounded: false,
-      groundNormal: new TH.Vector3(0, 1, 0),
-      groundT: -1,
-      jumpBuf: -1,
-      maxSpeed: 0,
-      ping: 0,
-      shots: 0,
-      hits: 0,
-      inputBuffer: [],
-      spawnIdx,
-      activeWeapon: 1,
-      crouchT: 0,
-    };
+      spawn,
+      spawnIdx
+    });
     return botId;
   }
 
@@ -224,15 +198,14 @@ export class GameServer {
       const pid = pids[i];
       const pl = this.gameState.players[pid];
       if (pl.isBot) {
-        const base = getBotPortalBase(pl);
-        cleanupBotPortals(pid, pl, this.gameState.portals);
+        const base = pl.portalBaseIndex;
+        pl.cleanupPortals(this.gameState.portals);
         this.updatePair();
         [base, base + 1].forEach(pi => {
           this.broadcast(JSON.stringify({ type: 'portal_remove', pi }));
         });
         delete this.gameState.players[pid];
         delete this.match.ready[pid];
-        removeBot(pid);
         return pid;
       }
     }
@@ -305,7 +278,7 @@ export class GameServer {
         this.matchSession.placeAtSpawn(pl, this.matchSession.pickSpawn(avoid, opp ? opp.pos : null, 2));
 
         if (pl.isBot) {
-          resetBotState(victimId);
+          pl.resetAI();
         }
         const respawnMsg = JSON.stringify({
           type: 'respawn',
@@ -325,7 +298,7 @@ export class GameServer {
       p.isDead = false;
       p.vel.set(0, 0, 0);
       if (p.isBot) {
-        resetBotState(id);
+        p.resetAI();
       } else if (p.ws && p.ws.readyState === 1) {
         p.ws.send(JSON.stringify({
           type: 'map_change',
@@ -548,7 +521,7 @@ export class GameServer {
           for (const pid in this.gameState.players) {
             const p = this.gameState.players[pid];
             if (p.isBot) {
-              resetBotState(pid);
+              p.resetAI();
             } else if (pid !== playerId && p.ws && p.ws.readyState === 1) {
               p.ws.send(JSON.stringify({
                 type: 'map_change',
@@ -838,10 +811,10 @@ export class GameServer {
           pl.crouchT = Math.max(0, pl.crouchT - dt * 3);
         }
         if (!pl.isDead && this.match.phase !== 'countdown') {
-          lastKeys = tickBot(pid, pl, this.tpState.nowT, this.gameState.portals, PORT, {
+          lastKeys = pl.tick(this.tpState.nowT, this.matchSession, {
             onPortalPlaced: (pIdx, surface, eyePos) => {
               const P = this.gameState.portals[pIdx];
-              if (isPortalOnDestroyedWall(P.c, P.n, P.r, P.u, PORT)) {
+              if (this.matchSession.isPortalOnDestroyedWall(P.c, P.n, P.r, P.u, PORT)) {
                 P.placed = false;
                 return;
               }
@@ -870,7 +843,7 @@ export class GameServer {
             onFireInstagib: (pts, hitPlayerId, scorch) => {
               this.handleBotInstagib(pid, pts, hitPlayerId, scorch);
             }
-          });
+          }, PORT);
           autohop = true;
         } else {
           lastKeys = { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false };
