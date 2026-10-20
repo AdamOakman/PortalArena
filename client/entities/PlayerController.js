@@ -185,16 +185,37 @@ export class PlayerController extends Entity {
 
     const events = {
       onJump: () => {
-        AudioSys.jump();
+        if (typeof AudioSys.jump === 'function') {
+          AudioSys.jump();
+        } else {
+          AudioSys.tone(340, 520, 0.06, 'triangle', 0.04);
+        }
         if (this.engine?.eventBus) {
           this.engine.eventBus.emit('PLAYER_JUMPED');
+          this.engine.eventBus.emit('SOUND_JUMP');
         }
       },
       onLand: (spd) => {
-        AudioSys.land(spd);
-        if (G) G.landingThump = Math.min(1.0, spd / 18);
+        const vol = Math.min(1.0, spd / 18);
+        if (typeof AudioSys.land === 'function') {
+          AudioSys.land(spd);
+        } else {
+          AudioSys.tone(90, 45, 0.12, 'sine', vol);
+        }
+        if (G) G.landingThump = vol;
         if (this.engine?.eventBus) {
           this.engine.eventBus.emit('PLAYER_LANDED', { speed: spd });
+          this.engine.eventBus.emit('SOUND_LAND', { volume: vol });
+        }
+      },
+      onJumppad: () => {
+        if (typeof AudioSys.jumppad === 'function') {
+          AudioSys.jumppad();
+        } else {
+          AudioSys.tone(200, 600, 0.4, 'sine', 0.15);
+        }
+        if (this.engine?.eventBus) {
+          this.engine.eventBus.emit('SOUND_JUMPPAD');
         }
       },
       onTeleport: () => {

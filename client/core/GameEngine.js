@@ -152,9 +152,10 @@ export class GameEngine {
     const G = this.context;
     this.eventBus.emit('ENGINE_TICK', { dt });
 
+    if (this.matchState) this.matchState.update(dt);
+    if (this.weaponManager) this.weaponManager.update(dt);
+
     if (!G) {
-      this.matchState.update(dt);
-      this.weaponManager.update(dt);
       if (this.inputManager && this.player) {
         this.player.stepPhysics(dt, this.inputManager.keys, this.context);
       }

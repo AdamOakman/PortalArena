@@ -6,6 +6,7 @@ export class Weapon {
     this.name = name;
     this.cooldown = cooldown;
     this.cooldownTimer = 0;
+    this.lastFireTime = -999;
   }
 
   /**
@@ -15,6 +16,7 @@ export class Weapon {
   update(dt) {
     if (this.cooldownTimer > 0) {
       this.cooldownTimer -= dt;
+      if (this.cooldownTimer < 0) this.cooldownTimer = 0;
     }
   }
 
@@ -23,7 +25,13 @@ export class Weapon {
    * @returns {boolean}
    */
   canFire() {
-    return this.cooldownTimer <= 0;
+    if (this.cooldownTimer <= 0) return true;
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+    if (now - this.lastFireTime >= this.cooldown) {
+      this.cooldownTimer = 0;
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -31,6 +39,7 @@ export class Weapon {
    */
   triggerCooldown() {
     this.cooldownTimer = this.cooldown;
+    this.lastFireTime = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
   }
 
   /**

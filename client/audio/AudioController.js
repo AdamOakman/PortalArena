@@ -178,6 +178,16 @@ export const AudioSys = {
     this.noise(0.12, 0.22, delay, pos, { type: 'highpass', f0: 2500, f1: 1200, q: 0.8 });
     this.tone(2600, 180, 0.18, 'triangle', delay, 0.16, pos);
   },
+  jump(pos = null) {
+    this.tone(340, 520, 0.06, 'triangle', 0.04, 0, pos);
+  },
+  land(spd = 0, pos = null) {
+    const vol = Math.min(1.0, (typeof spd === 'number' ? spd : 4) / 18);
+    this.tone(90, 45, 0.12, 'sine', vol, 0, pos);
+  },
+  jumppad(pos = null) {
+    this.tone(200, 600, 0.4, 'sine', 0.15, 0, pos);
+  },
   toggleMute() {
     this.muted = !this.muted;
     return this.muted;
