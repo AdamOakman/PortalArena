@@ -40,7 +40,7 @@ import { initWeapons } from './weapons/WeaponManager.js';
 import { PlayerController } from './entities/PlayerController.js';
 import { InputManager } from './input/InputManager.js';
 import { LoadingScreen } from './ui/LoadingScreen.js';
-import { GameEngine, initLoop } from './core/GameEngine.js';
+import { GameEngine } from './core/GameEngine.js';
 
 /**
  * PortalClient — Root Application orchestrator and composition coordinator.
@@ -317,8 +317,9 @@ export class PortalClient {
    * @param {Object} G - Context
    */
   startLoop(G) {
-    this.loop = initLoop(G);
-    this.loop.start();
+    if (this.engine) {
+      this.engine.start();
+    }
 
     if (this.loading) {
       this.loading.markReady('map');
