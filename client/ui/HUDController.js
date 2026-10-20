@@ -288,14 +288,3 @@ export class HUDController {
     this.renderStats(match, statsOpen, localPid);
   }
 }
-
-export function initHUD(document) {
-  const controller = new HUDController(null);
-  void document;
-  return {
-    hudController: controller,
-    updateHUD: (state) => controller.updateHUD(state),
-    showCountdown: () => controller.showCountdown(),
-    cancelCountdown: () => controller.cancelCountdown()
-  };
-}

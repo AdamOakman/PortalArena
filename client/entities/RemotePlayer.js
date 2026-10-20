@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { Entity } from './Entity.js';
+import { CFG } from '../../shared/constants.js';
 
 /**
  * RemotePlayer — Entity representing an opponent human or bot in the arena.
  */
 export class RemotePlayer extends Entity {
   constructor(pid, data = {}) {
-    super('remote_player');
+    super(pid || 'remote_player');
     this.pid = pid;
     this.name = data.name || 'Player';
     this.playerIndex = data.playerIndex != null ? data.playerIndex : 0;
@@ -100,19 +101,110 @@ export class RemotePlayer extends Entity {
   }
 
   /**
-   * Smoothly interpolate position and orientation towards target.
+   * Smoothly interpolate position and orientation towards target, and synchronize visual mesh.
    * @param {number} dt
+   * @param {number} [nowT=0]
+   * @param {Object} [context=null]
    */
-  update(dt) {
+  update(dt, nowT = 0, context = null) {
     const lerpFactor = Math.min(1.0, dt * 20);
     this.position.lerp(this.targetPos, lerpFactor);
     this.pos[0] = this.position.x;
     this.pos[1] = this.position.y;
     this.pos[2] = this.position.z;
 
-    if (this.mesh) {
-      this.mesh.position.copy(this.position);
-      this.mesh.rotation.y = this.targetYaw;
+    this.updateVisuals(dt, nowT, context);
+  }
+
+  /**
+   * Synchronize 3D player mesh, head rotation, weapon viewmodel visibility, and animations.
+   * @param {number} dt
+   * @param {number} nowT
+   * @param {Object} [context=null]
+   */
+  updateVisuals(dt, nowT = 0, context = null) {
+    const G = context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    if (!G) return;
+
+    if (!this.mesh) {
+      let remoteIndex = (this.playerIndex !== undefined)
+        ? this.playerIndex
+        : (G.match && G.match.players[this.pid] ? G.match.players[this.pid].index : (1 - G.localPlayerIndex));
+      if (remoteIndex < 0) remoteIndex = 0;
+      const remoteColor = remoteIndex === 0 ? 0x33ff33 : 0xff3333;
+      const mesh = G.createPlayerModel(remoteColor, 0);
+      G.scene.add(mesh);
+      if (G.remotePlayerMeshes) G.remotePlayerMeshes[this.pid] = mesh;
+      this.mesh = mesh;
+    }
+
+    const m = this.mesh;
+    if (this.predictedDeadUntil && nowT < this.predictedDeadUntil) {
+      this.isDead = true;
+    }
+
+    const isTargetFollowPOV = G.isSpectator && G.spectatorMode === 'follow' && G.spectateTargetPid === this.pid && G.followPerspective === 'pov' && !this.isDead;
+    if (!isTargetFollowPOV && this.viewOffset) {
+      const id = new THREE.Quaternion();
+      this.viewOffset.slerp(id, Math.min(1, dt * 5));
+      if (this.viewOffset.angleTo(id) < 0.001) this.viewOffset = null;
+    }
+
+    m.visible = !this.isDead && !isTargetFollowPOV;
+    m.position.set(this.pos[0], this.pos[1], this.pos[2]);
+    m.rotation.y = this.yaw;
+
+    const rpCT = this.crouchT || 0;
+    if (m.userData.smoothCrouchT === undefined) {
+      m.userData.smoothCrouchT = rpCT;
+    } else {
+      m.userData.smoothCrouchT += (rpCT - m.userData.smoothCrouchT) * Math.min(1, dt * 14);
+    }
+
+    const cT = m.userData.smoothCrouchT;
+    const rpBody = m.children.find(c => c.name === 'bodyMesh');
+    if (rpBody) {
+      rpBody.scale.y = 1 - cT * 0.4;
+      rpBody.position.y = -cT * 0.25;
+    }
+
+    if (m.userData.headGroup) {
+      m.userData.headGroup.rotation.x = this.pitch;
+      m.userData.headGroup.position.y = (CFG.H - (CFG.H - CFG.CROUCH_H) * cT) - 0.12;
+    }
+
+    if (m.userData.mirrorGun) {
+      m.userData.mirrorGun.visible = (this.activeWeapon === 1 || !this.activeWeapon);
+      m.userData.mirrorRocketGun.visible = (this.activeWeapon === 2);
+      if (m.userData.mirrorInstagibGun) m.userData.mirrorInstagibGun.visible = (this.activeWeapon === 3);
+    }
+
+    if (m.userData.muzzleT !== undefined) {
+      m.userData.muzzleT = Math.max(0, m.userData.muzzleT - dt * 6);
+      const mt = m.userData.muzzleT;
+      const rScale = 1 + mt * 0.12;
+      const rZ = -0.5 + mt * 0.15;
+      const rRot = mt * 0.3;
+      m.userData.mirrorGun.scale.setScalar(1);
+      m.userData.mirrorGun.position.z = -0.5;
+      m.userData.mirrorGun.rotation.x = 0;
+      m.userData.mirrorRocketGun.scale.setScalar(1);
+      m.userData.mirrorRocketGun.position.z = -0.5;
+      m.userData.mirrorRocketGun.rotation.x = 0;
+      if (m.userData.mirrorInstagibGun) {
+        m.userData.mirrorInstagibGun.scale.setScalar(1);
+        m.userData.mirrorInstagibGun.position.z = -0.5;
+        m.userData.mirrorInstagibGun.rotation.x = 0;
+      }
+      const aw = this.activeWeapon || 1;
+      const activeMir = aw === 1 ? m.userData.mirrorGun : (aw === 2 ? m.userData.mirrorRocketGun : m.userData.mirrorInstagibGun);
+      if (activeMir) {
+        activeMir.scale.setScalar(rScale);
+        activeMir.position.z = rZ;
+        activeMir.rotation.x = rRot;
+      }
+    } else {
+      m.userData.muzzleT = 0;
     }
   }
 

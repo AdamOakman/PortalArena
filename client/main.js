@@ -32,13 +32,13 @@ import { initPhysics } from '../shared/physics.js';
 import { initEngine } from './rendering/RenderManager.js';
 import { initTextures } from './rendering/TextureFactory.js';
 import { initModels } from './rendering/ModelFactory.js';
-import { initHUD } from './ui/HUDController.js';
+import { HUDController } from './ui/HUDController.js';
 import { initNetwork, onMessage, onNetworkClose } from './network/NetworkManager.js';
 import { initWorld } from './world/WorldManager.js';
 import { initPortalRendering, initPortals } from './portals/PortalManager.js';
 import { initWeapons } from './weapons/WeaponManager.js';
-import { initPlayers } from './entities/PlayerController.js';
-import { initInput } from './input/InputManager.js';
+import { PlayerController } from './entities/PlayerController.js';
+import { InputManager } from './input/InputManager.js';
 import { LoadingScreen } from './ui/LoadingScreen.js';
 import { GameEngine, initLoop } from './core/GameEngine.js';
 
@@ -207,12 +207,56 @@ export class PortalClient {
     G.menuPanel = G.dom('menupanel');
     G.winPanel = G.dom('winpanel');
 
-    // World geometry, portals, weapons, players, input
+    // World geometry, portals, weapons
     initWorld(G);
     initPortals(G);
     initWeapons(G);
-    initPlayers(G);
-    initInput(G);
+
+    // Player subsystem
+    const playerController = new PlayerController(G.engine || null);
+    G.playerController = playerController;
+    G.pl = {
+      pos: playerController.position,
+      vel: playerController.velocity,
+      yaw: 0,
+      pitch: 0,
+      viewOffset: null,
+      grounded: false,
+      groundNormal: new G.V3(0, 1, 0),
+      groundT: -1,
+      jumpBuf: -1,
+      cp: new G.V3(),
+      maxSpeed: 0,
+      crouchT: 0
+    };
+    G.grabCubes = G.grabCubes || [];
+    G.grabbedCube = G.grabbedCube || null;
+    G.remotePlayers = G.remotePlayers || {};
+    G.remotePlayerMeshes = G.remotePlayerMeshes || {};
+    playerController.initModel(G);
+
+    G.physStep = (dt, activeKeys) => playerController.stepPhysics(dt, activeKeys, G);
+    G.collideCube = (c, radius) => G.physics.collideCube(c, G.obbs, G.portals, radius);
+    G.resolveCubeCollisions = () => G.physics.resolveCubeCollisions(G.grabCubes, G.grabbedCube);
+    G.die = (killerId, viaPortal, cause, shotOrigin) => playerController.die(killerId, viaPortal, cause, shotOrigin, G);
+    G.updateRemotePlayers = (dt, nowT) => {
+      if (G.engine?.entityManager) {
+        G.engine.entityManager.updateRemotePlayers(dt, nowT, G);
+      } else {
+        for (const pid in G.remotePlayers) {
+          const rp = G.remotePlayers[pid];
+          if (rp && rp.updateVisuals) rp.updateVisuals(dt, nowT, G);
+        }
+      }
+    };
+    G.updateLocalView = (dt, now) => playerController.updateLocalView(dt, now, G);
+
+    // Input subsystem
+    G.inputManager = new InputManager(G.engine || null, G.canvas, G);
+    G.keys = G.inputManager.keys;
+    G.requestLock = () => G.inputManager.requestPointerLock();
+    G.addEventLog = (msg, hot) => G.inputManager.addEventLog(msg, hot);
+    G.showSummary = () => G.inputManager.showSummary();
 
     // Portal rendering pipeline
     const innerW = typeof window !== 'undefined' ? window.innerWidth : 800;
@@ -244,7 +288,11 @@ export class PortalClient {
     );
 
     // HUD
-    Object.assign(G, initHUD(document));
+    G.hudController = new HUDController(G.engine || null);
+    G.hud = G.hudController.hud;
+    G.updateHUD = (state) => G.hudController.updateHUD(state);
+    G.showCountdown = () => G.hudController.showCountdown();
+    G.cancelCountdown = () => G.hudController.cancelCountdown();
 
     // Network manager
     G.Network = initNetwork({

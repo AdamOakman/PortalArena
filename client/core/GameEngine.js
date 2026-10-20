@@ -33,6 +33,9 @@ export class GameEngine {
     this.hudController = context?.hudController || new HUDController(this);
 
     this.entityManager = new EntityManager(this);
+    if (context) {
+      context.entityManager = this.entityManager;
+    }
     this.player = context?.playerController || new PlayerController(this);
     this.entityManager.spawn(this.player);
 

@@ -1,35 +1,34 @@
 import { AudioSys } from '../audio/AudioController.js';
 
 function defaultServer() {
-  return window.location.hostname + ':3001';
+  return typeof window !== 'undefined' ? (window.location.hostname + ':3001') : 'localhost:3001';
 }
 
 /**
  * InputManager — Translates hardware mouse and keyboard events into semantic game actions and commands.
  */
 export class InputManager {
-  constructor(engine, canvas) {
+  /**
+   * @param {import('../core/GameEngine.js').GameEngine} [engine]
+   * @param {HTMLCanvasElement} [canvas]
+   * @param {Object} [context]
+   */
+  constructor(engine = null, canvas = null, context = null) {
     this.engine = engine;
     this.canvas = canvas;
+    this.context = context || engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
 
-    const G = engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
-    this.keys = G?.keys || {};
+    this.keys = this.context?.keys || {};
     this.pointerLocked = false;
     this.sensitivity = 0.0023;
 
-    if (!G) {
-      this._setupListeners();
+    if (this.context) {
+      this.context.keys = this.keys;
+      this.context.inputManager = this;
     }
-  }
 
-  _setupListeners() {
-    window.addEventListener('keydown', (e) => this._onKeyDown(e));
-    window.addEventListener('keyup', (e) => this._onKeyUp(e));
-    document.addEventListener('mousemove', (e) => this._onMouseMove(e));
-    document.addEventListener('pointerlockchange', () => this._onPointerLockChange());
-    if (this.canvas) {
-      this.canvas.addEventListener('click', () => this.requestPointerLock());
-    }
+    this._setupListeners();
+    this._setupPanelListeners();
   }
 
   requestPointerLock() {
@@ -39,99 +38,384 @@ export class InputManager {
   }
 
   exitPointerLock() {
-    if (document.exitPointerLock) {
+    if (typeof document !== 'undefined' && document.exitPointerLock) {
       document.exitPointerLock();
     }
   }
 
-  _onPointerLockChange() {
-    this.pointerLocked = document.pointerLockElement === this.canvas;
-    if (this.engine && this.engine.eventBus) {
-      this.engine.eventBus.emit('POINTER_LOCK_CHANGED', { locked: this.pointerLocked });
+  _setupListeners() {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+
+    document.addEventListener('pointerlockchange', () => {
+      this.pointerLocked = document.pointerLockElement === this.canvas;
+      if (this.context) this.context.pointerLocked = this.pointerLocked;
+
+      const menuPanel = this.context?.menuPanel || document.getElementById('menupanel');
+      if (menuPanel) {
+        if (this.pointerLocked) {
+          menuPanel.classList.add('hidden');
+        } else {
+          const switchBtn = this.context?.dom ? this.context.dom('btnswitchmode') : document.getElementById('btnswitchmode');
+          if (switchBtn) {
+            switchBtn.textContent = this.context?.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
+          }
+        }
+      }
+
+      if (this.engine?.eventBus) {
+        this.engine.eventBus.emit('POINTER_LOCK_CHANGED', { locked: this.pointerLocked });
+      }
+    });
+
+    if (this.canvas) {
+      this.canvas.addEventListener('click', () => {
+        AudioSys.ensure();
+        const G = this.context;
+        if (G && G.started && !this.pointerLocked && !G.won) {
+          this.requestPointerLock();
+        }
+      });
     }
+
+    document.addEventListener('mousemove', (e) => {
+      if (!this.pointerLocked || (this.canvas && document.pointerLockElement !== this.canvas)) return;
+      if (Math.abs(e.movementX) > 100 || Math.abs(e.movementY) > 100) return;
+
+      const G = this.context;
+      const fov = G?.camera?.fov || 115;
+      const baseFov = G?.baseFov || 115;
+      const sens = this.sensitivity * (fov / baseFov);
+
+      if (G && G.isSpectator) {
+        if (G.spectatorMode === 'freefly') {
+          G.specYaw -= e.movementX * sens;
+          G.specPitch = Math.max(-1.55, Math.min(1.55, G.specPitch - e.movementY * sens));
+        }
+        return;
+      }
+
+      if (G && G.pl) {
+        G.pl.yaw -= e.movementX * sens;
+        G.pl.pitch = Math.max(-1.55, Math.min(1.55, G.pl.pitch - e.movementY * sens));
+      } else if (this.engine?.player) {
+        this.engine.player.yaw -= e.movementX * sens;
+        this.engine.player.pitch = Math.max(-1.55, Math.min(1.55, this.engine.player.pitch - e.movementY * sens));
+      }
+    });
+
+    document.addEventListener('mousedown', (e) => {
+      if (!this.pointerLocked) return;
+      const G = this.context;
+      if (G && G.won) return;
+      AudioSys.ensure();
+
+      if (G && G.isSpectator) {
+        if (e.button === 0 && G.cycleSpectatorTarget) {
+          G.cycleSpectatorTarget(1);
+        } else if (e.button === 2 && G.toggleFollowPerspective) {
+          G.toggleFollowPerspective();
+        }
+        return;
+      }
+
+      if (G && (G.isDead || G.countdownActive || (G.match && G.match.phase === 'countdown'))) return;
+
+      if (e.button === 0) {
+        if (G && G.grabbedCube && G.camera && G.TH) {
+          const dir = new G.TH.Vector3(0, 0, -1).applyQuaternion(G.camera.quaternion).normalize();
+          G.grabbedCube.vel.copy(dir).multiplyScalar(22).add(G.pl.vel);
+          G.grabbedCube.rotVel.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(15);
+          if (G.Network?.send) {
+            G.Network.send({
+              type: 'throw_cube',
+              idx: G.grabCubes.indexOf(G.grabbedCube),
+              pos: G.grabbedCube.pos.toArray(),
+              vel: G.grabbedCube.vel.toArray()
+            });
+          }
+          G.grabbedCube = null;
+        } else if (G) {
+          if (G.activeWeapon === 1 && G.firePortal) G.firePortal(G.localPlayerIndex * 2);
+          else if (G.activeWeapon === 2 && G.fireRocket) G.fireRocket();
+          else if (G.activeWeapon === 3 && G.fireInstagib) G.fireInstagib();
+        }
+      } else if (e.button === 2) {
+        if (G) {
+          if (G.activeWeapon === 1 && !G.grabbedCube && G.firePortal) {
+            G.firePortal(G.localPlayerIndex * 2 + 1);
+          } else if (G.activeWeapon === 2 || G.activeWeapon === 3) {
+            G.isZooming = true;
+          }
+        }
+      }
+    });
+
+    document.addEventListener('mouseup', (e) => {
+      if (e.button === 2 && this.context) {
+        this.context.isZooming = false;
+      }
+    });
+
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    document.addEventListener('wheel', (e) => {
+      const G = this.context;
+      if (!this.pointerLocked || !G || G.won || !G.started) return;
+      if (G.isSpectator) {
+        if (G.cycleSpectatorTarget) G.cycleSpectatorTarget(e.deltaY > 0 ? 1 : -1);
+        return;
+      }
+      G.activeWeapon = (G.activeWeapon === 1) ? 2 : 1;
+      if (G.gun && G.rocketGun) {
+        if (G.activeWeapon === 1) {
+          G.gun.visible = true;
+          G.rocketGun.visible = false;
+        } else {
+          G.gun.visible = false;
+          G.rocketGun.visible = true;
+        }
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      const G = this.context;
+      if (e.code === 'Enter') {
+        const startPanel = G?.startPanel || document.getElementById('startpanel');
+        if (G && !G.started && startPanel && !startPanel.classList.contains('hidden')) {
+          const btn = G.dom ? G.dom('btnstart') : document.getElementById('btnstart');
+          if (btn) btn.click();
+          return;
+        }
+      }
+
+      if (e.target && e.target.tagName === 'INPUT') return;
+
+      const c = e.code;
+      if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyJ', 'ControlLeft', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) {
+        e.preventDefault();
+      }
+
+      this.keys[c] = true;
+      if (c === 'Tab') {
+        e.preventDefault();
+        if (G) G.statsOpen = G.started;
+      }
+
+      if (!G || !G.started) return;
+
+      if (c === 'KeyJ' && !e.repeat) {
+        if (G.isSpectator && G.requestJoin) {
+          G.requestJoin();
+          return;
+        }
+      }
+
+      if (c === 'KeyF') this.toggleFullscreen();
+
+      if (c === 'Escape') {
+        if (!G.won) {
+          const menuPanel = G.menuPanel || document.getElementById('menupanel');
+          if (menuPanel) {
+            menuPanel.classList.toggle('hidden');
+            const switchBtn = G.dom ? G.dom('btnswitchmode') : document.getElementById('btnswitchmode');
+            if (switchBtn) switchBtn.textContent = G.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
+          }
+        }
+      }
+
+      if (c === 'KeyM') {
+        AudioSys.toggleMute();
+        const muteInf = G.dom ? G.dom('muteinf') : document.getElementById('muteinf');
+        if (muteInf) muteInf.textContent = AudioSys.muted ? 'off' : 'on';
+        this.syncMuteBtn();
+      }
+
+      if (c === 'BracketLeft') this.setFov((G.baseFov || 115) - 5);
+      if (c === 'BracketRight') this.setFov((G.baseFov || 115) + 5);
+
+      if (G.isSpectator || G.isDead) return;
+
+      if (c === 'Digit1') {
+        G.activeWeapon = 1;
+        if (G.gun) G.gun.visible = true;
+        if (G.rocketGun) G.rocketGun.visible = false;
+        if (G.instagibGun) G.instagibGun.visible = false;
+      }
+      if (c === 'Digit2') {
+        G.activeWeapon = 2;
+        if (G.gun) G.gun.visible = false;
+        if (G.rocketGun) G.rocketGun.visible = true;
+        if (G.instagibGun) G.instagibGun.visible = false;
+      }
+      if (c === 'Digit3') {
+        G.activeWeapon = 3;
+        if (G.gun) G.gun.visible = false;
+        if (G.rocketGun) G.rocketGun.visible = false;
+        if (G.instagibGun) G.instagibGun.visible = true;
+      }
+
+      if (G.countdownActive || (G.match && G.match.phase === 'countdown')) {
+        if (['Space', 'KeyE'].includes(c)) return;
+      }
+
+      if (c === 'Space' && G.pl) {
+        G.pl.jumpBuf = G.nowT;
+      }
+
+      if (c === 'KeyR' && !e.repeat) {
+        if (G.match && (G.match.phase === 'warmup' || G.match.phase === 'waiting')) {
+          G.localReady = !G.localReady;
+          if (G.Network?.send) {
+            G.Network.send({ type: 'ready', ready: G.localReady });
+          }
+        }
+      }
+
+      if (c === 'KeyN' && G.newMap) {
+        G.newMap(String(Math.floor(Math.random() * 1e9)));
+      }
+
+      if (c === 'KeyE' && G.camera && G.TH) {
+        if (G.grabbedCube) {
+          G.grabbedCube.vel.copy(G.pl.vel);
+          G.grabbedCube = null;
+        } else if (G.grabCubes) {
+          G.camera.updateMatrixWorld(true);
+          const pos = G.camera.getWorldPosition(new G.TH.Vector3());
+          const dir = new G.TH.Vector3(0, 0, -1).applyQuaternion(G.camera.quaternion).normalize();
+          let bestC = null, bestT = 7.0;
+          for (const cb of G.grabCubes) {
+            const v = cb.pos.clone().sub(pos);
+            const dist = v.length();
+            if (dist > 7.0) continue;
+            v.normalize();
+            if (v.dot(dir) > 0.9 && dist < bestT) {
+              bestT = dist;
+              bestC = cb;
+            }
+          }
+          if (bestC) G.grabbedCube = bestC;
+        }
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      this.keys[e.code] = false;
+      if (e.code === 'Tab' && this.context) {
+        this.context.statsOpen = false;
+      }
+    });
   }
 
-  _onMouseMove(e) {
-    if (!this.pointerLocked) return;
-    if (Math.abs(e.movementX) > 100 || Math.abs(e.movementY) > 100) return;
+  _setupPanelListeners() {
+    const G = this.context;
+    if (!G || typeof document === 'undefined') return;
 
-    if (this.engine && this.engine.eventBus) {
-      this.engine.eventBus.emit('INPUT_LOOK', {
-        dx: e.movementX * this.sensitivity,
-        dy: e.movementY * this.sensitivity
+    const fovSlider = G.dom ? G.dom('fovslider') : document.getElementById('fovslider');
+    const fovSlider2 = G.dom ? G.dom('fovslider2') : document.getElementById('fovslider2');
+    if (fovSlider) fovSlider.addEventListener('input', (e) => this.setFov(+e.target.value));
+    if (fovSlider2) fovSlider2.addEventListener('input', (e) => this.setFov(+e.target.value));
+
+    const btnMute = G.dom ? G.dom('btnmute') : document.getElementById('btnmute');
+    if (btnMute) {
+      btnMute.addEventListener('click', () => {
+        AudioSys.toggleMute();
+        this.syncMuteBtn();
+      });
+    }
+
+    const btnFs = G.dom ? G.dom('btnfs') : document.getElementById('btnfs');
+    if (btnFs) btnFs.addEventListener('click', () => this.toggleFullscreen());
+
+    const ipInput = G.dom ? G.dom('ipinput') : document.getElementById('ipinput');
+    if (ipInput) ipInput.placeholder = defaultServer();
+
+    ['click', 'keydown', 'pointerdown'].forEach((evt) => {
+      window.addEventListener(evt, () => AudioSys.ensure(), { passive: true });
+    });
+
+    const btnStart = G.dom ? G.dom('btnstart') : document.getElementById('btnstart');
+    if (btnStart) {
+      btnStart.addEventListener('click', () => {
+        AudioSys.ensure();
+        const ipIn = document.getElementById('ipinput');
+        const passIn = document.getElementById('passinput');
+        const nameIn = document.getElementById('nameinput');
+        const ip = (ipIn && ipIn.value.trim()) ? ipIn.value.trim() : defaultServer();
+        const pass = (passIn && passIn.value.trim()) ? passIn.value.trim() : 'secret';
+        const name = (nameIn && nameIn.value.trim()) ? nameIn.value.trim() : 'Guest';
+
+        G.lastIp = ip;
+        G.lastPass = pass;
+        G.lastName = name;
+        if (G.startConnection) {
+          G.startConnection(ip, pass, name);
+        } else if (G.Network?.connect) {
+          G.Network.connect(ip, pass, name);
+        }
+      });
+    }
+
+    const cancelBtn = document.getElementById('connect-overlay-cancel');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        if (G.onConnectionTimeout) G.onConnectionTimeout('Connection cancelled');
+      });
+    }
+
+    const btnResume = G.dom ? G.dom('btnresume') : document.getElementById('btnresume');
+    if (btnResume) {
+      btnResume.addEventListener('click', () => {
+        AudioSys.ensure();
+        this.requestPointerLock();
+      });
+    }
+
+    const switchBtn = G.dom ? G.dom('btnswitchmode') : document.getElementById('btnswitchmode');
+    if (switchBtn) {
+      switchBtn.addEventListener('click', () => {
+        if (G.isSpectator) {
+          if (G.requestJoin) G.requestJoin();
+        } else {
+          if (G.requestSpectate) G.requestSpectate();
+        }
+        const menuPanel = G.menuPanel || document.getElementById('menupanel');
+        if (menuPanel) menuPanel.classList.add('hidden');
+        this.requestPointerLock();
+      });
+    }
+
+    const btnNewMap = G.dom ? G.dom('btnnewmap') : document.getElementById('btnnewmap');
+    if (btnNewMap) {
+      btnNewMap.addEventListener('click', () => {
+        const seedInput = G.dom ? G.dom('seedinput2') : document.getElementById('seedinput2');
+        const s = (seedInput && seedInput.value.trim()) || String(Math.floor(Math.random() * 1e9));
+        if (G.newMap) G.newMap(s);
+      });
+    }
+
+    const btnAgain = G.dom ? G.dom('btnagain') : document.getElementById('btnagain');
+    if (btnAgain) {
+      btnAgain.addEventListener('click', () => {
+        if (G.newMap) G.newMap(String(Math.floor(Math.random() * 1e9)));
+      });
+    }
+
+    const btnSame = G.dom ? G.dom('btnsame') : document.getElementById('btnsame');
+    if (btnSame) {
+      btnSame.addEventListener('click', () => {
+        if (G.Network?.send) {
+          G.Network.send({ type: 'new_map', seed: G.currentSeed });
+        }
+        const winPanel = G.winPanel || document.getElementById('winpanel');
+        if (winPanel) winPanel.classList.add('hidden');
+        this.requestPointerLock();
       });
     }
   }
 
-  _onKeyDown(e) {
-    this.keys[e.code] = true;
-
-    // Disregard game hotkeys if typing in an input field
-    if (e.target && e.target.tagName === 'INPUT') return;
-
-    const bus = this.engine ? this.engine.eventBus : null;
-    if (!bus) return;
-
-    switch (e.code) {
-      case 'Digit1':
-        bus.emit('INPUT_SWITCH_WEAPON', { slot: 1 });
-        break;
-      case 'Digit2':
-        bus.emit('INPUT_SWITCH_WEAPON', { slot: 2 });
-        break;
-      case 'Digit3':
-        bus.emit('INPUT_SWITCH_WEAPON', { slot: 3 });
-        break;
-      case 'KeyR':
-        bus.emit('INPUT_READY');
-        break;
-      case 'KeyJ':
-        bus.emit('INPUT_TOGGLE_JOIN');
-        break;
-      case 'KeyN':
-        bus.emit('INPUT_NEW_MAP');
-        break;
-      case 'KeyE':
-        bus.emit('INPUT_GRAB_CUBE');
-        break;
-      case 'Tab':
-        e.preventDefault();
-        bus.emit('INPUT_SCOREBOARD', { open: true });
-        break;
-      case 'Escape':
-        bus.emit('INPUT_PAUSE');
-        break;
-    }
-  }
-
-  _onKeyUp(e) {
-    this.keys[e.code] = false;
-
-    if (e.code === 'Tab' && this.engine && this.engine.eventBus) {
-      this.engine.eventBus.emit('INPUT_SCOREBOARD', { open: false });
-    }
-  }
-
-  isKeyDown(code) {
-    return !!this.keys[code];
-  }
-
-  destroy() {
-    this.exitPointerLock();
-  }
-}
-
-export function initInput(G) {
-  const { camera } = G;
-
-  const inputManager = G.inputManager || new InputManager(G.engine || null, G.canvas);
-  G.inputManager = inputManager;
-
-  G.keys = inputManager.keys || {};
-  let pointerLocked = false;
-  const menuPanel = G.menuPanel, winPanel = G.winPanel;
-
-  function addEventLog(msg, hot) {
+  addEventLog(msg, hot = false) {
+    if (typeof document === 'undefined') return;
     const logDiv = document.getElementById('eventlog');
     if (!logDiv) return;
     const el = document.createElement('div');
@@ -146,290 +430,63 @@ export function initInput(G) {
     }, 15000);
   }
 
-  function requestLock() {
-    if (G.canvas && G.canvas.requestPointerLock) {
-      G.canvas.requestPointerLock();
-    }
-  }
-
-  document.addEventListener('pointerlockchange', () => {
-    pointerLocked = document.pointerLockElement === G.canvas;
-    G.pointerLocked = pointerLocked;
-    if (pointerLocked) {
-      menuPanel.classList.add('hidden');
-    } else {
-      const switchBtn = G.dom('btnswitchmode');
-      if (switchBtn) switchBtn.textContent = G.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
-    }
-  });
-
-  G.canvas.addEventListener('click', () => {
-    AudioSys.ensure();
-    if (G.started && !pointerLocked && !G.won) requestLock();
-  });
-
-  document.addEventListener('mousemove', e => {
-    if (!pointerLocked || document.pointerLockElement !== G.canvas) return;
-    if (Math.abs(e.movementX) > 100 || Math.abs(e.movementY) > 100) return;
-    const sens = 0.0023 * (camera.fov / G.baseFov);
-    if (G.isSpectator) {
-      if (G.spectatorMode === 'freefly') {
-        G.specYaw -= e.movementX * sens;
-        G.specPitch = Math.max(-1.55, Math.min(1.55, G.specPitch - e.movementY * sens));
-      }
-      return;
-    }
-    G.pl.yaw -= e.movementX * sens;
-    G.pl.pitch = Math.max(-1.55, Math.min(1.55, G.pl.pitch - e.movementY * sens));
-  });
-
-  document.addEventListener('mousedown', e => {
-    if (!pointerLocked || G.won) return;
-    AudioSys.ensure();
-    if (G.isSpectator) {
-      if (e.button === 0) {
-        G.cycleSpectatorTarget(1);
-      } else if (e.button === 2) {
-        G.toggleFollowPerspective();
-      }
-      return;
-    }
-    if (G.isDead) return;
-    if (G.countdownActive || (G.match && G.match.phase === 'countdown')) return;
-    if (e.button === 0) {
-      if (G.grabbedCube) {
-        const dir = new G.TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-        G.grabbedCube.vel.copy(dir).multiplyScalar(22).add(G.pl.vel);
-        G.grabbedCube.rotVel.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(15);
-        G.Network.send({
-          type: 'throw_cube',
-          idx: G.grabCubes.indexOf(G.grabbedCube),
-          pos: G.grabbedCube.pos.toArray(),
-          vel: G.grabbedCube.vel.toArray()
-        });
-        G.grabbedCube = null;
-      } else {
-        if (G.activeWeapon === 1) G.firePortal(G.localPlayerIndex * 2);
-        else if (G.activeWeapon === 2) G.fireRocket();
-        else if (G.activeWeapon === 3) G.fireInstagib();
-      }
-    } else if (e.button === 2) {
-      if (G.activeWeapon === 1 && !G.grabbedCube) G.firePortal(G.localPlayerIndex * 2 + 1);
-      else if (G.activeWeapon === 2 || G.activeWeapon === 3) G.isZooming = true;
-    }
-  });
-
-  document.addEventListener('mouseup', e => {
-    if (e.button === 2) G.isZooming = false;
-  });
-  document.addEventListener('contextmenu', e => e.preventDefault());
-
-  document.addEventListener('wheel', (e) => {
-    if (!pointerLocked || G.won || !G.started) return;
-    if (G.isSpectator) {
-      G.cycleSpectatorTarget(e.deltaY > 0 ? 1 : -1);
-      return;
-    }
-    G.activeWeapon = (G.activeWeapon === 1) ? 2 : 1;
-    if (G.activeWeapon === 1) {
-      G.gun.visible = true; G.rocketGun.visible = false;
-    } else {
-      G.gun.visible = false; G.rocketGun.visible = true;
-    }
-  });
-
-  document.addEventListener('keydown', e => {
-    if (e.code === 'Enter') {
-      if (!G.started && !G.dom('startpanel').classList.contains('hidden')) {
-        G.dom('btnstart').click();
-        return;
-      }
-    }
-    if (e.target.tagName === 'INPUT') return;
-    const c = e.code;
-    if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyJ', 'ControlLeft', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) e.preventDefault();
-    G.keys[c] = true;
-    if (c === 'Tab') { e.preventDefault(); G.statsOpen = G.started; }
-    if (!G.started) return;
-
-    if (c === 'KeyJ' && !e.repeat) {
-      if (G.isSpectator) {
-        G.requestJoin();
-        return;
-      }
-    }
-
-    if (c === 'KeyF') toggleFullscreen();
-    if (c === 'Escape') {
-      if (!G.won) {
-        menuPanel.classList.toggle('hidden');
-        const switchBtn = G.dom('btnswitchmode');
-        if (switchBtn) switchBtn.textContent = G.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
-      }
-    }
-    if (c === 'KeyM') {
-      AudioSys.toggleMute();
-      G.dom('muteinf').textContent = AudioSys.muted ? 'off' : 'on';
-      syncMuteBtn();
-    }
-    if (c === 'BracketLeft') setFov(G.baseFov - 5);
-    if (c === 'BracketRight') setFov(G.baseFov + 5);
-
-    if (G.isSpectator || G.isDead) return;
-
-    if (c === 'Digit1') { G.activeWeapon = 1; G.gun.visible = true; G.rocketGun.visible = false; G.instagibGun.visible = false; }
-    if (c === 'Digit2') { G.activeWeapon = 2; G.gun.visible = false; G.rocketGun.visible = true; G.instagibGun.visible = false; }
-    if (c === 'Digit3') { G.activeWeapon = 3; G.gun.visible = false; G.rocketGun.visible = false; G.instagibGun.visible = true; }
-    if (G.countdownActive || (G.match && G.match.phase === 'countdown')) {
-      if (['Space', 'KeyE'].includes(c)) return;
-    }
-    if (c === 'Space') G.pl.jumpBuf = G.nowT;
-
-    if (c === 'KeyR' && !e.repeat) {
-      if (G.match && (G.match.phase === 'warmup' || G.match.phase === 'waiting')) {
-        G.localReady = !G.localReady;
-        G.Network.send({ type: 'ready', ready: G.localReady });
-      }
-    }
-    if (c === 'KeyN') G.newMap(String(Math.floor(Math.random() * 1e9)));
-    if (c === 'KeyE') {
-      if (G.grabbedCube) {
-        G.grabbedCube.vel.copy(G.pl.vel);
-        G.grabbedCube = null;
-      } else {
-        camera.updateMatrixWorld(true);
-        const pos = camera.getWorldPosition(new G.TH.Vector3());
-        const dir = new G.TH.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-        let bestC = null, bestT = 7.0;
-        for (const cb of G.grabCubes) {
-          const v = cb.pos.clone().sub(pos);
-          const dist = v.length();
-          if (dist > 7.0) continue;
-          v.normalize();
-          if (v.dot(dir) > 0.9) {
-            if (dist < bestT) { bestT = dist; bestC = cb; }
-          }
-        }
-        if (bestC) G.grabbedCube = bestC;
-      }
-    }
-  });
-
-  document.addEventListener('keyup', e => {
-    G.keys[e.code] = false;
-    if (e.code === 'Tab') G.statsOpen = false;
-  });
-
-  function toggleFullscreen() {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
-    else document.exitFullscreen();
-  }
-
-  function setFov(f) {
+  setFov(f) {
+    const G = this.context;
+    if (!G) return;
     G.baseFov = Math.max(90, Math.min(135, Math.round(f)));
-    G.dom('fovinf').textContent = G.baseFov;
-    G.dom('fovslider').value = G.baseFov;
-    G.dom('fovval').textContent = G.baseFov;
-    G.dom('fovslider2').value = G.baseFov;
-    G.dom('fovval2').textContent = G.baseFov;
+    const ids = ['fovinf', 'fovslider', 'fovval', 'fovslider2', 'fovval2'];
+    ids.forEach((id) => {
+      const el = G.dom ? G.dom(id) : (typeof document !== 'undefined' ? document.getElementById(id) : null);
+      if (el) {
+        if ('value' in el) el.value = G.baseFov;
+        else el.textContent = G.baseFov;
+      }
+    });
   }
 
-  G.dom('fovslider').addEventListener('input', e => setFov(+e.target.value));
-  G.dom('fovslider2').addEventListener('input', e => setFov(+e.target.value));
+  toggleFullscreen() {
+    if (typeof document === 'undefined') return;
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen();
+    }
+  }
 
-  function syncMuteBtn() {
-    const b = G.dom('btnmute');
+  syncMuteBtn() {
+    const G = this.context;
+    if (!G) return;
+    const b = G.dom ? G.dom('btnmute') : document.getElementById('btnmute');
     if (b) b.textContent = 'SOUND: ' + (AudioSys.muted ? 'OFF' : 'ON');
-    const i = G.dom('muteinf');
+    const i = G.dom ? G.dom('muteinf') : document.getElementById('muteinf');
     if (i) i.textContent = AudioSys.muted ? 'off' : 'on';
   }
 
-  G.dom('btnmute').addEventListener('click', () => {
-    AudioSys.toggleMute();
-    syncMuteBtn();
-  });
-  G.dom('btnfs').addEventListener('click', toggleFullscreen);
-
-  G.dom('ipinput').placeholder = defaultServer();
-  ['click', 'keydown', 'pointerdown'].forEach(evt => {
-    window.addEventListener(evt, () => AudioSys.ensure(), { passive: true });
-  });
-
-  G.dom('btnstart').addEventListener('click', () => {
-    AudioSys.ensure();
-    const ipInput = document.getElementById('ipinput');
-    const passInput = document.getElementById('passinput');
-    const ip = (ipInput && ipInput.value.trim()) ? ipInput.value.trim() : defaultServer();
-    const pass = (passInput && passInput.value.trim()) ? passInput.value.trim() : 'secret';
-    const nameInput = document.getElementById('nameinput');
-    const actualIp = ip || defaultServer();
-
-    G.lastIp = actualIp;
-    G.lastPass = pass;
-    G.lastName = (nameInput && nameInput.value.trim()) ? nameInput.value.trim() : 'Guest';
-    if (G.startConnection) {
-      G.startConnection(actualIp, pass, G.lastName);
-    } else {
-      G.Network.connect(actualIp, pass, G.lastName);
-    }
-  });
-
-  const cancelBtn = document.getElementById('connect-overlay-cancel');
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', () => {
-      if (G.onConnectionTimeout) G.onConnectionTimeout('Connection cancelled');
-    });
-  }
-
-  G.dom('btnresume').addEventListener('click', () => {
-    AudioSys.ensure();
-    requestLock();
-  });
-
-  const switchBtn = G.dom('btnswitchmode');
-  if (switchBtn) {
-    switchBtn.addEventListener('click', () => {
-      if (G.isSpectator) {
-        G.requestJoin();
-      } else {
-        G.requestSpectate();
-      }
-      menuPanel.classList.add('hidden');
-      requestLock();
-    });
-  }
-
-  G.dom('btnnewmap').addEventListener('click', () => {
-    const s = G.dom('seedinput2').value.trim() || String(Math.floor(Math.random() * 1e9));
-    G.newMap(s);
-  });
-  G.dom('btnagain').addEventListener('click', () => G.newMap(String(Math.floor(Math.random() * 1e9))));
-  G.dom('btnsame').addEventListener('click', () => {
-    G.Network.send({ type: 'new_map', seed: G.currentSeed });
-    winPanel.classList.add('hidden');
-    requestLock();
-  });
-
-  function showSummary() {
-    if (!G.match) return;
+  showSummary() {
+    const G = this.context;
+    if (!G || !G.match) return;
     let title, sub;
     if (G.match.winner === 'tie') {
       title = 'DRAW';
       sub = 'THE CHAMBER BALANCES — NO FAVOR GIVEN';
     } else {
-      const w = G.match.winner && G.match.players[G.match.winner];
+      const w = G.match.winner && G.match.players ? G.match.players[G.match.winner] : null;
       title = (w ? w.name : 'PLAYER') + ' WINS';
       sub = 'THE ROUND IS DECIDED';
     }
-    const t = G.dom('winTitle'), s = G.dom('winSub');
+    const t = G.dom ? G.dom('winTitle') : document.getElementById('winTitle');
+    const s = G.dom ? G.dom('winSub') : document.getElementById('winSub');
     if (t) t.textContent = title;
     if (s) s.textContent = sub;
-    winPanel.classList.remove('hidden');
+    const winPanel = G.winPanel || document.getElementById('winpanel');
+    if (winPanel) winPanel.classList.remove('hidden');
   }
 
-  G.addEventLog = addEventLog;
-  G.requestLock = requestLock;
-  G.showSummary = showSummary;
+  isKeyDown(code) {
+    return !!this.keys[code];
+  }
 
-  return inputManager;
+  destroy() {
+    this.exitPointerLock();
+  }
 }

@@ -202,9 +202,13 @@ export function onMessage(G, data) {
         continue;
       }
       if (!G.remotePlayers[pid]) {
-        G.remotePlayers[pid] = new RemotePlayer(pid, data.players[pid]);
-        if (!G.remotePlayers[pid].name && data.match?.players?.[pid]?.name) {
-          G.remotePlayers[pid].name = data.match.players[pid].name;
+        const rp = new RemotePlayer(pid, data.players[pid]);
+        G.remotePlayers[pid] = rp;
+        if (G.engine?.entityManager) {
+          G.engine.entityManager.spawn(rp);
+        }
+        if (!rp.name && data.match?.players?.[pid]?.name) {
+          rp.name = data.match.players[pid].name;
         }
       } else {
         const oldRp = G.remotePlayers[pid];
@@ -233,10 +237,14 @@ export function onMessage(G, data) {
     }
     for (const pid in G.remotePlayers) {
       if (!data.players[pid]) {
-        delete G.remotePlayers[pid];
-        if (G.remotePlayerMeshes[pid]) {
-          G.scene.remove(G.remotePlayerMeshes[pid]);
-          delete G.remotePlayerMeshes[pid];
+        if (G.engine?.entityManager) {
+          G.engine.entityManager.despawn(pid);
+        } else {
+          delete G.remotePlayers[pid];
+          if (G.remotePlayerMeshes[pid]) {
+            G.scene.remove(G.remotePlayerMeshes[pid]);
+            delete G.remotePlayerMeshes[pid];
+          }
         }
       }
     }
