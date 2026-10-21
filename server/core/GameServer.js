@@ -753,9 +753,17 @@ export class GameServer {
           } else {
             p.viewOffset = null;
           }
+          if (data.pos) {
+            p.pos.set(data.pos[0], data.pos[1], data.pos[2]);
+          }
+          if (data.yaw != null) {
+            p.yaw = data.yaw;
+          }
           this.broadcast(JSON.stringify({
             type: 'player_teleport',
             playerId,
+            pos: data.pos,
+            yaw: data.yaw,
             viewOffset: data.viewOffset
           }), ws);
         }
@@ -877,6 +885,8 @@ export class GameServer {
           this.broadcast(JSON.stringify({
             type: 'player_teleport',
             playerId: pid,
+            pos: teleportedPl?.pos ? [teleportedPl.pos.x, teleportedPl.pos.y, teleportedPl.pos.z] : null,
+            yaw: teleportedPl?.yaw,
             viewOffset: (teleportedPl && teleportedPl.viewOffset) ? [
               teleportedPl.viewOffset.x,
               teleportedPl.viewOffset.y,

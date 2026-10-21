@@ -225,27 +225,33 @@ export class PlayerController extends Entity {
           this.engine.eventBus.emit('SOUND_JUMPPAD');
         }
       },
-      onTeleport: () => {
+      onTeleport: (pl) => {
+        const p = pl || plState || this;
         this.isPostTeleport = true;
         if (_tpFlash) {
           _tpFlash.classList.remove('fadeflash');
           void _tpFlash.offsetWidth;
           _tpFlash.classList.add('fadeflash');
         }
+        const posArr = p.pos ? (p.pos.toArray ? p.pos.toArray() : [p.pos.x, p.pos.y, p.pos.z]) : [this.position.x, this.position.y, this.position.z];
+        const yawVal = p.yaw !== undefined ? p.yaw : this.yaw;
+        const vo = p.viewOffset || this.viewOffset;
         const net = G?.Network || this.engine?.network;
         if (net && net.send) {
           net.send({
             type: 'teleport',
-            viewOffset: this.viewOffset ? [
-              this.viewOffset.x,
-              this.viewOffset.y,
-              this.viewOffset.z,
-              this.viewOffset.w
+            pos: posArr,
+            yaw: yawVal,
+            viewOffset: vo ? [
+              vo.x,
+              vo.y,
+              vo.z,
+              vo.w
             ] : null
           });
         }
         if (this.engine?.eventBus) {
-          this.engine.eventBus.emit('PLAYER_TELEPORTED', { viewOffset: this.viewOffset });
+          this.engine.eventBus.emit('PLAYER_TELEPORTED', { viewOffset: vo });
         }
       }
     };
@@ -386,9 +392,22 @@ export class PlayerController extends Entity {
       camera.quaternion.setFromEuler(new TH.Euler(this.pitch, this.yaw, 0, 'YXZ'));
     }
 
+    if (this.viewOffset) {
+      const id = new TH.Quaternion();
+      this.viewOffset.slerp(id, Math.min(1, dt * 5));
+      if (this.viewOffset.angleTo(id) < 0.001) {
+        this.viewOffset = null;
+      } else {
+        camera.quaternion.multiply(this.viewOffset);
+      }
+    }
+
     if (this.playerModel) {
       this.playerModel.position.copy(this.position);
-      this.playerModel.rotation.set(0, this.yaw, 0, 'YXZ');
+      this.playerModel.quaternion.setFromEuler(new TH.Euler(0, this.yaw, 0, 'YXZ'));
+      if (this.viewOffset) {
+        this.playerModel.quaternion.multiply(this.viewOffset);
+      }
       const cBody = this.playerModel.children.find(c => c.name === 'bodyMesh');
       if (cBody) {
         cBody.scale.y = 1 - this.crouchT * 0.4;
@@ -423,13 +442,6 @@ export class PlayerController extends Entity {
       } else if (trans.targetP && this.velocity.dot(trans.targetP.n) < -0.2) {
         this.isPostTeleport = false;
       }
-    }
-
-    if (this.viewOffset) {
-      const id = new TH.Quaternion();
-      this.viewOffset.slerp(id, Math.min(1, dt * 5));
-      if (this.viewOffset.angleTo(id) < 0.001) this.viewOffset = null;
-      else camera.quaternion.multiply(this.viewOffset);
     }
 
     const zoomHeld = !(this.isDead || G.isDead) && (G.keys?.['KeyZ'] || G.keys?.['ShiftLeft'] || (G.isZooming && (G.activeWeapon === 2 || G.activeWeapon === 3)));

@@ -366,6 +366,17 @@ export function onMessage(G, data) {
   } else if (data.type === 'player_teleport') {
     const rp = G.remotePlayers[data.playerId];
     if (rp) {
+      if (data.pos) {
+        rp.pos[0] = data.pos[0];
+        rp.pos[1] = data.pos[1];
+        rp.pos[2] = data.pos[2];
+        rp.position.set(data.pos[0], data.pos[1], data.pos[2]);
+        rp.targetPos.set(data.pos[0], data.pos[1], data.pos[2]);
+      }
+      if (data.yaw != null) {
+        rp.yaw = data.yaw;
+        rp.targetYaw = data.yaw;
+      }
       if (data.viewOffset) {
         rp.viewOffset = new THREE.Quaternion(
           data.viewOffset[0],

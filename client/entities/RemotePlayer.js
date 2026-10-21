@@ -165,7 +165,10 @@ export class RemotePlayer extends Entity {
 
     m.visible = !this.isDead && !isTargetFollowPOV;
     m.position.set(this.pos[0], this.pos[1], this.pos[2]);
-    m.rotation.y = this.yaw;
+    m.quaternion.setFromEuler(new THREE.Euler(0, this.yaw, 0, 'YXZ'));
+    if (this.viewOffset) {
+      m.quaternion.multiply(this.viewOffset);
+    }
 
     const rpCT = this.crouchT || 0;
     if (m.userData.smoothCrouchT === undefined) {
