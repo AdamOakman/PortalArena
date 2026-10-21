@@ -42,6 +42,15 @@ export function onMessage(G, data) {
         const hMesh = headGroup.children.find(c => c.name === 'headMesh');
         if (hMesh) hMesh.material.color.setHex(localColor);
       }
+      if (G.playerCloneModel) {
+        const cbMesh = G.playerCloneModel.children.find(c => c.name === 'bodyMesh');
+        if (cbMesh) cbMesh.material.color.setHex(localColor);
+        const cheadGroup = G.playerCloneModel.children.find(c => c.name === 'headGroup');
+        if (cheadGroup) {
+          const chMesh = cheadGroup.children.find(c => c.name === 'headMesh');
+          if (chMesh) chMesh.material.color.setHex(localColor);
+        }
+      }
 
       G.gun.userData.core.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
       G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
@@ -54,6 +63,8 @@ export function onMessage(G, data) {
       G.rocketGun.visible = false;
       G.instagibGun.visible = false;
       G.playerModel.visible = false;
+    if (G.playerCloneModel) G.playerCloneModel.visible = false;
+      if (G.playerCloneModel) G.playerCloneModel.visible = false;
       G.spectatorMode = 'freefly';
       G.specPos.set(0, 8, 14);
       G.specYaw = 0;
@@ -103,6 +114,15 @@ export function onMessage(G, data) {
       const hMesh = headGroup.children.find(c => c.name === 'headMesh');
       if (hMesh) hMesh.material.color.setHex(localColor);
     }
+    if (G.playerCloneModel) {
+      const cbMesh = G.playerCloneModel.children.find(c => c.name === 'bodyMesh');
+      if (cbMesh) cbMesh.material.color.setHex(localColor);
+      const cheadGroup = G.playerCloneModel.children.find(c => c.name === 'headGroup');
+      if (cheadGroup) {
+        const chMesh = cheadGroup.children.find(c => c.name === 'headMesh');
+        if (chMesh) chMesh.material.color.setHex(localColor);
+      }
+    }
 
     G.gun.userData.core.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
     G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
@@ -146,6 +166,7 @@ export function onMessage(G, data) {
     G.rocketGun.visible = false;
     G.instagibGun.visible = false;
     G.playerModel.visible = false;
+    if (G.playerCloneModel) G.playerCloneModel.visible = false;
     G.spectatorMode = 'freefly';
     G.specPos.copy(G.pl.pos);
     G.specPos.y += 2;
@@ -261,6 +282,9 @@ export function onMessage(G, data) {
         } else {
           delete G.remotePlayers[pid];
           if (G.remotePlayerMeshes[pid]) {
+            if (G.remotePlayerMeshes[pid].userData?.cloneMesh) {
+              G.scene.remove(G.remotePlayerMeshes[pid].userData.cloneMesh);
+            }
             G.scene.remove(G.remotePlayerMeshes[pid]);
             delete G.remotePlayerMeshes[pid];
           }

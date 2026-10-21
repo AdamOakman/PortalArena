@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Entity } from './Entity.js';
 import { AudioSys } from '../audio/AudioController.js';
 import { CFG } from '../../shared/constants.js';
+import { updatePortalTransition } from '../portals/PortalManager.js';
 
 /**
  * PlayerController — Entity encapsulating the local player's Quake movement physics,
@@ -47,6 +48,9 @@ export class PlayerController extends Entity {
 
     this.playerModel = null;
     this.playerClipPlane = null;
+    this.playerCloneModel = null;
+    this.playerCloneClipPlane = null;
+    this.isPostTeleport = false;
   }
 
   /**
@@ -66,6 +70,7 @@ export class PlayerController extends Entity {
     this.viewOffset = null;
     this.grounded = false;
     this.crouchT = 0;
+    this.isPostTeleport = false;
     if (this.engine && this.engine.eventBus) {
       this.engine.eventBus.emit('PLAYER_RESPAWNED', { position: this.position });
     }
@@ -101,7 +106,9 @@ export class PlayerController extends Entity {
       if (G.rocketGun) G.rocketGun.visible = false;
       if (G.instagibGun) G.instagibGun.visible = false;
       if (G.playerModel) G.playerModel.visible = false;
+      if (G.playerCloneModel) G.playerCloneModel.visible = false;
     }
+    this.isPostTeleport = false;
 
     const isSuicide = !killerId || (G && killerId === G.localPlayerId) || cause === 'lava' || cause === 'void';
 
@@ -219,6 +226,7 @@ export class PlayerController extends Entity {
         }
       },
       onTeleport: () => {
+        this.isPostTeleport = true;
         if (_tpFlash) {
           _tpFlash.classList.remove('fadeflash');
           void _tpFlash.offsetWidth;
@@ -314,14 +322,34 @@ export class PlayerController extends Entity {
     const playerModel = G.createPlayerModel(0x4a86e8, 1, playerClipPlane);
     scene.add(playerModel);
 
+    const playerCloneClipPlane = new TH.Plane(new V3(0, 1, 0), 1e6);
+    const playerCloneModel = G.createPlayerModel(0x4a86e8, 0, playerCloneClipPlane);
+    playerCloneModel.visible = false;
+    scene.add(playerCloneModel);
+    playerModel.userData.cloneMesh = playerCloneModel;
+
     if (typeof window !== 'undefined') {
       window.playerClipPlane = playerClipPlane;
     }
 
     this.playerModel = playerModel;
     this.playerClipPlane = playerClipPlane;
+    this.playerCloneModel = playerCloneModel;
+    this.playerCloneClipPlane = playerCloneClipPlane;
     G.playerModel = playerModel;
     G.playerClipPlane = playerClipPlane;
+    G.playerCloneModel = playerCloneModel;
+    G.playerCloneClipPlane = playerCloneClipPlane;
+    G.playerController = this;
+
+    if (G.portalManager) {
+      G.portalManager.localPlayerModel = playerModel;
+      G.portalManager.localPlayerCloneModel = playerCloneModel;
+    }
+    if (typeof window !== 'undefined') {
+      window.playerModel = playerModel;
+      window.playerCloneModel = playerCloneModel;
+    }
   }
 
   /**
@@ -379,23 +407,21 @@ export class PlayerController extends Entity {
       }
     }
 
-    if (this.playerClipPlane && G.portals) {
-      let closestPortal = -1, minDist = 3.5;
-      for (let i = 0; i < 4; i++) {
-        if (!G.portals[i] || !G.portals[i].placed) continue;
-        const d = this.position.distanceTo(G.portals[i].c);
-        if (d < minDist) {
-          minDist = d;
-          closestPortal = i;
-        }
-      }
-      if (closestPortal !== -1) {
-        const P = G.portals[closestPortal];
-        this.playerClipPlane.normal.copy(P.n);
-        this.playerClipPlane.constant = -P.n.dot(P.c);
-      } else {
-        this.playerClipPlane.normal.set(0, 1, 0);
-        this.playerClipPlane.constant = 1e6;
+    if (this.playerModel && this.playerCloneModel && this.playerClipPlane && this.playerCloneClipPlane) {
+      const trans = updatePortalTransition(
+        this.playerModel,
+        this.playerCloneModel,
+        this.playerClipPlane,
+        this.playerCloneClipPlane,
+        this.position,
+        G.portals,
+        G.R_AB,
+        G.R_BA
+      );
+      if (!trans?.inPortal) {
+        this.isPostTeleport = false;
+      } else if (trans.targetP && this.velocity.dot(trans.targetP.n) < -0.2) {
+        this.isPostTeleport = false;
       }
     }
 

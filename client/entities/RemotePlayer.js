@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Entity } from './Entity.js';
 import { CFG } from '../../shared/constants.js';
+import { updatePortalTransition } from '../portals/PortalManager.js';
 
 /**
  * RemotePlayer — Entity representing an opponent human or bot in the arena.
@@ -27,6 +28,9 @@ export class RemotePlayer extends Entity {
     this.targetYaw = this.yaw;
     this.targetPitch = this.pitch;
     this.mesh = null;
+    this.cloneMesh = null;
+    this.clipPlane = null;
+    this.cloneClipPlane = null;
 
     this.deathCamPos = null;
     this.deathCamTarget = null;
@@ -132,10 +136,19 @@ export class RemotePlayer extends Entity {
         : (G.match && G.match.players[this.pid] ? G.match.players[this.pid].index : (1 - G.localPlayerIndex));
       if (remoteIndex < 0) remoteIndex = 0;
       const remoteColor = remoteIndex === 0 ? 0x33ff33 : 0xff3333;
-      const mesh = G.createPlayerModel(remoteColor, 0);
+
+      this.clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 1e6);
+      const mesh = G.createPlayerModel(remoteColor, 0, this.clipPlane);
       G.scene.add(mesh);
       if (G.remotePlayerMeshes) G.remotePlayerMeshes[this.pid] = mesh;
       this.mesh = mesh;
+
+      this.cloneClipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 1e6);
+      const cloneMesh = G.createPlayerModel(remoteColor, 0, this.cloneClipPlane);
+      cloneMesh.visible = false;
+      G.scene.add(cloneMesh);
+      this.cloneMesh = cloneMesh;
+      mesh.userData.cloneMesh = cloneMesh;
     }
 
     const m = this.mesh;
@@ -206,6 +219,19 @@ export class RemotePlayer extends Entity {
     } else {
       m.userData.muzzleT = 0;
     }
+
+    if (this.mesh && this.cloneMesh && this.clipPlane && this.cloneClipPlane) {
+      updatePortalTransition(
+        this.mesh,
+        this.cloneMesh,
+        this.clipPlane,
+        this.cloneClipPlane,
+        this.pos,
+        G.portals,
+        G.R_AB,
+        G.R_BA
+      );
+    }
   }
 
   destroy() {
@@ -213,6 +239,12 @@ export class RemotePlayer extends Entity {
     if (this.mesh && this.mesh.parent) {
       this.mesh.parent.remove(this.mesh);
     }
+    if (this.cloneMesh && this.cloneMesh.parent) {
+      this.cloneMesh.parent.remove(this.cloneMesh);
+    }
     this.mesh = null;
+    this.cloneMesh = null;
+    this.clipPlane = null;
+    this.cloneClipPlane = null;
   }
 }

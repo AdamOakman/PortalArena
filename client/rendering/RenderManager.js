@@ -179,6 +179,9 @@ export class RenderManager {
   }
 
   render() {
+    this.renderer.autoClear = true;
+    this.camera.layers.enable(0);
+    this.camera.layers.enable(2);
     this.renderer.render(this.scene, this.camera);
   }
 }

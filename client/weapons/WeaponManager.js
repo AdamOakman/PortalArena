@@ -616,7 +616,12 @@ export class WeaponManager {
           G.remotePlayers[hitPlayerId].predictedDeadUntil = G.nowT + 3.0;
         }
         AudioSys.tone(600, 600, 0.5, 'sine', 0.3);
-        if (G.remotePlayerMeshes[hitPlayerId]) G.remotePlayerMeshes[hitPlayerId].visible = false;
+        if (G.remotePlayerMeshes[hitPlayerId]) {
+          G.remotePlayerMeshes[hitPlayerId].visible = false;
+          if (G.remotePlayerMeshes[hitPlayerId].userData?.cloneMesh) {
+            G.remotePlayerMeshes[hitPlayerId].userData.cloneMesh.visible = false;
+          }
+        }
         for (let i = 0; i < pts.length; i += 2) this.spawnInstagibBeam(pts[i], pts[i + 1], G.animObjects);
         return;
       }

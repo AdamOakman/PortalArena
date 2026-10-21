@@ -221,6 +221,7 @@ export class GameEngine {
     } else if (G.isSpectator) {
       this._updateSpectator(dt);
       if (G.playerModel) G.playerModel.visible = false;
+      if (G.playerCloneModel) G.playerCloneModel.visible = false;
       this.entityManager.updateRemotePlayers(dt, G.nowT, G);
     } else if (!G.won) {
       let activeKeys = G.pointerLocked ? G.keys : { KeyW: false, KeyA: false, KeyS: false, KeyD: false, Space: false, ShiftLeft: false, KeyC: false, ControlLeft: false };
@@ -636,6 +637,7 @@ export class GameEngine {
       if (G.rocketGun) G.rocketGun.visible = (aw === 2);
       if (G.instagibGun) G.instagibGun.visible = (aw === 3);
       if (G.playerModel) G.playerModel.visible = false;
+      if (G.playerCloneModel) G.playerCloneModel.visible = false;
 
       if (aw === 1 && G.gun?.userData?.core && G.portals) {
         let tIdx = (targetPl.playerIndex !== undefined) ? targetPl.playerIndex : (G.match && G.match.players[G.spectateTargetPid] ? G.match.players[G.spectateTargetPid].index : 0);
@@ -659,6 +661,7 @@ export class GameEngine {
       if (G.rocketGun) G.rocketGun.visible = false;
       if (G.instagibGun) G.instagibGun.visible = false;
       if (G.playerModel) G.playerModel.visible = false;
+      if (G.playerCloneModel) G.playerCloneModel.visible = false;
     }
   }
 
@@ -1115,7 +1118,42 @@ export class GameEngine {
       if (G.updateSky) G.updateSky(G.nowT);
       if (G.renderer && G.scene && G.camera) {
         G.renderer.setRenderTarget(null);
-        G.renderer.render(G.scene, G.camera);
+
+        const hasViewmodel = (
+          !G.isSpectator && G.started && !G.isDead && (
+            (G.gun && G.gun.visible) || (G.rocketGun && G.rocketGun.visible) || (G.instagibGun && G.instagibGun.visible)
+          )
+        ) || (
+          G.isSpectator && G.spectatorMode === 'follow' && G.followPerspective === 'pov' && (
+            (G.gun && G.gun.visible) || (G.rocketGun && G.rocketGun.visible) || (G.instagibGun && G.instagibGun.visible)
+          )
+        );
+
+        if (hasViewmodel) {
+          G.renderer.autoClear = false;
+          G.renderer.clear();
+
+          // Pass 1: Render world and entities (excluding 1st-person viewmodels on layer 2)
+          G.camera.layers.disable(2);
+          G.renderer.render(G.scene, G.camera);
+
+          // Pass 2: Render 1st-person viewmodels with cleared depth without redrawing scene background
+          const savedBg = G.scene.background;
+          G.scene.background = null;
+          G.renderer.clearDepth();
+          G.camera.layers.set(2);
+          G.renderer.render(G.scene, G.camera);
+          G.scene.background = savedBg;
+
+          // Restore default camera layers (world layer 0 and viewmodel layer 2)
+          G.camera.layers.enable(0);
+          G.camera.layers.enable(2);
+        } else {
+          G.renderer.autoClear = true;
+          G.camera.layers.enable(0);
+          G.camera.layers.enable(2);
+          G.renderer.render(G.scene, G.camera);
+        }
       }
     } else if (this.renderManager) {
       this.renderManager.render();

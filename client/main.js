@@ -559,6 +559,13 @@ export class PortalClient {
     if (G.remotePlayerMeshes) {
       for (const pid in G.remotePlayerMeshes) {
         if (G.remotePlayerMeshes[pid]) {
+          if (G.remotePlayerMeshes[pid].userData?.cloneMesh) {
+            G.scene.remove(G.remotePlayerMeshes[pid].userData.cloneMesh);
+            G.remotePlayerMeshes[pid].userData.cloneMesh.traverse((o) => {
+              if (o.geometry) o.geometry.dispose();
+              if (o.material) o.material.dispose();
+            });
+          }
           G.scene.remove(G.remotePlayerMeshes[pid]);
           G.remotePlayerMeshes[pid].traverse((o) => {
             if (o.geometry) o.geometry.dispose();

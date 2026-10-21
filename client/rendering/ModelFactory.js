@@ -112,7 +112,7 @@ export class ModelFactory {
 
     const bodyGeo = new THREE.CylinderGeometry(0.3, 0.3, 1.2, 16);
     bodyGeo.translate(0, 0.6, 0);
-    const bodyMat = new THREE.MeshStandardMaterial({ color, metalness: 0.2, roughness: 0.7 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color, metalness: 0.2, roughness: 0.7, side: THREE.DoubleSide });
     const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
     bodyMesh.name = 'bodyMesh';
     model.add(bodyMesh);
@@ -123,7 +123,8 @@ export class ModelFactory {
     model.add(headGroup);
 
     const headGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-    const headMesh = new THREE.Mesh(headGeo, bodyMat);
+    const headMat = new THREE.MeshStandardMaterial({ color, metalness: 0.2, roughness: 0.7, side: THREE.DoubleSide });
+    const headMesh = new THREE.Mesh(headGeo, headMat);
     headMesh.name = 'headMesh';
     headGroup.add(headMesh);
 
@@ -184,6 +185,7 @@ export function initModels(TH, camera, scene) {
           c.material = c.material.clone();
           c.material.clippingPlanes = [clipPlane];
           c.material.clipShadows = true;
+          c.material.side = THREE.DoubleSide;
         }
       }
     });

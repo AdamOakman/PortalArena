@@ -41,6 +41,8 @@ export class PortalManager {
     this.camera = null;
     this.scene = null;
     this.skyGroup = null;
+    this.localPlayerModel = null;
+    this.localPlayerCloneModel = null;
 
     // Shared scratch objects
     this._fRef = new THREE.Vector3();
@@ -221,6 +223,9 @@ export class PortalManager {
     this.camera = ctx.camera;
     this.scene = ctx.scene;
     this.skyGroup = ctx.skyGroup;
+    this.engine = ctx.engine || this.engine;
+    if (ctx.playerModel) this.localPlayerModel = ctx.playerModel;
+    if (ctx.playerCloneModel) this.localPlayerCloneModel = ctx.playerCloneModel;
     this.renderer.clippingPlanes = [this.clipPlane];
     this.makeRTs(ctx.innerWidth, ctx.innerHeight);
   }
@@ -498,7 +503,32 @@ export class PortalManager {
       if (this.quadMats[j]) this.quadMats[j].uniforms.uEncode.value = 0;
     }
 
+    // Local player portal transition avatar handling:
+    // When depth === 0 (direct first-person view into portal i), if the transition clone
+    // is placed at exit portal Q (where vcam is currently located), hide it during this pass
+    // so vcam does not render the clone attached to its own lens when looking down or through
+    // the entrance portal.
+    // When looking across the room at exit portal B, this.camera renders playerCloneModel on
+    // layer 0 emerging from portal B starting from the gun rifle.
+    // Deeper recursive views (depth > 0) render normally so recursive copies/reflections remain visible.
+    const G = this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
+    const localClone = this.localPlayerCloneModel || G?.playerCloneModel || G?.playerModel?.userData?.cloneMesh || (typeof window !== 'undefined' ? window.playerCloneModel : null);
+    const localModel = this.localPlayerModel || G?.playerModel || (typeof window !== 'undefined' ? window.playerModel : null);
+    const trans = localModel?.userData?.portalTransition;
+    let restoreCloneVis = null;
+
+    if (depth === 0 && localClone && localClone.visible) {
+      if (trans?.inPortal && trans.targetQ === Q) {
+        restoreCloneVis = localClone.visible;
+        localClone.visible = false;
+      }
+    }
+
     this.renderer.render(this.scene, this.vcam);
+
+    if (restoreCloneVis !== null && localClone) {
+      localClone.visible = restoreCloneVis;
+    }
 
     for (let j = 0; j < 4; j++) {
       if (this.frames[j]) this.frames[j].visible = oldVis[j].frame;
@@ -660,3 +690,138 @@ export function initPortalRendering(ctx, fallbackG = null) {
     makeRTs: (w, h) => manager.makeRTs(w, h)
   };
 }
+
+// Scratch matrices for portal transition calculations
+const _T1_trans = new THREE.Matrix4();
+const _T2_trans = new THREE.Matrix4();
+const _M_trans = new THREE.Matrix4();
+const _cloneMat_trans = new THREE.Matrix4();
+
+/**
+ * Coordinate portal transition clipping and visual exit clone for a player avatar.
+ *
+ * @param {THREE.Object3D} mesh - The main 3D player mesh.
+ * @param {THREE.Object3D} cloneMesh - The duplicated 3D player mesh appearing at the exit portal.
+ * @param {THREE.Plane} clipPlane - The clipping plane applied to the primary player mesh.
+ * @param {THREE.Plane} cloneClipPlane - The clipping plane applied to the exit clone mesh.
+ * @param {THREE.Vector3|number[]} pos - Player position.
+ * @param {Array} portals - Array of placed portals.
+ * @param {THREE.Matrix4[]} R_AB - Forward transition rotation matrices.
+ * @param {THREE.Matrix4[]} R_BA - Backward transition rotation matrices.
+ */
+export function updatePortalTransition(mesh, cloneMesh, clipPlane, cloneClipPlane, pos, portals, R_AB, R_BA) {
+  if (!mesh || !cloneMesh || !clipPlane || !cloneClipPlane) return { inPortal: false };
+
+  const posX = Array.isArray(pos) ? pos[0] : (pos ? pos.x : mesh.position.x);
+  const posY = Array.isArray(pos) ? pos[1] : (pos ? pos.y : mesh.position.y);
+  const posZ = Array.isArray(pos) ? pos[2] : (pos ? pos.z : mesh.position.z);
+
+  // Synchronize internal child parts (crouch, headGroup, mirror guns) from mesh to cloneMesh
+  const cCloneBody = cloneMesh.children.find(c => c.name === 'bodyMesh');
+  const cBody = mesh.children.find(c => c.name === 'bodyMesh');
+  if (cCloneBody && cBody) {
+    cCloneBody.scale.copy(cBody.scale);
+    cCloneBody.position.copy(cBody.position);
+  }
+
+  if (cloneMesh.userData?.headGroup && mesh.userData?.headGroup) {
+    cloneMesh.userData.headGroup.rotation.x = mesh.userData.headGroup.rotation.x;
+    cloneMesh.userData.headGroup.position.y = mesh.userData.headGroup.position.y;
+  }
+
+  if (cloneMesh.userData?.mirrorGun && mesh.userData?.mirrorGun) {
+    cloneMesh.userData.mirrorGun.visible = mesh.userData.mirrorGun.visible;
+    cloneMesh.userData.mirrorRocketGun.visible = mesh.userData.mirrorRocketGun.visible;
+    if (cloneMesh.userData.mirrorInstagibGun && mesh.userData.mirrorInstagibGun) {
+      cloneMesh.userData.mirrorInstagibGun.visible = mesh.userData.mirrorInstagibGun.visible;
+    }
+
+    const mg = mesh.userData.mirrorGun;
+    const mrg = mesh.userData.mirrorRocketGun;
+    const mig = mesh.userData.mirrorInstagibGun;
+    const cmg = cloneMesh.userData.mirrorGun;
+    const cmrg = cloneMesh.userData.mirrorRocketGun;
+    const cmig = cloneMesh.userData.mirrorInstagibGun;
+
+    if (cmg && mg) { cmg.scale.copy(mg.scale); cmg.position.copy(mg.position); cmg.rotation.copy(mg.rotation); }
+    if (cmrg && mrg) { cmrg.scale.copy(mrg.scale); cmrg.position.copy(mrg.position); cmrg.rotation.copy(mrg.rotation); }
+    if (cmig && mig) { cmig.scale.copy(mig.scale); cmig.position.copy(mig.position); cmig.rotation.copy(mig.rotation); }
+  }
+
+  let inPortal = false;
+  let targetP = null;
+  let targetQ = null;
+  let targetR = null;
+  if (mesh.visible && portals && R_AB && R_BA) {
+    let bestDist = 3.5;
+
+    for (let pairIdx = 0; pairIdx < 2; pairIdx++) {
+      const offset = pairIdx * 2;
+      const p0 = portals[offset];
+      const p1 = portals[offset + 1];
+      if (!p0 || !p1 || !p0.placed || !p1.placed) continue;
+
+      for (let pi = 0; pi < 2; pi++) {
+        const P = pi === 0 ? p0 : p1;
+        const Q = pi === 0 ? p1 : p0;
+        const R = pi === 0 ? R_AB[pairIdx] : R_BA[pairIdx];
+        if (!R) continue;
+
+        const dx = posX - P.c.x;
+        const dy = posY - P.c.y;
+        const dz = posZ - P.c.z;
+        const dn = dx * P.n.x + dy * P.n.y + dz * P.n.z;
+        const du = Math.abs(dx * P.r.x + dy * P.r.y + dz * P.r.z);
+        const dv = Math.abs(dx * P.u.x + dy * P.u.y + dz * P.u.z);
+
+        // Check if player or outstretched weapon is within transition zone of portal P
+        if (dn >= -0.8 && dn <= 2.5 && du <= PORT.hw + 0.6 && dv <= PORT.hh + 0.6) {
+          const dCenter = Math.hypot(dx, dy, dz);
+          if (dCenter < bestDist) {
+            bestDist = dCenter;
+            targetP = P;
+            targetQ = Q;
+            targetR = R;
+            inPortal = true;
+          }
+        }
+      }
+    }
+
+    if (inPortal && targetP && targetQ && targetR) {
+      clipPlane.normal.copy(targetP.n);
+      clipPlane.constant = -targetP.n.dot(targetP.c);
+
+      cloneClipPlane.normal.copy(targetQ.n);
+      cloneClipPlane.constant = -targetQ.n.dot(targetQ.c);
+
+      mesh.updateMatrixWorld(true);
+
+      _T1_trans.makeTranslation(-targetP.c.x, -targetP.c.y, -targetP.c.z);
+      _T2_trans.makeTranslation(targetQ.c.x, targetQ.c.y, targetQ.c.z);
+      _M_trans.multiplyMatrices(targetR, _T1_trans);
+      _M_trans.premultiply(_T2_trans);
+
+      _cloneMat_trans.multiplyMatrices(_M_trans, mesh.matrixWorld);
+      _cloneMat_trans.decompose(cloneMesh.position, cloneMesh.quaternion, cloneMesh.scale);
+      cloneMesh.updateMatrixWorld(true);
+      cloneMesh.visible = true;
+    }
+  }
+
+  if (!inPortal) {
+    cloneMesh.visible = false;
+    clipPlane.normal.set(0, 1, 0);
+    clipPlane.constant = 1e6;
+    cloneClipPlane.normal.set(0, 1, 0);
+    cloneClipPlane.constant = 1e6;
+  }
+
+  const transitionState = { inPortal, targetP, targetQ, targetR };
+  if (mesh.userData) {
+    mesh.userData.portalTransition = transitionState;
+  }
+  return transitionState;
+}
+
+PortalManager.updatePortalTransition = updatePortalTransition;
