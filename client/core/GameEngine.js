@@ -16,6 +16,48 @@ import { RocketLauncher } from '../weapons/RocketLauncher.js';
 import { InstagibRifle } from '../weapons/InstagibRifle.js';
 import { CFG, PORT } from '../../shared/constants.js';
 
+const _flatVx = new THREE.Vector3();
+const _flatVy = new THREE.Vector3();
+const _flatVz = new THREE.Vector3();
+const _flatAxes = [
+  new THREE.Vector3(),
+  new THREE.Vector3(),
+  new THREE.Vector3(),
+  new THREE.Vector3(),
+  new THREE.Vector3(),
+  new THREE.Vector3()
+];
+const _flatQAlign = new THREE.Quaternion();
+const _flatTargetQ = new THREE.Quaternion();
+const _flatUp = new THREE.Vector3(0, 1, 0);
+
+function alignCubeToFlatSurface(currentQuat, normal = _flatUp, blendFactor = 1.0) {
+  _flatVx.set(1, 0, 0).applyQuaternion(currentQuat);
+  _flatVy.set(0, 1, 0).applyQuaternion(currentQuat);
+  _flatVz.set(0, 0, 1).applyQuaternion(currentQuat);
+
+  _flatAxes[0].copy(_flatVx);
+  _flatAxes[1].copy(_flatVx).negate();
+  _flatAxes[2].copy(_flatVy);
+  _flatAxes[3].copy(_flatVy).negate();
+  _flatAxes[4].copy(_flatVz);
+  _flatAxes[5].copy(_flatVz).negate();
+
+  let bestAxis = _flatAxes[0];
+  let bestDot = -Infinity;
+  for (let i = 0; i < 6; i++) {
+    const d = _flatAxes[i].dot(normal);
+    if (d > bestDot) {
+      bestDot = d;
+      bestAxis = _flatAxes[i];
+    }
+  }
+
+  _flatQAlign.setFromUnitVectors(bestAxis, normal);
+  _flatTargetQ.copy(_flatQAlign).multiply(currentQuat);
+  currentQuat.slerp(_flatTargetQ, blendFactor);
+}
+
 /**
  * GameEngine — Central OOP Composition Root, loop coordinator, and lifecycle manager.
  */
@@ -846,18 +888,24 @@ export class GameEngine {
         if (!teleported) {
           c.pos.add(step);
           if (G.collideCube) G.collideCube(c, c.rad);
-          if (c.vel.lengthSq() < 0.001) {
+
+          const speedSq = c.vel.lengthSq();
+          if (speedSq < 0.001) {
             c.vel.set(0, 0, 0);
-            c.rotVel.multiplyScalar(0.8);
-            const eu = new TH.Euler().setFromQuaternion(c.quat);
-            const snap = Math.PI / 2;
-            c.rotVel.x += (Math.round(eu.x / snap) * snap - eu.x) * dt * 30;
-            c.rotVel.y += (Math.round(eu.y / snap) * snap - eu.y) * dt * 30;
-            c.rotVel.z += (Math.round(eu.z / snap) * snap - eu.z) * dt * 30;
           }
 
           const qSpin = new TH.Quaternion().setFromEuler(new TH.Euler(c.rotVel.x * dt, c.rotVel.y * dt, c.rotVel.z * dt));
           c.quat.multiply(qSpin);
+
+          // Tend to land on flat surfaces after bouncing:
+          // As a cube loses speed or settles near ground, natural restoring torque tips it flat.
+          if (speedSq < 0.1) {
+            c.rotVel.multiplyScalar(Math.max(0, 1 - dt * 8));
+            alignCubeToFlatSurface(c.quat, _flatUp, Math.min(1.0, dt * 15));
+          } else if (speedSq < 4.0) {
+            c.rotVel.multiplyScalar(Math.max(0, 1 - dt * 3));
+            alignCubeToFlatSurface(c.quat, _flatUp, Math.min(1.0, dt * 6));
+          }
         }
       }
     }
@@ -1020,13 +1068,94 @@ export class GameEngine {
           G.animObjects.splice(i, 1);
         } else {
           a.vel.y -= 25.0 * dt;
-          a.obj.position.addScaledVector(a.vel, dt);
-          if (a.obj.position.y < 0.15 && a.vel.y < 0) {
-            a.obj.position.y = 0.15;
-            a.vel.y *= -0.6;
-            a.vel.x *= 0.8;
-            a.vel.z *= 0.8;
+
+          const gibProxy = a.proxy || (a.proxy = { pos: a.obj.position, vel: a.vel });
+          gibProxy.pos = a.obj.position;
+          gibProxy.vel = a.vel;
+
+          let teleported = false;
+          if (G.physics && G.physics.teleportCube && G.portals && G.R_AB && G.R_BA) {
+            teleported = G.physics.teleportCube(gibProxy, dt, G.portals, G.R_AB, G.R_BA);
           }
+
+          if (!teleported) {
+            a.obj.position.addScaledVector(a.vel, dt);
+            const gibRad = 0.12;
+            if (G.collideCube && G.obbs) {
+              G.collideCube(gibProxy, gibRad);
+            } else if (G.physics && G.physics.collideCube && G.obbs) {
+              G.physics.collideCube(gibProxy, G.obbs, G.portals || [], gibRad);
+            }
+          }
+
+          // Bounce off other collidable objects: grabCubes
+          if (G.grabCubes) {
+            const gibRad = 0.12;
+            for (let j = 0; j < G.grabCubes.length; j++) {
+              const cube = G.grabCubes[j];
+              if (!cube || !cube.pos) continue;
+              const cRad = cube.rad || 0.75;
+              const totalRad = cRad + gibRad;
+              const dx = a.obj.position.x - cube.pos.x;
+              const dy = a.obj.position.y - cube.pos.y;
+              const dz = a.obj.position.z - cube.pos.z;
+              const dSq = dx * dx + dy * dy + dz * dz;
+              if (dSq < totalRad * totalRad && dSq > 1e-6) {
+                const dist = Math.sqrt(dSq);
+                const nx = dx / dist, ny = dy / dist, nz = dz / dist;
+                const depth = totalRad - dist;
+                a.obj.position.x += nx * (depth + 0.002);
+                a.obj.position.y += ny * (depth + 0.002);
+                a.obj.position.z += nz * (depth + 0.002);
+                const vn = a.vel.x * nx + a.vel.y * ny + a.vel.z * nz;
+                if (vn < 0) {
+                  const bounce = -vn * 1.5;
+                  a.vel.x += nx * bounce;
+                  a.vel.y += ny * bounce;
+                  a.vel.z += nz * bounce;
+                  a.vel.x *= 0.8;
+                  a.vel.z *= 0.8;
+                  if (a.rotVel) a.rotVel.multiplyScalar(0.7);
+                }
+              }
+            }
+          }
+
+          // Floor bounce
+          let onFloor = false;
+          if (a.obj.position.y < 0.15) {
+            a.obj.position.y = 0.15;
+            if (a.vel.y < 0) {
+              if (Math.abs(a.vel.y) < 0.8) {
+                a.vel.y = 0;
+              } else {
+                a.vel.y *= -0.6;
+              }
+            }
+            a.vel.x *= 0.75;
+            a.vel.z *= 0.75;
+            onFloor = true;
+          }
+
+          // Tumbling rotation via quaternion
+          if (a.rotVel) {
+            const qSpin = new THREE.Quaternion().setFromEuler(
+              new THREE.Euler(a.rotVel.x * dt, a.rotVel.y * dt, a.rotVel.z * dt)
+            );
+            a.obj.quaternion.multiply(qSpin);
+          }
+
+          // Tend to land on flat surfaces after bouncing:
+          // Smoothly align the closest cube face with the ground as speed decays
+          const speedSq = a.vel.lengthSq();
+          if (onFloor || speedSq < 3.0) {
+            const alignRate = onFloor ? (speedSq < 0.1 ? 16.0 : 8.0) : 4.0;
+            alignCubeToFlatSurface(a.obj.quaternion, _flatUp, Math.min(1.0, dt * alignRate));
+            if (a.rotVel) {
+              a.rotVel.multiplyScalar(Math.max(0, 1 - dt * (onFloor ? 8.0 : 3.0)));
+            }
+          }
+
           if (a.life < 1.5) {
             a.obj.material.opacity = a.life / 1.5;
           }

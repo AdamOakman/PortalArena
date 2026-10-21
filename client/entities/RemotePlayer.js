@@ -36,6 +36,7 @@ export class RemotePlayer extends Entity {
     this.deathCamTarget = null;
     this.lastShotOrigin = null;
     this.lastKillerId = null;
+    this.lastBeamDir = null;
     this.predictedDeadUntil = null;
 
     if (data.viewOffset) {
@@ -95,6 +96,7 @@ export class RemotePlayer extends Entity {
       this.deathCamTarget = null;
       this.lastShotOrigin = null;
       this.lastKillerId = null;
+      this.lastBeamDir = null;
       this.predictedDeadUntil = null;
     }
 

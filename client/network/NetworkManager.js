@@ -256,6 +256,7 @@ export function onMessage(G, data) {
         const prevDeathCamTarget = oldRp.deathCamTarget;
         const prevLastShotOrigin = oldRp.lastShotOrigin;
         const prevLastKillerId = oldRp.lastKillerId;
+        const prevLastBeamDir = oldRp.lastBeamDir;
         const prevViewOffset = oldRp.viewOffset;
 
         if (oldRp.updateFromSnapshot) {
@@ -269,6 +270,7 @@ export function onMessage(G, data) {
           if (prevDeathCamTarget) G.remotePlayers[pid].deathCamTarget = prevDeathCamTarget;
           if (prevLastShotOrigin) G.remotePlayers[pid].lastShotOrigin = prevLastShotOrigin;
           if (prevLastKillerId) G.remotePlayers[pid].lastKillerId = prevLastKillerId;
+          if (prevLastBeamDir) G.remotePlayers[pid].lastBeamDir = prevLastBeamDir;
         }
         if (prevViewOffset && !G.remotePlayers[pid].viewOffset) {
           G.remotePlayers[pid].viewOffset = prevViewOffset;
@@ -462,36 +464,43 @@ export function onMessage(G, data) {
       AudioSys.zap(sp, AudioSys.listenerPos ? sp.distanceTo(AudioSys.listenerPos) / 343 : 0);
     }
 
+    const beamDir = (pts && pts.length >= 2) ? pts[pts.length - 1].clone().sub(pts[pts.length - 2]).normalize() : null;
+
     if (data.hitPlayerId && G.remotePlayers[data.hitPlayerId]) {
       const hitRp = G.remotePlayers[data.hitPlayerId];
       hitRp.lastShotOrigin = pts && pts.length >= 2 ? pts[pts.length - 2].clone() : (shooter && shooter.pos ? new V3(...shooter.pos) : null);
       hitRp.lastKillerId = data.playerId;
+      hitRp.lastBeamDir = beamDir ? beamDir.clone() : null;
     }
 
     if (data.hitPlayerId === G.localPlayerId && !G.isSpectator) {
       const shotOrigin = pts && pts.length >= 2 ? pts[pts.length - 2].clone() : (shooter && shooter.pos ? new V3(...shooter.pos) : null);
-      G.die(data.playerId, data.pts.length > 2, 'instagib', shotOrigin);
+      G.die(data.playerId, data.pts.length > 2, 'instagib', shotOrigin, beamDir);
     }
   } else if (data.type === 'player_died') {
+    const deadRp = G.remotePlayers[data.playerId];
+    let beamDir = data.beamDir ? new V3(...data.beamDir) : (deadRp?.lastBeamDir || null);
+    let shotOrigin = data.shotOrigin ? new V3(...data.shotOrigin) : (deadRp?.lastShotOrigin || null);
+    if (!beamDir && shotOrigin && data.pos) {
+      beamDir = new V3(...data.pos).add(new V3(0, 1.0, 0)).sub(shotOrigin).normalize();
+    }
+
     if (data.playerId !== G.localPlayerId || G.isSpectator) {
       const pos = new V3(...data.pos);
-      G.spawnDeathAnimation(pos, data.color);
+      G.spawnDeathAnimation(pos, data.color, beamDir);
     }
     if (data.playerId === G.localPlayerId && !G.isDead && !G.isSpectator) {
-      let shotOrigin = null;
-      if (data.killerId && G.remotePlayers[data.killerId]) {
+      if (!shotOrigin && data.killerId && G.remotePlayers[data.killerId]) {
         const kp = G.remotePlayers[data.killerId];
         if (kp && kp.pos) shotOrigin = new V3(kp.pos[0], kp.pos[1] + 1.5, kp.pos[2]);
       }
-      G.die(data.killerId, data.viaPortal, data.cause, shotOrigin);
+      G.die(data.killerId, data.viaPortal, data.cause, shotOrigin, beamDir);
     }
-    const deadRp = G.remotePlayers[data.playerId];
     if (deadRp) {
       deadRp.isDead = true;
       if (data.killerId) deadRp.lastKillerId = data.killerId;
       const deadPos = new V3(...data.pos);
-      const isSuicide = !data.killerId || data.killerId === data.playerId || data.cause === 'lava' || data.cause === 'void';
-      let shotOrigin = deadRp.lastShotOrigin || null;
+      const isEnvironmentalSuicide = data.cause === 'lava' || data.cause === 'void';
       if (!shotOrigin && data.killerId) {
         if (data.killerId === G.localPlayerId) {
           shotOrigin = new V3(G.pl.pos.x, G.pl.pos.y + 1.5, G.pl.pos.z);
@@ -501,14 +510,7 @@ export function onMessage(G, data) {
         }
       }
 
-      if (isSuicide || !shotOrigin) {
-        const offset = new V3(0, 2, 4).applyAxisAngle(new V3(0, 1, 0), deadRp.yaw || 0);
-        const backDir = offset.clone().normalize();
-        const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length()) : null;
-        const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
-        deadRp.deathCamPos = deadPos.clone().addScaledVector(backDir, camDist);
-        deadRp.deathCamTarget = deadPos.clone();
-      } else {
+      if (shotOrigin && !isEnvironmentalSuicide) {
         const eyePos = new V3(deadPos.x, deadPos.y + 1.5, deadPos.z);
         const toShot = new V3().subVectors(shotOrigin, eyePos);
         const shotDist = toShot.length();
@@ -520,6 +522,13 @@ export function onMessage(G, data) {
         deadRp.deathCamPos = eyePos.clone().addScaledVector(backDir, actualPull);
         deadRp.deathCamPos.y += Math.min(0.35, actualPull * 0.25);
         deadRp.deathCamTarget = shotOrigin.clone();
+      } else {
+        const offset = new V3(0, 2, 4).applyAxisAngle(new V3(0, 1, 0), deadRp.yaw || 0);
+        const backDir = offset.clone().normalize();
+        const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length()) : null;
+        const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
+        deadRp.deathCamPos = deadPos.clone().addScaledVector(backDir, camDist);
+        deadRp.deathCamTarget = deadPos.clone();
       }
     }
     if (data.feedMsg) G.addEventLog(data.feedMsg, data.feedHot);
@@ -548,6 +557,7 @@ export function onMessage(G, data) {
       respawnRp.deathCamTarget = null;
       respawnRp.lastShotOrigin = null;
       respawnRp.lastKillerId = null;
+      respawnRp.lastBeamDir = null;
       respawnRp.predictedDeadUntil = null;
       if (G.remotePlayerMeshes[pid]) {
         if (data.pos) G.remotePlayerMeshes[pid].position.fromArray(data.pos);

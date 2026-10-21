@@ -1,6 +1,6 @@
 ---
 name: feature-dev-workflow
-description: Mandatory workflow whenever asked to develop a new feature or fix a bug in this repo. Run lint, build, and knip verification after code changes; static verification (lint + build + knip) is the only gate (no smoke tests of any kind, no e2e/browser testing), and finish with a commit-message summary of all changes.
+description: Mandatory workflow whenever asked to develop a new feature or fix a bug in this repo. Focus on minimal viable solutions, strong performance, and proactive reduction/removal of unnecessary surrounding code. Run lint, build, and knip verification after code changes; static verification (lint + build + knip) is the only gate (no smoke tests of any kind, no e2e/browser testing), and finish with a commit-message summary of all changes.
 ---
 
 # Feature Development / Bug-Fix Workflow
@@ -57,7 +57,21 @@ Apply this workflow for **every** request to develop a feature or fix a bug in t
    - Do **not** spin up browser-based end-to-end tests (no Playwright, Puppeteer, or manual browser sessions).
    - If a change is clean per `lint`, `build`, and `knip`, it is done — do not add extra verification to "be safe".
 
-3. **Finish with a commit-message summary**
+3. **Minimal viable solution, strong performance focus & proactive code reduction**
+   - **Minimal Viable Solution (MVS)**:
+     - Implement the most direct, concise solution that satisfies the task requirements without overengineering.
+     - Avoid speculative abstractions, unnecessary indirection layers, unneeded parameters, or unasked-for features.
+     - Solve the exact problem cleanly with minimal code footprint.
+   - **Strong Focus on Performance**:
+     - Keep performance paramount across both client and server, especially in hot paths (per-frame animation loops, physics steps, raycasts, matrix math, rendering, and network synchronization).
+     - Eliminate heap allocations and garbage collection overhead in tick loops: reuse scratch vectors, quaternions, and matrices rather than allocating new instances every frame.
+     - Avoid redundant calculations, costly iterations over large collections, or unnecessary DOM/canvas operations.
+   - **Notice and Reduce/Strip Unnecessary Code**:
+     - Actively inspect surrounding code in any files being read or modified.
+     - Look for opportunities to shrink, consolidate, or completely remove unnecessary surrounding code (e.g. dead branches, obsolete fallbacks, duplicate helpers, verbose boilerplate, overcomplicated logic) without altering or losing any intended functionality.
+     - Never leave dead exports, unused variables, or orphan references behind; ensure `knip` remains completely clean.
+
+4. **Finish with a commit-message summary**
    - When the whole task is done (all changes made, lint, build, and knip passing), present a commit-message-style summary of the work:
      - **Title**: a short, imperative summary of the change (e.g. `Add portal cooldown indicator`).
      - **Body**: a detailed description of exactly what was changed — which files, which classes/methods, and why — so the summary can be used verbatim as a commit message.

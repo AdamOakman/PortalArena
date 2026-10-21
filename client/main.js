@@ -248,7 +248,7 @@ export class PortalClient {
     G.physStep = (dt, activeKeys) => playerController.stepPhysics(dt, activeKeys, G);
     G.collideCube = (c, radius) => G.physics.collideCube(c, G.obbs, G.portals, radius);
     G.resolveCubeCollisions = () => G.physics.resolveCubeCollisions(G.grabCubes, G.grabbedCube);
-    G.die = (killerId, viaPortal, cause, shotOrigin) => playerController.die(killerId, viaPortal, cause, shotOrigin, G);
+    G.die = (killerId, viaPortal, cause, shotOrigin, beamDir) => playerController.die(killerId, viaPortal, cause, shotOrigin, G, beamDir);
     G.updateRemotePlayers = (dt, nowT) => {
       if (G.engine?.entityManager) {
         G.engine.entityManager.updateRemotePlayers(dt, nowT, G);

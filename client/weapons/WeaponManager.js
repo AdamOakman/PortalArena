@@ -322,11 +322,34 @@ export class WeaponManager {
     }
   }
 
-  spawnDeathAnimation(pos, color, animObjects = null) {
+  spawnDeathAnimation(pos, color, animObjects = null, blowDir = null) {
+    let anims = animObjects;
+    let bDir = blowDir;
+    if (animObjects && (animObjects.isVector3 || (Array.isArray(animObjects) && typeof animObjects[0] === 'number'))) {
+      bDir = animObjects;
+      anims = null;
+    }
+    anims = anims || this.context?.animObjects || this.engine?.context?.animObjects || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__?.animObjects : null);
     if (!this._gibPool) return;
     const gibColor = color || 0xaa0000;
     AudioSys.tone(200, 500, 0.5, 'square', 0.1);
-    const anims = animObjects || this.engine?.context?.animObjects || window.__GAME_CONTEXT__?.animObjects;
+
+    let normBlow = null;
+    if (bDir) {
+      if (bDir.isVector3 && Number.isFinite(bDir.x) && Number.isFinite(bDir.y) && Number.isFinite(bDir.z)) {
+        if (bDir.lengthSq() > 0.0001) {
+          normBlow = bDir.clone().normalize();
+        }
+      } else if (Array.isArray(bDir) && bDir.length >= 3 && typeof bDir[0] === 'number' && typeof bDir[1] === 'number' && typeof bDir[2] === 'number') {
+        const v = new THREE.Vector3(bDir[0], bDir[1], bDir[2]);
+        if (v.lengthSq() > 0.0001) {
+          normBlow = v.normalize();
+        }
+      }
+    }
+
+    const basePos = pos && pos.isVector3 ? pos : (Array.isArray(pos) ? new THREE.Vector3(...pos) : new THREE.Vector3());
+
     let spawned = 0;
     while (spawned < 20) {
       const slot = this._gibPool.acquire();
@@ -335,10 +358,25 @@ export class WeaponManager {
       slot.mat.color.setHex(gibColor);
       slot.mat.opacity = 1.0;
       slot.mesh.scale.setScalar(1.0);
-      slot.mesh.position.copy(pos).add(this._gibScratch.set((Math.random() - 0.5) * 0.6, Math.random() * 1.5, (Math.random() - 0.5) * 0.6));
-      slot.vel.set((Math.random() - 0.5) * 10, Math.random() * 6 + 2, (Math.random() - 0.5) * 10);
+      slot.mesh.position.copy(basePos).add(this._gibScratch.set((Math.random() - 0.5) * 0.6, Math.random() * 1.5, (Math.random() - 0.5) * 0.6));
+      slot.mesh.rotation.set(
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2
+      );
+      const rotVel = new THREE.Vector3(
+        (Math.random() - 0.5) * 14,
+        (Math.random() - 0.5) * 14,
+        (Math.random() - 0.5) * 14
+      );
+      if (normBlow) {
+        slot.vel.set((Math.random() - 0.5) * 8, Math.random() * 5 + 3, (Math.random() - 0.5) * 8);
+        slot.vel.addScaledVector(normBlow, 4.0 + Math.random() * 3.0);
+      } else {
+        slot.vel.set((Math.random() - 0.5) * 10, Math.random() * 6 + 2, (Math.random() - 0.5) * 10);
+      }
       if (anims) {
-        anims.push({ type: 'gib', obj: slot.mesh, vel: slot.vel, slot, life: 3.0 });
+        anims.push({ type: 'gib', obj: slot.mesh, vel: slot.vel, rotVel, slot, life: 3.0 });
       }
       spawned++;
     }
@@ -609,11 +647,16 @@ export class WeaponManager {
         const trueHitPt = curPos.clone().addScaledVector(curDir, bestT);
         pts.push(curStart, trueHitPt);
         G.Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()), hitPlayerId });
+        const shotOrigin = pts && pts.length >= 2 ? pts[pts.length - 2].clone() : curStart.clone();
+        const beamDir = curDir.clone();
         if (hitPlayerId === G.localPlayerId) {
-          G.die(G.localPlayerId, true);
+          G.die(G.localPlayerId, true, 'instagib', shotOrigin, beamDir);
         } else if (G.remotePlayers[hitPlayerId]) {
           G.remotePlayers[hitPlayerId].isDead = true;
           G.remotePlayers[hitPlayerId].predictedDeadUntil = G.nowT + 3.0;
+          G.remotePlayers[hitPlayerId].lastShotOrigin = shotOrigin;
+          G.remotePlayers[hitPlayerId].lastKillerId = G.localPlayerId;
+          G.remotePlayers[hitPlayerId].lastBeamDir = beamDir;
         }
         AudioSys.tone(600, 600, 0.5, 'sine', 0.3);
         if (G.remotePlayerMeshes[hitPlayerId]) {
@@ -837,6 +880,7 @@ export class WeaponManager {
  */
 export function initWeapons(G) {
   const manager = G.weaponManager || new WeaponManager(G.engine?.eventBus || null, G.engine || null);
+  manager.context = G;
   G.weaponManager = manager;
   manager.initPools(G.scene);
 
@@ -861,7 +905,7 @@ export function initWeapons(G) {
   G.spawnBeam = (color, s, e) => manager.spawnBeam(color, s, e, G.scene);
   G.spawnScorch = (pos, n) => manager.spawnScorch(pos, n, G.animObjects);
   G.spawnInstagibBeam = (s, e) => manager.spawnInstagibBeam(s, e, G.animObjects);
-  G.spawnDeathAnimation = (pos, color) => manager.spawnDeathAnimation(pos, color, G.animObjects);
+  G.spawnDeathAnimation = (pos, color, blowDir = null) => manager.spawnDeathAnimation(pos, color, G.animObjects, blowDir);
   G.firePortal = (pi) => manager.firePortal(pi, G);
   G.fireRocket = () => manager.fireRocket(G);
   G.fireInstagib = () => manager.fireInstagib(G);

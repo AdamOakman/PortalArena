@@ -232,7 +232,7 @@ export class GameServer {
     }
   }
 
-  handlePlayerDeath(victimId, killerId = null, cause = null, viaPortal = false) {
+  handlePlayerDeath(victimId, killerId = null, cause = null, viaPortal = false, shotOrigin = null, beamDir = null) {
     const pl = this.gameState.players[victimId];
     if (!pl || pl.isDead) return;
     pl.isDead = true;
@@ -263,7 +263,9 @@ export class GameServer {
       viaPortal: !!viaPortal,
       cause: cause || null,
       feedMsg,
-      feedHot
+      feedHot,
+      shotOrigin: shotOrigin || null,
+      beamDir: beamDir || null
     });
 
     this.broadcast(deathMsg);
@@ -412,7 +414,14 @@ export class GameServer {
     }
 
     if (hitPlayerId && this.gameState.players[hitPlayerId]?.isBot) {
-      this.handlePlayerDeath(hitPlayerId, pid, 'instagib', pts.length > 2);
+      let shotOrigin = null, beamDir = null;
+      if (pts && pts.length >= 2) {
+        const pStart = pts[pts.length - 2];
+        const pEnd = pts[pts.length - 1];
+        shotOrigin = pStart.toArray();
+        beamDir = new TH.Vector3().subVectors(pEnd, pStart).normalize().toArray();
+      }
+      this.handlePlayerDeath(hitPlayerId, pid, 'instagib', pts.length > 2, shotOrigin, beamDir);
     }
 
     this.broadcast(JSON.stringify({
@@ -741,7 +750,14 @@ export class GameServer {
             if (data.hitPlayerId && this.gameState.players[data.hitPlayerId]) fp.hits++;
           }
           if (data.hitPlayerId && this.gameState.players[data.hitPlayerId]?.isBot) {
-            this.handlePlayerDeath(data.hitPlayerId, playerId, 'instagib', !!(data.pts && data.pts.length > 2));
+            let shotOrigin = null, beamDir = null;
+            if (data.pts && data.pts.length >= 2) {
+              const pStart = new TH.Vector3(...data.pts[data.pts.length - 2]);
+              const pEnd = new TH.Vector3(...data.pts[data.pts.length - 1]);
+              shotOrigin = pStart.toArray();
+              beamDir = pEnd.clone().sub(pStart).normalize().toArray();
+            }
+            this.handlePlayerDeath(data.hitPlayerId, playerId, 'instagib', !!(data.pts && data.pts.length > 2), shotOrigin, beamDir);
           }
         }
         this.broadcast(JSON.stringify(data), ws);
@@ -768,7 +784,7 @@ export class GameServer {
           }), ws);
         }
       } else if (data.type === 'player_died') {
-        this.handlePlayerDeath(playerId, data.killerId, data.cause, data.viaPortal);
+        this.handlePlayerDeath(playerId, data.killerId, data.cause, data.viaPortal, data.shotOrigin, data.beamDir);
       } else if (data.type === 'new_map') {
         this.matchSession.updateMap(data.seed);
         this.updatePair();

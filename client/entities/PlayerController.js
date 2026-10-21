@@ -79,11 +79,32 @@ export class PlayerController extends Entity {
   /**
    * Handle player death with directional death camera placement.
    */
-  die(killerId = null, viaPortal = false, cause = 'generic', shotOrigin = null, context = null) {
-    const G = context || this.engine?.context || window.__GAME_CONTEXT__;
+  die(killerId = null, viaPortal = false, cause = 'generic', shotOrigin = null, context = null, beamDir = null) {
+    const G = (context && context.scene) ? context : (this.engine?.context || window.__GAME_CONTEXT__);
+    const explicitBeamDir = (beamDir && (beamDir.isVector3 || Array.isArray(beamDir)))
+      ? beamDir
+      : ((context && (context.isVector3 || Array.isArray(context))) ? context : null);
+
     if (G && (!G.started || G.won || G.isDead)) return;
     this.isDead = true;
     if (G) G.isDead = true;
+
+    let sOrigin = shotOrigin;
+    if (Array.isArray(sOrigin)) {
+      sOrigin = new THREE.Vector3(...sOrigin);
+    }
+
+    if (!sOrigin && killerId && G && G.remotePlayers && G.remotePlayers[killerId]) {
+      const kp = G.remotePlayers[killerId];
+      if (kp && kp.pos) {
+        sOrigin = new THREE.Vector3(kp.pos[0], kp.pos[1] + 1.5, kp.pos[2]);
+      }
+    }
+
+    let blowDir = explicitBeamDir || null;
+    if (!blowDir && sOrigin) {
+      blowDir = this.position.clone().add(new THREE.Vector3(0, 1.0, 0)).sub(sOrigin).normalize();
+    }
 
     const myColor = (G && G.localPlayerIndex === 0) ? 0x33ff33 : 0xff3333;
     if (G && G.Network && G.Network.send) {
@@ -93,12 +114,14 @@ export class PlayerController extends Entity {
         color: myColor,
         killerId: killerId || null,
         viaPortal: !!viaPortal,
-        cause: cause || null
+        cause: cause || null,
+        shotOrigin: sOrigin ? sOrigin.toArray() : null,
+        beamDir: blowDir ? (blowDir.isVector3 ? blowDir.toArray() : blowDir) : null
       });
     }
 
     if (G && G.spawnDeathAnimation) {
-      G.spawnDeathAnimation(this.position, myColor);
+      G.spawnDeathAnimation(this.position, myColor, blowDir);
     }
 
     if (G) {
@@ -110,47 +133,36 @@ export class PlayerController extends Entity {
     }
     this.isPostTeleport = false;
 
-    const isSuicide = !killerId || (G && killerId === G.localPlayerId) || cause === 'lava' || cause === 'void';
+    const isEnvironmentalSuicide = cause === 'lava' || cause === 'void';
 
-    if (isSuicide) {
+    if (sOrigin && !isEnvironmentalSuicide) {
+      const eyeH = (CFG.H - (CFG.H - CFG.CROUCH_H) * this.crouchT) - 0.12;
+      const eyePos = new THREE.Vector3(this.position.x, this.position.y + eyeH, this.position.z);
+      const toShot = new THREE.Vector3().subVectors(sOrigin, eyePos);
+      const shotDist = toShot.length();
+      const shotDir = shotDist > 0.01 ? toShot.clone().normalize() : new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+
+      const pullDist = 2.0;
+      const backDir = shotDir.clone().negate();
+      const rayHit = G && G.raycast ? G.raycast(eyePos, backDir, pullDist + 0.3) : null;
+      const actualPull = rayHit ? Math.max(0.1, rayHit.distance - 0.3) : pullDist;
+
+      this.deathCamPos.copy(eyePos).addScaledVector(backDir, actualPull);
+      this.deathCamPos.y += Math.min(0.35, actualPull * 0.25);
+      this.deathCamTarget.copy(sOrigin);
+    } else {
       const offset = new THREE.Vector3(0, 2, 4).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
       this.deathCamPos.copy(this.position).add(offset);
       this.deathCamTarget.copy(this.position);
-    } else {
-      if (!shotOrigin && killerId && G && G.remotePlayers && G.remotePlayers[killerId]) {
-        const kp = G.remotePlayers[killerId];
-        if (kp && kp.pos) {
-          shotOrigin = new THREE.Vector3(kp.pos[0], kp.pos[1] + 1.5, kp.pos[2]);
-        }
-      }
-
-      if (shotOrigin) {
-        const eyeH = (CFG.H - (CFG.H - CFG.CROUCH_H) * this.crouchT) - 0.12;
-        const eyePos = new THREE.Vector3(this.position.x, this.position.y + eyeH, this.position.z);
-        const toShot = new THREE.Vector3().subVectors(shotOrigin, eyePos);
-        const shotDist = toShot.length();
-        const shotDir = shotDist > 0.01 ? toShot.clone().normalize() : new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-
-        const pullDist = 2.0;
-        const backDir = shotDir.clone().negate();
-        const rayHit = G && G.raycast ? G.raycast(eyePos, backDir, pullDist + 0.3) : null;
-        const actualPull = rayHit ? Math.max(0.1, rayHit.distance - 0.3) : pullDist;
-
-        this.deathCamPos.copy(eyePos).addScaledVector(backDir, actualPull);
-        this.deathCamPos.y += Math.min(0.35, actualPull * 0.25);
-        this.deathCamTarget.copy(shotOrigin);
-      } else {
-        const offset = new THREE.Vector3(0, 2, 4).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-        this.deathCamPos.copy(this.position).add(offset);
-        this.deathCamTarget.copy(this.position);
-      }
     }
 
     if (this.engine && this.engine.eventBus) {
       this.engine.eventBus.emit('PLAYER_DIED', {
         position: this.position.clone(),
         killerId,
-        cause
+        cause,
+        shotOrigin: sOrigin ? sOrigin.clone() : null,
+        beamDir: blowDir ? (blowDir.isVector3 ? blowDir.clone() : new THREE.Vector3(...blowDir)) : null
       });
     }
   }
