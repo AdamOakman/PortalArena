@@ -91,7 +91,6 @@ export function onMessage(G, data) {
     }
     const switchBtn = document.getElementById('btnswitchmode');
     if (switchBtn) switchBtn.textContent = G.isSpectator ? 'JOIN GAME (J)' : 'SPECTATE';
-    if (!G.pointerLocked) G.requestLock();
   } else if (data.type === 'join_success') {
     G.isSpectator = false;
     G.localPlayerId = data.playerId;
@@ -139,7 +138,6 @@ export function onMessage(G, data) {
     const mp = document.getElementById('menupanel');
     if (mp) mp.classList.add('hidden');
     G.addEventLog('Joined game as active player', true);
-    if (!G.pointerLocked) G.requestLock();
   } else if (data.type === 'join_denied') {
     G.addEventLog('Cannot join: ' + (data.reason || 'Server full'), true);
   } else if (data.type === 'spectate_success') {
@@ -169,7 +167,6 @@ export function onMessage(G, data) {
     const mp = document.getElementById('menupanel');
     if (mp) mp.classList.add('hidden');
     G.addEventLog('Switched to spectator mode', false);
-    if (!G.pointerLocked) G.requestLock();
   } else if (data.type === 'spectate_denied') {
     G.addEventLog('Cannot spectate: ' + (data.reason || 'Spectator slots full'), true);
   } else if (data.type === 'player_connected') {

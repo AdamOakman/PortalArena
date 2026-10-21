@@ -547,6 +547,18 @@ export class MenuController {
     if (G.isSpectator) {
       if (G.requestJoin) G.requestJoin();
     } else {
+      G.isSpectator = true;
+      G.spectatorMode = 'freefly';
+      if (G.gun) G.gun.visible = false;
+      if (G.rocketGun) G.rocketGun.visible = false;
+      if (G.instagibGun) G.instagibGun.visible = false;
+      if (G.playerModel) G.playerModel.visible = false;
+      if (G.pl && G.specPos) {
+        G.specPos.copy(G.pl.pos);
+        G.specPos.y += 2;
+        G.specYaw = G.pl.yaw;
+        G.specPitch = G.pl.pitch;
+      }
       if (G.requestSpectate) G.requestSpectate();
     }
     if (G.requestLock) G.requestLock();
@@ -621,7 +633,9 @@ export class MenuController {
     }
 
     if (typeof document !== 'undefined' && document.exitPointerLock) {
-      document.exitPointerLock();
+      try {
+        document.exitPointerLock();
+      } catch { /* ignore */ }
     }
     G.pointerLocked = false;
 

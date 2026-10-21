@@ -21,6 +21,9 @@ export class InputManager {
     this.keys = this.context?.keys || {};
     this.pointerLocked = false;
     this.sensitivity = 0.0023;
+    this.lastUnlockTime = 0;
+    this.pendingLockRetry = false;
+    this._retryLockTimer = null;
 
     if (this.context) {
       this.context.keys = this.keys;
@@ -32,14 +35,66 @@ export class InputManager {
   }
 
   requestPointerLock() {
-    if (this.canvas && this.canvas.requestPointerLock) {
-      this.canvas.requestPointerLock();
+    const canvas = this.canvas || (typeof document !== 'undefined' ? document.getElementById('gl') : null);
+    if (!canvas) return;
+
+    if (document.pointerLockElement === canvas) {
+      this.pointerLocked = true;
+      if (this.context) this.context.pointerLocked = true;
+      this.pendingLockRetry = false;
+      return;
     }
+
+    try {
+      if (typeof canvas.focus === 'function') {
+        canvas.focus({ preventScroll: true });
+      }
+    } catch { /* ignore */ }
+
+    try {
+      const lockPromise = canvas.requestPointerLock();
+      if (lockPromise && typeof lockPromise.catch === 'function') {
+        lockPromise.catch((err) => {
+          // In Chromium, exiting pointer lock via ESC triggers a 1.25s cooldown during which
+          // calling requestPointerLock() throws/rejects SecurityError.
+          // Handle gracefully and schedule retry once cooldown passes.
+          const msg = String(err?.message || err || '');
+          if (err?.name === 'SecurityError' || msg.includes('Pointer lock cannot be acquired immediately')) {
+            this._handleCooldownLockRetry();
+          }
+        });
+      }
+    } catch { /* ignore */ }
+  }
+
+  _handleCooldownLockRetry() {
+    this.pendingLockRetry = true;
+    if (this._retryLockTimer) {
+      clearTimeout(this._retryLockTimer);
+    }
+    const elapsed = performance.now() - (this.lastUnlockTime || 0);
+    const delay = Math.max(50, Math.ceil(1300 - elapsed));
+    this._retryLockTimer = setTimeout(() => {
+      this._retryLockTimer = null;
+      const G = this.context;
+      if (this.pendingLockRetry && G && G.started && !G.won && (!G.menuController || !G.menuController.isMenuOpen())) {
+        this.requestPointerLock();
+      }
+    }, delay);
   }
 
   exitPointerLock() {
+    this.pendingLockRetry = false;
+    if (this._retryLockTimer) {
+      clearTimeout(this._retryLockTimer);
+      this._retryLockTimer = null;
+    }
+    this.pointerLocked = false;
+    if (this.context) this.context.pointerLocked = false;
     if (typeof document !== 'undefined' && document.exitPointerLock) {
-      document.exitPointerLock();
+      try {
+        document.exitPointerLock();
+      } catch { /* ignore */ }
     }
   }
 
@@ -48,11 +103,22 @@ export class InputManager {
 
     document.addEventListener('pointerlockchange', () => {
       const wasLocked = this.pointerLocked;
-      this.pointerLocked = document.pointerLockElement === this.canvas;
-      if (this.context) this.context.pointerLocked = this.pointerLocked;
+      const isLocked = !!(this.canvas && document.pointerLockElement === this.canvas);
+      this.pointerLocked = isLocked;
+      if (this.context) this.context.pointerLocked = isLocked;
+
+      if (!isLocked) {
+        this.lastUnlockTime = performance.now();
+      } else {
+        this.pendingLockRetry = false;
+        if (this._retryLockTimer) {
+          clearTimeout(this._retryLockTimer);
+          this._retryLockTimer = null;
+        }
+      }
 
       if (this.context?.menuController) {
-        this.context.menuController.onPointerLockChange(this.pointerLocked, wasLocked);
+        this.context.menuController.onPointerLockChange(isLocked, wasLocked);
       } else {
         const menuPanel = this.context?.menuPanel || document.getElementById('menupanel');
         if (menuPanel) {
@@ -72,24 +138,48 @@ export class InputManager {
       }
     });
 
-    if (this.canvas) {
-      this.canvas.addEventListener('click', () => {
-        AudioSys.ensure();
-        const G = this.context;
-        if (G && G.started && !this.pointerLocked && !G.won) {
-          if (G.menuController && G.menuController.isMenuOpen()) {
-            return;
-          }
-          this.requestPointerLock();
+    document.addEventListener('pointerlockerror', () => {
+      this.pointerLocked = false;
+      if (this.context) this.context.pointerLocked = false;
+    });
+
+    const triggerLock = () => {
+      AudioSys.ensure();
+      const G = this.context;
+      if (G && G.started && !this.pointerLocked && !G.won) {
+        if (G.menuController && G.menuController.isMenuOpen()) {
+          return;
         }
-      });
+        this.requestPointerLock();
+      }
+    };
+
+    if (this.canvas) {
+      this.canvas.addEventListener('click', triggerLock);
+      this.canvas.addEventListener('pointerdown', triggerLock);
     }
+    window.addEventListener('click', () => {
+      const G = this.context;
+      if (G && G.started && !this.pointerLocked && !G.won) {
+        if (G.menuController && G.menuController.isMenuOpen()) return;
+        triggerLock();
+      }
+    });
+    window.addEventListener('pointerdown', (e) => {
+      const G = this.context;
+      if (G && G.started && !this.pointerLocked && !G.won) {
+        if (G.menuController && G.menuController.isMenuOpen()) return;
+        if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.closest?.('.retro-menu-item'))) return;
+        triggerLock();
+      }
+    });
 
     document.addEventListener('mousemove', (e) => {
+      const G = this.context;
+      if (G?.menuController && G.menuController.isMenuOpen()) return;
       if (!this.pointerLocked || (this.canvas && document.pointerLockElement !== this.canvas)) return;
       if (Math.abs(e.movementX) > 100 || Math.abs(e.movementY) > 100) return;
 
-      const G = this.context;
       const fov = G?.camera?.fov || 115;
       const baseFov = G?.baseFov || 115;
       const sens = this.sensitivity * (fov / baseFov);
@@ -221,6 +311,13 @@ export class InputManager {
       }
 
       if (e.target && e.target.tagName === 'INPUT') return;
+
+      if (this.pendingLockRetry && G && G.started && !this.pointerLocked && !G.won) {
+        const elapsed = performance.now() - (this.lastUnlockTime || 0);
+        if (elapsed >= 1250) {
+          this.requestPointerLock();
+        }
+      }
 
       const c = e.code;
       if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyJ', 'ControlLeft', 'BracketLeft', 'BracketRight', 'Digit1', 'Digit2', 'Digit3'].includes(c)) {

@@ -521,7 +521,9 @@ export class PortalClient {
     if (G.menuController) G.menuController.hideInGameMenu();
 
     if (typeof document !== 'undefined' && document.exitPointerLock) {
-      document.exitPointerLock();
+      try {
+        document.exitPointerLock();
+      } catch { /* ignore */ }
     }
     G.pointerLocked = false;
     G.started = false;

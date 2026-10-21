@@ -97,19 +97,25 @@
 
   /* ---------- Retro Diablo 1 / Quake 1 Gothic-Slipgate Overlay Styling ---------- */
   .overlay{ position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
-    background:radial-gradient(ellipse at 50% 38%, rgba(24,12,10,.62), rgba(6,4,5,.82)); }
+    background:radial-gradient(ellipse at 50% 50%, rgba(14,8,10,.35), rgba(0,0,0,.55)); }
   #startpanel{ opacity:0; transition:opacity .3s ease; }
 
-  /* Retro Panel Container */
-  .panel{ position:relative; width:min(740px, 94vw); min-height:480px; padding:38px 46px; border-radius:3px; text-align:center;
-    background:radial-gradient(circle at 50% 28%, rgba(38,18,14,.96), rgba(12,7,8,.98));
-    border:2px solid #5a3822; outline:1px solid rgba(255,122,34,.22); outline-offset:5px;
-    box-shadow:0 0 80px rgba(0,0,0,.95), 0 0 35px rgba(180,50,10,.25), 0 0 25px rgba(255,100,20,.12) inset; }
-  /* wrought-iron corner brackets with slipgate rivets */
-  .panel::before, .panel::after{ content:''; position:absolute; width:30px; height:30px;
-    border-style:solid; border-color:rgba(255,140,40,.9); filter:drop-shadow(0 0 8px rgba(255,122,34,.6)); }
-  .panel::before{ top:8px; left:8px; border-width:3px 0 0 3px; }
-  .panel::after{ bottom:8px; right:8px; border-width:0 3px 3px 0; }
+  /* Frameless Retro Menu Panel */
+  .panel{ position:relative; width:min(740px, 94vw); min-height:480px; padding:28px 20px; border-radius:0; text-align:center;
+    background:transparent; border:none; outline:none; box-shadow:none; }
+  .panel::before, .panel::after{ display:none; }
+
+  /* Modals (Exit Fallback / Round Summary) retain a subtle framed plaque */
+  #exit-modal .panel, #winpanel .panel{
+    background:radial-gradient(circle at 50% 30%, rgba(32,16,14,.96), rgba(12,7,8,.98));
+    border:1px solid rgba(255,122,34,.35); outline:1px solid rgba(255,122,34,.16); outline-offset:4px;
+    box-shadow:0 0 60px rgba(0,0,0,.95), 0 0 20px rgba(255,100,20,.12) inset;
+    padding:34px 40px; border-radius:3px;
+  }
+  #exit-modal .panel::before, #exit-modal .panel::after,
+  #winpanel .panel::before, #winpanel .panel::after{
+    display:block;
+  }
 
   /* 3D decorator overlay canvas */
   .menu-decorator-canvas{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; }
