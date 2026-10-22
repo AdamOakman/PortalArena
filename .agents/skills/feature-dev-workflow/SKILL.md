@@ -1,6 +1,6 @@
 ---
 name: feature-dev-workflow
-description: Mandatory workflow whenever asked to develop a new feature or fix a bug in this repo. Focus on minimal viable solutions, strong performance, and proactive reduction/removal of unnecessary surrounding code. Run lint, build, and knip verification after code changes; static verification (lint + build + knip) is the only gate (no smoke tests of any kind, no e2e/browser testing), and finish with a commit-message summary of all changes.
+description: Mandatory workflow whenever asked to develop a new feature or fix a bug in this repo. Focus on minimal viable solutions, strong performance, and proactive reduction/removal of unnecessary surrounding code. Run parallel verification (npm run verify) running test, lint, build, and knip after code changes; fast verification is the only gate (no smoke tests of any kind, no e2e/browser testing), and finish with a commit-message summary of all changes.
 ---
 
 # Feature Development / Bug-Fix Workflow
@@ -32,30 +32,35 @@ Apply this workflow for **every** request to develop a feature or fix a bug in t
   - `server/bots/BotAgent.js`: Server-side bot navigation and combat AI.
 - **Shared**:
   - `shared/constants.js`: Common game constants, physics values, and protocol packet types.
+- **Tests**:
+  - `test/unit/`: Fast, headless Node.js unit tests (`node:test`) validating pure math, subsystem interface contracts, physics boundaries, and state machines.
+- **Scripts**:
+  - `scripts/verify.sh`: Parallel verification script executing `test`, `lint`, `build`, and `knip` concurrently and printing ordered logs on failure.
 
 ## Rules
 
-1. **Verify after code changes (`lint` + `build` + `knip`)**
+1. **Verify after code changes (`npm run verify`)**
    - After editing files (or a batch of related edits), run:
      ```bash
-     npm run lint
-     npm run build
-     npm run knip
+     npm run verify
      ```
-     *(Note: On Windows PowerShell, execute via `cmd.exe /c "npm run lint"`, `cmd.exe /c "npm run build"`, and `cmd.exe /c "npm run knip"` or `npm.cmd` to avoid PowerShell execution policy restrictions).*
-   - All three commands must exit with code 0:
-     - `npm run lint`: Validates code style and syntax across `client/`, `server/`, and `shared/`.
-     - `npm run build`: Validates Vite ES module resolution, bundling, and asset pipelines into `dist/`.
-     - `npm run knip`: Validates that there are no unused files, dependencies, or exports.
-   - If any command reports errors: fix them immediately, re-run, and only move on once all three pass cleanly.
+     *(Note: On Windows PowerShell, execute via `npm.cmd run verify` or `cmd.exe /c "npm run verify"` to avoid PowerShell execution policy restrictions).*
+   - `npm run verify` runs all four checks in parallel and reports ordered results:
+     - `test`: Validates pure math, angle normalization, cooldown mechanics, interface contracts, and regression tests via headless `node --test` in sub-second time.
+     - `lint`: Validates code style and syntax across `client/`, `server/`, `shared/`, and `test/`.
+     - `build`: Validates Vite ES module resolution, bundling, and asset pipelines into `dist/`.
+     - `knip`: Validates that there are no unused files, dependencies, or exports.
+   - Alternatively, individual checks can be run directly via `npm test`, `npm run lint`, `npm run build`, and `npm run knip`.
+   - All checks must pass with exit code 0.
+   - If any check reports errors: fix them immediately, re-run, and only move on once verification passes completely.
    - Never leave a known violation, build break, or dead/unused code behind.
 
-2. **No smoke tests of any kind — static verification is the only gate**
-   - `npm run lint`, `npm run build`, and `npm run knip` are the **sole** verification gates for this workflow. Do not perform any runtime verification.
+2. **No smoke tests of any kind — verification suite is the only gate**
+   - `npm run verify` (or the underlying `test`, `lint`, `build`, and `knip`) is the **sole** verification gate for this workflow. Do not perform any manual or browser runtime verification.
    - Do **not** run the app, launch servers/clients, exercise the UI, or interact with a running build to "check it works".
-   - Do **not** write or run throwaway/scratch scripts, one-off test harnesses, or ad-hoc smoke checks.
+   - Do **not** write or run throwaway/scratch scripts, ad-hoc smoke checks, or manual playtesting.
    - Do **not** spin up browser-based end-to-end tests (no Playwright, Puppeteer, or manual browser sessions).
-   - If a change is clean per `lint`, `build`, and `knip`, it is done — do not add extra verification to "be safe".
+   - If `npm run verify` passes clean, it is done — do not add extra manual verification to "be safe".
 
 3. **Minimal viable solution, strong performance focus & proactive code reduction**
    - **Minimal Viable Solution (MVS)**:
@@ -84,7 +89,5 @@ Fix portal cooldown desync between clients
 - client/portals/PortalManager.js: reset cooldown timer on server snapshot to prevent
   stale cooldowns after reconnection
 - shared/constants.js: add PORTAL_COOLDOWN_MS shared constant
-- npm run lint passes clean
-- npm run build passes clean
-- npm run knip passes clean
+- npm run verify passes clean (test, lint, build, knip)
 ```

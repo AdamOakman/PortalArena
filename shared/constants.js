@@ -8,6 +8,8 @@ export const CFG = {
   WALK: 6.0, 
   AIRCAP: 35,
   AACC: 8, 
+  AIR_FORWARD_ACC: 0.35, // very gentle mid-air forward/backward nudge
+  AIR_FORWARD_CAP: 60, // linear speed threshold where mid-air W/S acceleration stops completely
   STRAFE_FOLLOW: 1.0, // air-strafe: heading follows the mouse turn 1:1 (keeps velocity 90° off the wish, so momentum is preserved)
   GACC: 80, 
   FR: 7.5, 

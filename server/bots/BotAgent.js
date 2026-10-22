@@ -30,6 +30,12 @@ export const FUNNY_BOT_NAMES = [
 
 // ------------------------------------------------------------------ pure helpers
 
+export function normalizeAngle(ang) {
+  while (ang > Math.PI) ang -= Math.PI * 2;
+  while (ang < -Math.PI) ang += Math.PI * 2;
+  return ang;
+}
+
 function getRampEndpoints(rm) {
   let fwdX = 1, fwdZ = 0;
   if (rm.dir === 1) { fwdX = 0; fwdZ = 1; }
@@ -647,9 +653,7 @@ export class BotAgent {
         const targetYaw = Math.atan2(-opp.dir.x, -opp.dir.z);
         const targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, opp.dir.y)));
 
-        let oppDyaw = targetYaw - this.yaw;
-        while (oppDyaw > Math.PI) oppDyaw -= Math.PI * 2;
-        while (oppDyaw < -Math.PI) oppDyaw += Math.PI * 2;
+        const oppDyaw = normalizeAngle(targetYaw - this.yaw);
 
         const aimAligned = Math.abs(oppDyaw) < 0.12 && Math.abs(targetPitch - this.pitch) < 0.14;
         const aimDwellOk = (nowT - st.instagibAimStartT) > 0.28;
@@ -874,9 +878,7 @@ export class BotAgent {
       desiredYaw = st.avoidYaw;
     }
 
-    let dyaw = desiredYaw - this.yaw;
-    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
-    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+    const dyaw = normalizeAngle(desiredYaw - this.yaw);
 
     const isPortalAiming = st.portalPhase === 'aim_primary' || st.portalPhase === 'delay_secondary' || st.portalPhase === 'aim_secondary';
     const maxTurn = (isPortalAiming ? 3.8 : (activeOpp ? 4.2 : 4.8)) * DT;
@@ -885,8 +887,7 @@ export class BotAgent {
     } else {
       this.yaw += dyaw;
     }
-    while (this.yaw > Math.PI) this.yaw -= Math.PI * 2;
-    while (this.yaw < -Math.PI) this.yaw += Math.PI * 2;
+    this.yaw = normalizeAngle(this.yaw);
 
     let targetPitch;
     if (activeOpp) {
@@ -1003,9 +1004,7 @@ export class BotAgent {
     const botPortalBase = this.portalBaseIndex;
 
     if (st.portalPhase === 'aim_primary') {
-      let aimDyaw = st.primaryAimYaw - this.yaw;
-      while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
-      while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
+      const aimDyaw = normalizeAngle(st.primaryAimYaw - this.yaw);
       const aimDpitch = Math.abs(st.primaryAimPitch - this.pitch);
       const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
       const timedOut = nowT - st.primaryAimT > 1.2;
@@ -1046,9 +1045,7 @@ export class BotAgent {
         st.lastPortalT = nowT + 2.0;
       }
     } else if (st.portalPhase === 'aim_secondary') {
-      let aimDyaw = st.secondaryAimYaw - this.yaw;
-      while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
-      while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
+      const aimDyaw = normalizeAngle(st.secondaryAimYaw - this.yaw);
       const aimDpitch = Math.abs(st.secondaryAimPitch - this.pitch);
       const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
       const timedOut = nowT - st.secondaryAimT > 1.2;

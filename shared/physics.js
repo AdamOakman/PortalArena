@@ -463,6 +463,19 @@ export function initPhysics(TH, CFG, PORT) {
     const relCam = new V3().subVectors(camPos, P.c).applyMatrix4(R);
     pl.pos.copy(Q.c).add(relCam).sub(eyeOffset);
 
+    if (Q.n.y < -0.4) {
+      // Exit portal is on ceiling: place player completely below ceiling
+      const curH = playerHeight(pl.crouchT);
+      if (pl.pos.y > Q.c.y - curH - 0.2) {
+        pl.pos.y = Q.c.y - curH - 0.2;
+      }
+    }
+
+    const outSpeed = pl.vel.dot(Q.n);
+    if (outSpeed < 6.0) {
+      pl.vel.addScaledVector(Q.n, 6.0 - outSpeed);
+    }
+
     const baseQ = new TH.Quaternion().setFromEuler(new TH.Euler(pl.pitch, pl.yaw, 0, 'YXZ'));
     if (pl.viewOffset) baseQ.multiply(pl.viewOffset);
 
@@ -524,15 +537,20 @@ export function initPhysics(TH, CFG, PORT) {
         accelerate(pl.vel, wish, CFG.AACC, CFG.AIRCAP, dt);
       }
       if (!keys.KeyA && !keys.KeyD && (keys.KeyW || keys.KeyS)) {
-        // Forward glide: W/S alone curves the path without losing speed.
-        const speed = Math.hypot(pl.vel.x, pl.vel.z);
-        if (speed > 1.0) {
+        // Forward glide: W/S alone curves the path without losing speed,
+        // with subtle acceleration up to the speed threshold (~60 m/s).
+        const linearSpeed = pl.vel.length();
+        if (linearSpeed < (CFG.AIR_FORWARD_CAP || 60)) {
+          accelerate(pl.vel, wish, CFG.AIR_FORWARD_ACC || 0.35, CFG.AIR_FORWARD_CAP || 60, dt);
+        }
+        const horizSpeed = Math.hypot(pl.vel.x, pl.vel.z);
+        if (horizSpeed > 1.0) {
           const vDir = new V3(pl.vel.x, 0, pl.vel.z).normalize();
           const dot = vDir.dot(wish);
           if (dot > 0) {
             vDir.lerp(wish, 4.0 * dt).normalize();
-            pl.vel.x = vDir.x * speed;
-            pl.vel.z = vDir.z * speed;
+            pl.vel.x = vDir.x * horizSpeed;
+            pl.vel.z = vDir.z * horizSpeed;
           }
         }
       } else if (!keys.KeyW && !keys.KeyS && (keys.KeyA || keys.KeyD)) {
