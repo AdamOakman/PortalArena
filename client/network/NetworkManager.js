@@ -169,8 +169,30 @@ export function onMessage(G, data) {
     G.gun.visible = false;
     G.rocketGun.visible = false;
     G.instagibGun.visible = false;
-    G.playerModel.visible = false;
-    if (G.playerCloneModel) G.playerCloneModel.visible = false;
+    if (G.playerModel) {
+      G.playerModel.visible = false;
+      G.playerModel.position.set(0, -9999, 0);
+    }
+    if (G.playerCloneModel) {
+      G.playerCloneModel.visible = false;
+      G.playerCloneModel.position.set(0, -9999, 0);
+    }
+    const myPid = data.playerId || G.localPlayerId;
+    if (myPid) {
+      if (G.engine?.entityManager) {
+        G.engine.entityManager.despawn(myPid);
+      }
+      if (G.remotePlayers && G.remotePlayers[myPid]) {
+        if (G.remotePlayers[myPid].destroy) G.remotePlayers[myPid].destroy();
+        delete G.remotePlayers[myPid];
+      }
+      if (G.remotePlayerMeshes && G.remotePlayerMeshes[myPid]) {
+        const m = G.remotePlayerMeshes[myPid];
+        if (m.userData?.cloneMesh && G.scene) G.scene.remove(m.userData.cloneMesh);
+        if (G.scene) G.scene.remove(m);
+        delete G.remotePlayerMeshes[myPid];
+      }
+    }
     G.spectatorMode = 'freefly';
     G.specPos.copy(G.pl.pos);
     G.specPos.y += 2;
@@ -245,7 +267,7 @@ export function onMessage(G, data) {
       G.destroyedWallObbs = [];
     }
     for (const pid in data.players) {
-      if (pid === G.localPlayerId && !G.isSpectator) {
+      if (pid === G.localPlayerId) {
         continue;
       }
       if (!G.remotePlayers[pid]) {
@@ -285,18 +307,24 @@ export function onMessage(G, data) {
       }
     }
     for (const pid in G.remotePlayers) {
-      if (!data.players[pid]) {
+      if (!data.players[pid] || pid === G.localPlayerId) {
         if (G.engine?.entityManager) {
           G.engine.entityManager.despawn(pid);
-        } else {
-          delete G.remotePlayers[pid];
-          if (G.remotePlayerMeshes[pid]) {
-            if (G.remotePlayerMeshes[pid].userData?.cloneMesh) {
-              G.scene.remove(G.remotePlayerMeshes[pid].userData.cloneMesh);
-            }
-            G.scene.remove(G.remotePlayerMeshes[pid]);
-            delete G.remotePlayerMeshes[pid];
+        }
+        if (G.remotePlayers[pid]) {
+          if (G.remotePlayers[pid].destroy) {
+            G.remotePlayers[pid].destroy();
           }
+          delete G.remotePlayers[pid];
+        }
+        if (G.remotePlayerMeshes && G.remotePlayerMeshes[pid]) {
+          if (G.remotePlayerMeshes[pid].userData?.cloneMesh && G.scene) {
+            G.scene.remove(G.remotePlayerMeshes[pid].userData.cloneMesh);
+          }
+          if (G.scene) {
+            G.scene.remove(G.remotePlayerMeshes[pid]);
+          }
+          delete G.remotePlayerMeshes[pid];
         }
       }
     }

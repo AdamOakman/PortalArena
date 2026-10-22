@@ -619,6 +619,7 @@ export class GameServer {
         }));
 
         this.broadcast(JSON.stringify({ type: 'player_connected', name: pName + ' (spectating)' }));
+        this.broadcastState();
 
       } else if (data.type === 'input') {
         if (!playerId) return;
@@ -1010,6 +1011,10 @@ export class GameServer {
       steps++;
     }
 
+    this.broadcastState();
+  }
+
+  broadcastState() {
     const stateUpdate = {
       type: 'state',
       tick: this.gameState.tick++,

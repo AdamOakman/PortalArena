@@ -36,6 +36,22 @@ export class EntityManager {
     if (this.remotePlayers[id]) {
       delete this.remotePlayers[id];
     }
+    const ctx = this.engine?.context;
+    if (ctx) {
+      if (ctx.remotePlayers && ctx.remotePlayers[id]) {
+        delete ctx.remotePlayers[id];
+      }
+      if (ctx.remotePlayerMeshes && ctx.remotePlayerMeshes[id]) {
+        const mesh = ctx.remotePlayerMeshes[id];
+        if (mesh.userData?.cloneMesh && ctx.scene) {
+          ctx.scene.remove(mesh.userData.cloneMesh);
+        }
+        if (ctx.scene) {
+          ctx.scene.remove(mesh);
+        }
+        delete ctx.remotePlayerMeshes[id];
+      }
+    }
   }
 
   /**

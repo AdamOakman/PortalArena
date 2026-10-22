@@ -245,8 +245,13 @@ export class RemotePlayer extends Entity {
 
   destroy() {
     super.destroy();
-    if (this.mesh && this.mesh.parent) {
-      this.mesh.parent.remove(this.mesh);
+    if (this.mesh) {
+      if (this.mesh.userData?.cloneMesh && this.mesh.userData.cloneMesh.parent) {
+        this.mesh.userData.cloneMesh.parent.remove(this.mesh.userData.cloneMesh);
+      }
+      if (this.mesh.parent) {
+        this.mesh.parent.remove(this.mesh);
+      }
     }
     if (this.cloneMesh && this.cloneMesh.parent) {
       this.cloneMesh.parent.remove(this.cloneMesh);
