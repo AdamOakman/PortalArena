@@ -362,14 +362,14 @@ export function initPhysics(TH, CFG, PORT) {
 
         const du = Math.abs((cx - P.c.x) * P.r.x + (cy - P.c.y) * P.r.y + (cz - P.c.z) * P.r.z);
         const dv = Math.abs((cx - P.c.x) * P.u.x + (cy - P.c.y) * P.u.y + (cz - P.c.z) * P.u.z);
-        if (du <= PORT.hw - 0.05 && dv <= PORT.hh - 0.05) {
+        if (du <= PORT.hw && dv <= PORT.hh) {
           doTeleport(pl, R, P, Q, t, dt, tpState, events);
           return;
         }
       }
 
-      // 2. Feet / base entry (for floor or upward/downward angled portals)
-      if (Math.abs(P.n.y) > 0.4 && prevPos) {
+      // 2. Feet / base entry (for floor portals exiting to wall or ground)
+      if (P.n.y > 0.4 && Q.n.y >= -0.4 && prevPos) {
         const prevFeet = new V3(prevPos.x, prevPos.y + 0.15, prevPos.z);
         const currFeet = new V3(pl.pos.x, pl.pos.y + 0.15, pl.pos.z);
         const a_feet = (prevFeet.x - P.c.x) * P.n.x + (prevFeet.y - P.c.y) * P.n.y + (prevFeet.z - P.c.z) * P.n.z;
@@ -413,8 +413,16 @@ export function initPhysics(TH, CFG, PORT) {
       if (outSpeed < 6.0) {
         pl.vel.addScaledVector(Q.n, 6.0 - outSpeed);
       }
+    } else if (Q.n.y < -0.4) {
+      // Exit portal is on ceiling: place player completely below ceiling
+      const curH = playerHeight(pl.crouchT);
+      pl.pos.copy(Q.c).add(relExit).addScaledVector(Q.n, curH + 0.2);
+      const outSpeed = pl.vel.dot(Q.n);
+      if (outSpeed < 6.0) {
+        pl.vel.addScaledVector(Q.n, 6.0 - outSpeed);
+      }
     } else {
-      // Exit portal is on floor/ceiling: place player exiting along Q.n
+      // Exit portal is on floor: place player exiting along Q.n
       pl.pos.copy(Q.c).add(relExit).addScaledVector(Q.n, 0.2);
       const outSpeed = pl.vel.dot(Q.n);
       if (outSpeed < 6.0) {
