@@ -14,7 +14,7 @@ import { AudioController, AudioSys } from '../audio/AudioController.js';
 import { PortalGun } from '../weapons/PortalGun.js';
 import { RocketLauncher } from '../weapons/RocketLauncher.js';
 import { InstagibRifle } from '../weapons/InstagibRifle.js';
-import { CFG, PORT } from '../../shared/constants.js';
+import { CFG, PORT, getPlayerHeight } from '../../shared/constants.js';
 
 const _flatVx = new THREE.Vector3();
 const _flatVy = new THREE.Vector3();
@@ -827,8 +827,9 @@ export class GameEngine {
             if (!rp || rp.isDead) continue;
             const box = new THREE.Box3();
             const rpPos = new THREE.Vector3().fromArray(rp.pos);
+            const rpH = getPlayerHeight(rp.crouchT);
             box.min.copy(rpPos).add(new THREE.Vector3(-0.45, 0, -0.45));
-            box.max.copy(rpPos).add(new THREE.Vector3(0.45, CFG.H, 0.45));
+            box.max.copy(rpPos).add(new THREE.Vector3(0.45, rpH, 0.45));
             const ray = new THREE.Ray(r.pos, rDir);
             const pt = ray.intersectBox(box, new THREE.Vector3());
             if (pt) {
@@ -842,8 +843,9 @@ export class GameEngine {
 
           if (!r.isLocal && !G.isDead && (!r.shooterId || String(r.shooterId) !== String(G.localPlayerId))) {
             const box = new THREE.Box3();
+            const plH = getPlayerHeight(G.pl?.crouchT);
             box.min.copy(G.pl.pos).add(new THREE.Vector3(-0.45, 0, -0.45));
-            box.max.copy(G.pl.pos).add(new THREE.Vector3(0.45, CFG.H, 0.45));
+            box.max.copy(G.pl.pos).add(new THREE.Vector3(0.45, plH, 0.45));
             const ray = new THREE.Ray(r.pos, rDir);
             const pt = ray.intersectBox(box, new THREE.Vector3());
             if (pt) {

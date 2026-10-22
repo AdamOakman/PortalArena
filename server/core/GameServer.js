@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import * as TH from 'three';
-import { CFG, PORT, TICK_RATE, MAX_PLAYERS, MAX_SPECTATORS } from '../../shared/constants.js';
+import { CFG, PORT, TICK_RATE, MAX_PLAYERS, MAX_SPECTATORS, getPlayerHeight } from '../../shared/constants.js';
 import { initPhysics } from '../../shared/physics.js';
 import { BotAgent } from '../bots/BotAgent.js';
 import { MatchSession } from '../match/MatchSession.js';
@@ -368,7 +368,7 @@ export class GameServer {
         const pl = this.gameState.players[plId];
         if (!pl.isDead) {
           const pCenter = pl.pos.clone();
-          pCenter.y += CFG.H / 2;
+          pCenter.y += getPlayerHeight(pl.crouchT) / 2;
           const dvec = new TH.Vector3().subVectors(pCenter, hitPt);
           const dist = dvec.length();
           if (dist < 12) {
@@ -721,7 +721,7 @@ export class GameServer {
           const pl = this.gameState.players[pid];
           if (!pl.isDead) {
             const pCenter = pl.pos.clone();
-            pCenter.y += CFG.H / 2;
+            pCenter.y += getPlayerHeight(pl.crouchT) / 2;
             const dvec = new TH.Vector3().subVectors(pCenter, explPos);
             const dist = dvec.length();
             if (dist < 12) {

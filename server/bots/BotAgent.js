@@ -3,7 +3,7 @@
  */
 
 import * as TH from 'three';
-import { CFG, PORT, TICK_RATE } from '../../shared/constants.js';
+import { CFG, PORT, TICK_RATE, getPlayerHeight } from '../../shared/constants.js';
 import { initPhysics } from '../../shared/physics.js';
 
 const physics = initPhysics(TH, CFG, PORT);
@@ -16,8 +16,8 @@ const PORTAL_COOLDOWN_S = 4.5;
 const PORTAL_CHANCE = 0.55;
 const JUMP_COOLDOWN_S = 0.35;
 const ROCKET_COOLDOWN_S = 8.0;
-const INSTAGIB_COOLDOWN_S = 6.0;
-const INSTAGIB_HIT_CHANCE = 0.20;
+const INSTAGIB_COOLDOWN_S = 4.5;
+const INSTAGIB_HIT_CHANCE = 0.30;
 
 export const FUNNY_BOT_NAMES = [
   'SirLagALot', 'AimBot9000', 'PotatoAim', 'GibMagnet', 'RocketClown',
@@ -445,7 +445,7 @@ function findOpponent(pid, eyePos, players, obbs, maxDist = 45) {
     const pl = players[id];
     if (!pl || pl.isDead) continue;
     const oppPos = pl.pos.clone();
-    oppPos.y += CFG.H * 0.6;
+    oppPos.y += getPlayerHeight(pl.crouchT) * 0.6;
     const toOpp = oppPos.clone().sub(eyePos);
     const dist = toOpp.length();
     if (dist < bestDist) {
@@ -607,7 +607,7 @@ export class BotAgent {
       if (destWall && nowT - st.lastRocketT > ROCKET_COOLDOWN_S && Math.random() < 0.45) {
         this.activeWeapon = 2;
         st.weaponHoldUntilT = nowT + 2.0;
-      } else if (opp && nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && Math.random() < 0.45) {
+      } else if (opp && nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && Math.random() < 0.60) {
         this.activeWeapon = 3;
         st.weaponHoldUntilT = nowT + 1.8;
       } else if (nowT - st.lastWeaponSwapT > 5.0) {
@@ -655,8 +655,8 @@ export class BotAgent {
 
         const oppDyaw = normalizeAngle(targetYaw - this.yaw);
 
-        const aimAligned = Math.abs(oppDyaw) < 0.12 && Math.abs(targetPitch - this.pitch) < 0.14;
-        const aimDwellOk = (nowT - st.instagibAimStartT) > 0.28;
+        const aimAligned = Math.abs(oppDyaw) < 0.15 && Math.abs(targetPitch - this.pitch) < 0.16;
+        const aimDwellOk = (nowT - st.instagibAimStartT) > 0.22;
 
         if (nowT - st.lastInstagibT > INSTAGIB_COOLDOWN_S && onFireInstagib && aimAligned && aimDwellOk) {
           const losHit = raycastWall(eyePos, opp.dir, opp.dist, obbs);
@@ -850,7 +850,7 @@ export class BotAgent {
     if (this.activeWeapon === 3 && st.instagibTargetPid && players[st.instagibTargetPid] && !players[st.instagibTargetPid].isDead) {
       const oppPl = players[st.instagibTargetPid];
       const oppHead = oppPl.pos.clone();
-      oppHead.y += CFG.H * 0.6;
+      oppHead.y += getPlayerHeight(oppPl.crouchT) * 0.6;
       const toOpp = oppHead.sub(eyePos);
       activeOpp = { dir: toOpp.clone().normalize(), dist: toOpp.length() };
     }

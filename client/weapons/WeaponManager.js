@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AudioSys } from '../audio/AudioController.js';
-import { CFG, PORT } from '../../shared/constants.js';
+import { CFG, PORT, getPlayerHeight } from '../../shared/constants.js';
 import { ObjectPool } from '../core/ObjectPool.js';
 import { RocketProjectile } from '../projectiles/RocketProjectile.js';
 
@@ -427,8 +427,9 @@ export class WeaponManager {
         if (!rp || rp.isDead) continue;
         const box = new THREE.Box3();
         const rpPos = new THREE.Vector3().fromArray(rp.pos);
+        const rpH = getPlayerHeight(rp.crouchT);
         box.min.copy(rpPos).add(new THREE.Vector3(-0.45, 0, -0.45));
-        box.max.copy(rpPos).add(new THREE.Vector3(0.45, CFG.H, 0.45));
+        box.max.copy(rpPos).add(new THREE.Vector3(0.45, rpH, 0.45));
         const ray = new THREE.Ray(curPos, curDir);
         const pt = ray.intersectBox(box, new THREE.Vector3());
         if (pt) {
@@ -616,8 +617,9 @@ export class WeaponManager {
         const rp = G.remotePlayers[id];
         const rpPos = new THREE.Vector3().fromArray(rp.pos);
         const box = new THREE.Box3();
+        const rpH = getPlayerHeight(rp.crouchT);
         box.min.copy(rpPos).add(new THREE.Vector3(-0.4, 0, -0.4));
-        box.max.copy(rpPos).add(new THREE.Vector3(0.4, CFG.H, 0.4));
+        box.max.copy(rpPos).add(new THREE.Vector3(0.4, rpH, 0.4));
         const ray = new THREE.Ray(curPos, curDir);
         const playerHit = ray.intersectBox(box, new THREE.Vector3());
         if (playerHit) {
@@ -631,8 +633,9 @@ export class WeaponManager {
 
       if (iter > 0 && !G.won && !G.isDead) {
         const box = new THREE.Box3();
+        const plH = getPlayerHeight(G.pl?.crouchT);
         box.min.copy(G.pl.pos).add(new THREE.Vector3(-0.4, 0, -0.4));
-        box.max.copy(G.pl.pos).add(new THREE.Vector3(0.4, CFG.H, 0.4));
+        box.max.copy(G.pl.pos).add(new THREE.Vector3(0.4, plH, 0.4));
         const ray = new THREE.Ray(curPos, curDir);
         const playerHit = ray.intersectBox(box, new THREE.Vector3());
         if (playerHit) {
@@ -762,7 +765,7 @@ export class WeaponManager {
     G.animObjects.push({ type: 'expl', obj: expl, life: 1.0 });
 
     const pCenter = G.pl.pos.clone();
-    pCenter.y += CFG.H / 2;
+    pCenter.y += getPlayerHeight(G.pl?.crouchT) / 2;
     const dvec = new THREE.Vector3().subVectors(pCenter, pos);
     const dist = dvec.length();
 
@@ -777,7 +780,7 @@ export class WeaponManager {
     for (const pid in G.remotePlayers) {
       const rp = G.remotePlayers[pid];
       if (rp && !rp.isDead) {
-        const rpCenter = new THREE.Vector3(rp.pos[0], rp.pos[1] + CFG.H / 2, rp.pos[2]);
+        const rpCenter = new THREE.Vector3(rp.pos[0], rp.pos[1] + getPlayerHeight(rp.crouchT) / 2, rp.pos[2]);
         const rpdvec = new THREE.Vector3().subVectors(rpCenter, pos);
         const rpDist = rpdvec.length();
         if (rpDist < 12) {

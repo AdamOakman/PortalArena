@@ -449,6 +449,7 @@ export function initPhysics(TH, CFG, PORT) {
       const targetBaseQ = new TH.Quaternion().setFromEuler(new TH.Euler(pl.pitch, pl.yaw, 0, 'YXZ'));
       pl.viewOffset = targetBaseQ.invert().multiply(Q_new);
     }
+    pl.prevYaw = pl.yaw;
 
     tpState.tpGracePortal = Q;
     tpState.tpGraceT = tpState.nowT;
@@ -495,6 +496,7 @@ export function initPhysics(TH, CFG, PORT) {
        const targetBaseQ = new TH.Quaternion().setFromEuler(new TH.Euler(pl.pitch, pl.yaw, 0, 'YXZ'));
        pl.viewOffset = targetBaseQ.invert().multiply(Q_new);
     }
+    pl.prevYaw = pl.yaw;
 
     tpState.tpGracePortal = Q;
     tpState.tpGraceT = tpState.nowT;
@@ -505,7 +507,9 @@ export function initPhysics(TH, CFG, PORT) {
     if (pl.grounded) pl.groundT = tpState.nowT;
     // Yaw change since the previous step; gates air-strafing (the mouse must
     // be turning with the held strafe key).
-    const dyaw = pl.yaw - (pl.prevYaw ?? pl.yaw);
+    let dyaw = pl.yaw - (pl.prevYaw ?? pl.yaw);
+    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
     pl.prevYaw = pl.yaw;
     const wish = wishDir(keys, pl.yaw);
     applyFriction(pl, dt);
@@ -554,22 +558,26 @@ export function initPhysics(TH, CFG, PORT) {
           }
         }
       } else if (!keys.KeyW && !keys.KeyS && (keys.KeyA || keys.KeyD)) {
-        // Air-strafe (Quake's accidental mechanic, made explicit): release the
-        // forward key, hold A/D, and turn the mouse in that same direction ->
-        // the heading rotates toward the strafe direction, following the mouse
-        // turn (STRAFE_FOLLOW x) at preserved magnitude: the flight path curves
-        // without losing momentum.
-        const turningWithStrafe = (keys.KeyA && dyaw > 0) || (keys.KeyD && dyaw < 0);
+        // Air-strafe: release forward key, hold A/D, and turn mouse with strafe.
+        // Heading smoothly curves in the direction of the strafe turn with clamped
+        // rate limit and softened follow ratio to prevent aggressive snappy jerks.
+        const turningWithStrafe = (keys.KeyA && !keys.KeyD && dyaw > 0) || (keys.KeyD && !keys.KeyA && dyaw < 0);
         if (turningWithStrafe) {
           const speed = Math.hypot(pl.vel.x, pl.vel.z);
           if (speed > 1.0) {
             const vx = pl.vel.x / speed, vz = pl.vel.z / speed;
-            // Signed angle from the current heading to the strafe wish (XZ plane)
-            const a = Math.atan2(vx * wish.z - vz * wish.x, vx * wish.x + vz * wish.z);
-            const turn = Math.min(Math.abs(dyaw) * CFG.STRAFE_FOLLOW, Math.abs(a));
-            const sa = Math.sign(a) * turn;
-            pl.vel.x = speed * (vx * Math.cos(sa) - vz * Math.sin(sa));
-            pl.vel.z = speed * (vx * Math.sin(sa) + vz * Math.cos(sa));
+            const fwdX = -Math.sin(pl.yaw), fwdZ = -Math.cos(pl.yaw);
+            const fwdDot = vx * fwdX + vz * fwdZ;
+            if (fwdDot > -0.2) {
+              const turnDir = keys.KeyD ? 1 : -1;
+              const mouseTurn = Math.abs(dyaw);
+              const follow = CFG.STRAFE_FOLLOW ?? 0.5;
+              const maxTurnRate = CFG.STRAFE_MAX_TURN ?? 3.5;
+              const turn = Math.min(mouseTurn * follow, maxTurnRate * dt);
+              const sa = turnDir * turn;
+              pl.vel.x = speed * (vx * Math.cos(sa) - vz * Math.sin(sa));
+              pl.vel.z = speed * (vx * Math.sin(sa) + vz * Math.cos(sa));
+            }
           }
         }
       }

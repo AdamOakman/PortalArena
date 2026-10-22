@@ -100,4 +100,52 @@ describe('Mid-Air W/S Subtle Acceleration & Speed Threshold', () => {
     const newSpeed = Math.hypot(pl.vel.x, pl.vel.z);
     assert.strictEqual(newSpeed, initialSpeed, 'Speed should remain unchanged when no keys are pressed');
   });
+
+  test('air-strafing with KeyD and mouse turn right curves velocity smoothly right while preserving speed', () => {
+    // Airborne player moving forward in -Z with yaw 0
+    const pl = createAirbornePlayer(-10);
+    const initialSpeed = Math.hypot(pl.vel.x, pl.vel.z);
+
+    // Turn mouse right (yaw decreases: dyaw < 0)
+    pl.prevYaw = 0;
+    pl.yaw = -0.02;
+
+    step(pl, { KeyD: true });
+
+    const newSpeed = Math.hypot(pl.vel.x, pl.vel.z);
+    assert.ok(Math.abs(newSpeed - initialSpeed) < 0.05, 'Speed magnitude should be preserved during air strafe');
+    assert.ok(pl.vel.x > 0, 'Velocity should curve towards the right (+X)');
+    assert.ok(pl.vel.z < 0, 'Forward velocity should remain negative (-Z)');
+  });
+
+  test('air-strafing with KeyA and mouse turn left curves velocity smoothly left while preserving speed', () => {
+    const pl = createAirbornePlayer(-10);
+    const initialSpeed = Math.hypot(pl.vel.x, pl.vel.z);
+
+    // Turn mouse left (yaw increases: dyaw > 0)
+    pl.prevYaw = 0;
+    pl.yaw = 0.02;
+
+    step(pl, { KeyA: true });
+
+    const newSpeed = Math.hypot(pl.vel.x, pl.vel.z);
+    assert.ok(Math.abs(newSpeed - initialSpeed) < 0.05, 'Speed magnitude should be preserved during air strafe');
+    assert.ok(pl.vel.x < 0, 'Velocity should curve towards the left (-X)');
+    assert.ok(pl.vel.z < 0, 'Forward velocity should remain negative (-Z)');
+  });
+
+  test('aggressive mouse flick is clamped by STRAFE_MAX_TURN and avoids snapping direction', () => {
+    const pl = createAirbornePlayer(-10);
+
+    // Huge flick: 0.5 rad (~28 degrees) in a single tick
+    pl.prevYaw = 0;
+    pl.yaw = -0.5;
+
+    step(pl, { KeyD: true });
+
+    // With dt = 1/128 and STRAFE_MAX_TURN = 3.5, max turn is 3.5 / 128 = ~0.0273 rad (~1.56 degrees)
+    // vx should be 10 * sin(turn) <= 10 * sin(0.028) ~ 0.28, NOT 10 * sin(0.5) ~ 4.79
+    assert.ok(pl.vel.x > 0, 'Velocity should curve right');
+    assert.ok(pl.vel.x < 0.35, `Velocity redirect should be smoothed and clamped (got vx: ${pl.vel.x})`);
+  });
 });
