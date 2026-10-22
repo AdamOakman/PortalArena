@@ -265,6 +265,7 @@ export class PortalClient {
     G.menuController = new MenuController(G);
     G.menuController.init();
     G.showMainMenu = () => G.menuController.showMainMenu();
+    G.hideMainMenu = () => G.menuController.hideMainMenu();
     G.showInGameMenu = () => G.menuController.showInGameMenu();
     G.hideInGameMenu = () => G.menuController.hideInGameMenu();
     G.toggleInGameMenu = () => G.menuController.toggleInGameMenu();
@@ -274,7 +275,14 @@ export class PortalClient {
     G.keys = G.inputManager.keys;
     G.requestLock = () => G.inputManager.requestPointerLock();
     G.addEventLog = (msg, hot) => G.inputManager.addEventLog(msg, hot);
-    G.showSummary = () => G.inputManager.showSummary();
+    G.showSummary = () => {
+      if (G.menuController) G.menuController.showVictoryScreen();
+      else if (G.inputManager) G.inputManager.showSummary();
+    };
+    G.hideVictoryScreen = () => {
+      if (G.menuController) G.menuController.hideVictoryScreen();
+      else if (G.winPanel) G.winPanel.classList.add('hidden');
+    };
 
     // Portal rendering pipeline
     const innerW = typeof window !== 'undefined' ? window.innerWidth : 800;

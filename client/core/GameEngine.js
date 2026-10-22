@@ -414,20 +414,35 @@ export class GameEngine {
                 const toShot = new V3().subVectors(shotOrigin, eyePos);
                 const shotDist = toShot.length();
                 const shotDir = shotDist > 0.01 ? toShot.clone().normalize() : new V3(-Math.sin(rp.yaw || 0), 0, -Math.cos(rp.yaw || 0));
-                const pullDist = 2.0;
+                const pullDist = 2.2;
                 const backDir = shotDir.clone().negate();
                 const rayHit = G.raycast ? G.raycast(eyePos, backDir, pullDist + 0.3) : null;
                 const actualPull = rayHit ? Math.max(0.1, rayHit.distance - 0.3) : pullDist;
                 rp.deathCamPos = eyePos.clone().addScaledVector(backDir, actualPull);
-                rp.deathCamPos.y += Math.min(0.35, actualPull * 0.25);
-                rp.deathCamTarget = shotOrigin.clone();
+                rp.deathCamPos.y += Math.min(0.65, 0.25 + actualPull * 0.25);
+
+                const shotHorizDist = Math.hypot(shotDir.x, shotDir.z);
+                if (shotHorizDist > 0.01) {
+                  const horizX = shotDir.x / shotHorizDist;
+                  const horizZ = shotDir.z / shotHorizDist;
+                  const currentPitch = Math.atan2(shotDir.y, shotHorizDist);
+                  const targetPitch = Math.max(-0.65, Math.min(0.15, currentPitch - 0.32));
+                  const lookDir = new V3(
+                    horizX * Math.cos(targetPitch),
+                    Math.sin(targetPitch),
+                    horizZ * Math.cos(targetPitch)
+                  ).normalize();
+                  rp.deathCamTarget = rp.deathCamPos.clone().addScaledVector(lookDir, Math.max(10, shotDist));
+                } else {
+                  rp.deathCamTarget = shotOrigin.clone();
+                }
               } else {
-                const offset = new V3(0, 2, 4).applyAxisAngle(new V3(0, 1, 0), rp.yaw || 0);
+                const offset = new V3(0, 2.2, 3.8).applyAxisAngle(new V3(0, 1, 0), rp.yaw || 0);
                 const backDir = offset.clone().normalize();
                 const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length()) : null;
                 const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
                 rp.deathCamPos = deadPos.clone().addScaledVector(backDir, camDist);
-                rp.deathCamTarget = deadPos.clone();
+                rp.deathCamTarget = deadPos.clone().add(new V3(0, 0.2, 0));
               }
             }
             G.camera.position.lerp(rp.deathCamPos, Math.min(1, dt * 5));

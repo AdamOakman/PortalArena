@@ -750,7 +750,8 @@ export class WorldManager {
     G.localReady = saveReady;
 
     if (saveWon && !G.isSpectator && G.match && G.match.phase === 'summary') {
-      if (G.winPanel) G.winPanel.classList.remove('hidden');
+      if (G.showSummary) G.showSummary();
+      else if (G.winPanel) G.winPanel.classList.remove('hidden');
     }
   }
 
@@ -759,6 +760,9 @@ export class WorldManager {
     if (G && G.Network) {
       G.Network.send({ type: 'new_map', seed: s });
       if (G.menuPanel) G.menuPanel.classList.add('hidden');
+      if (G.winPanel) G.winPanel.classList.add('hidden');
+      if (G.hideVictoryScreen) G.hideVictoryScreen();
+      else if (G.menuController) G.menuController.hideVictoryScreen();
       if (G.requestLock) G.requestLock();
     }
   }

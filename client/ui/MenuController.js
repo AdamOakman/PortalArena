@@ -30,6 +30,7 @@ export class MenuController {
     this.startPanel = null;
     this.menuPanel = null;
     this.exitModal = null;
+    this.winPanel = null;
 
     // Sub-views
     this.mainRootView = null;
@@ -37,13 +38,15 @@ export class MenuController {
     this.mainOptionsView = null;
     this.ingameRootView = null;
     this.ingameOptionsView = null;
+    this.winRootView = null;
 
     // 3D Decorators
     this.mainDecorator = null;
     this.ingameDecorator = null;
+    this.winDecorator = null;
 
     // Navigation state
-    this.activeView = 'main'; // 'main', 'start_game', 'main_options', 'ingame', 'ingame_options'
+    this.activeView = 'main'; // 'main', 'start_game', 'main_options', 'ingame', 'ingame_options', 'victory'
     this.selectedIndex = 0;
     this.currentItems = [];
 
@@ -65,6 +68,7 @@ export class MenuController {
     this.startPanel = document.getElementById('startpanel');
     this.menuPanel = document.getElementById('menupanel');
     this.exitModal = document.getElementById('exit-modal');
+    this.winPanel = document.getElementById('winpanel');
 
     this.mainRootView = document.getElementById('main-menu-root');
     this.startGameView = document.getElementById('start-game-view');
@@ -72,6 +76,7 @@ export class MenuController {
 
     this.ingameRootView = document.getElementById('ingame-menu-root');
     this.ingameOptionsView = document.getElementById('ingame-options-view');
+    this.winRootView = document.getElementById('win-menu-root');
 
     this.nameInput = document.getElementById('nameinput');
     this.ipInput = document.getElementById('ipinput');
@@ -129,6 +134,11 @@ export class MenuController {
     const ingameCanvas = document.getElementById('ingame-decorator-canvas');
     if (ingameCanvas) {
       this.ingameDecorator = new MenuDecorator(ingameCanvas);
+    }
+
+    const winCanvas = document.getElementById('win-decorator-canvas');
+    if (winCanvas) {
+      this.winDecorator = new MenuDecorator(winCanvas);
     }
 
     this._bindEvents();
@@ -292,6 +302,9 @@ export class MenuController {
     if (this.ingameRootView) this.ingameRootView.classList.toggle('hidden', screen !== 'ingame');
     if (this.ingameOptionsView) this.ingameOptionsView.classList.toggle('hidden', screen !== 'ingame_options');
 
+    // Victory sub-view / screen
+    if (this.winPanel) this.winPanel.classList.toggle('hidden', screen !== 'victory');
+
     // Refresh selectable menu items for active view
     let container = null;
     let decorator = null;
@@ -300,10 +313,17 @@ export class MenuController {
       container = screen === 'main' ? this.mainRootView : (screen === 'start_game' ? this.startGameView : this.mainOptionsView);
       decorator = this.mainDecorator;
       if (this.ingameDecorator) this.ingameDecorator.stop();
+      if (this.winDecorator) this.winDecorator.stop();
     } else if (screen === 'ingame' || screen === 'ingame_options') {
       container = screen === 'ingame' ? this.ingameRootView : this.ingameOptionsView;
       decorator = this.ingameDecorator;
       if (this.mainDecorator) this.mainDecorator.stop();
+      if (this.winDecorator) this.winDecorator.stop();
+    } else if (screen === 'victory') {
+      container = this.winRootView || this.winPanel;
+      decorator = this.winDecorator;
+      if (this.mainDecorator) this.mainDecorator.stop();
+      if (this.ingameDecorator) this.ingameDecorator.stop();
     }
 
     if (decorator) {
@@ -373,6 +393,8 @@ export class MenuController {
         this.mainDecorator.setTarget(activeItem);
       } else if ((this.activeView === 'ingame' || this.activeView === 'ingame_options') && this.ingameDecorator) {
         this.ingameDecorator.setTarget(activeItem);
+      } else if (this.activeView === 'victory' && this.winDecorator) {
+        this.winDecorator.setTarget(activeItem);
       }
 
       // If selecting a form row in start game, focus the nested input
@@ -470,6 +492,14 @@ export class MenuController {
 
       case 'disconnect_to_main':
         this.disconnectToMainMenu();
+        break;
+
+      case 'new_universe':
+        this.newUniverse();
+        break;
+
+      case 'replay_seed':
+        this.replaySeed();
         break;
 
       case 'exit_game':
@@ -690,8 +720,7 @@ export class MenuController {
     if (hud) hud.classList.add('hidden');
     const menu = document.getElementById('menupanel');
     if (menu) menu.classList.add('hidden');
-    const win = document.getElementById('winpanel');
-    if (win) win.classList.add('hidden');
+    this.hideVictoryScreen();
     const connStatus = document.getElementById('connstatus');
     if (connStatus) {
       connStatus.textContent = '';
@@ -713,6 +742,17 @@ export class MenuController {
       this.startPanel.style.opacity = '1';
     }
     this.showScreen('main');
+  }
+
+  /**
+   * Hide Main Menu overlay and stop main 3D decorator.
+   */
+  hideMainMenu() {
+    if (this.startPanel) this.startPanel.classList.add('hidden');
+    if (this.mainDecorator) this.mainDecorator.stop();
+    if (this.activeView === 'main' || this.activeView === 'start_game' || this.activeView === 'main_options') {
+      this.activeView = null;
+    }
   }
 
   /**
@@ -752,13 +792,103 @@ export class MenuController {
   }
 
   /**
+   * Show Victory / Round Summary screen with 3D player decorators and score breakdown.
+   */
+  showVictoryScreen() {
+    if (typeof document !== 'undefined' && document.exitPointerLock) {
+      try {
+        document.exitPointerLock();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (this.context) this.context.pointerLocked = false;
+
+    if (this.startPanel) this.startPanel.classList.add('hidden');
+    if (this.menuPanel) this.menuPanel.classList.add('hidden');
+
+    const G = this.context;
+    let titleHtml = 'VICTORY <em>DECIDED</em>';
+    let subText = 'THE CHAMBER DECIDES';
+
+    if (G?.match) {
+      if (G.match.winner === 'tie') {
+        titleHtml = 'ROUND <em>DRAW</em>';
+        subText = 'THE CHAMBER BALANCES — NO FAVOR GIVEN';
+      } else if (G.match.winner && G.match.players) {
+        const w = G.match.players[G.match.winner];
+        const winnerName = w?.name ? w.name : 'PLAYER';
+        titleHtml = `${winnerName} <em>WINS</em>`;
+        subText = 'THE ROUND IS DECIDED — BLOOD CLAIMS VICTORY';
+      }
+    }
+
+    const titleEl = document.getElementById('winTitle');
+    const subEl = document.getElementById('winSub');
+    if (titleEl) titleEl.innerHTML = titleHtml;
+    if (subEl) subEl.textContent = subText;
+
+    if (this.winPanel) this.winPanel.classList.remove('hidden');
+    this.showScreen('victory');
+  }
+
+  /**
+   * Hide Victory screen overlay and stop 3D decorator.
+   */
+  hideVictoryScreen() {
+    if (this.winPanel) this.winPanel.classList.add('hidden');
+    const wp = document.getElementById('winpanel');
+    if (wp) wp.classList.add('hidden');
+    if (this.winDecorator) this.winDecorator.stop();
+  }
+
+  /**
+   * Check if Victory screen is currently visible.
+   * @returns {boolean}
+   */
+  isVictoryOpen() {
+    return !!(this.winPanel && !this.winPanel.classList.contains('hidden'));
+  }
+
+  /**
+   * Start next round in a randomized universe seed.
+   */
+  newUniverse() {
+    this.hideVictoryScreen();
+    if (this.context) this.context.won = false;
+    const s = String(Math.floor(Math.random() * 1e9));
+    if (this.context?.newMap) {
+      this.context.newMap(s);
+    } else if (this.context?.Network?.send) {
+      this.context.Network.send({ type: 'new_map', seed: s });
+      if (this.context?.requestLock) this.context.requestLock();
+    }
+  }
+
+  /**
+   * Replay active round using the current seed.
+   */
+  replaySeed() {
+    this.hideVictoryScreen();
+    if (this.context) this.context.won = false;
+    const s = this.context?.currentSeed || String(Math.floor(Math.random() * 1e9));
+    if (this.context?.Network?.send) {
+      this.context.Network.send({ type: 'new_map', seed: s });
+      if (this.context?.requestLock) this.context.requestLock();
+    } else if (this.context?.newMap) {
+      this.context.newMap(s);
+    }
+  }
+
+  /**
    * Check if any menu panel is currently visible.
    * @returns {boolean}
    */
   isMenuOpen() {
     const startOpen = this.startPanel && !this.startPanel.classList.contains('hidden');
     const inGameOpen = this.menuPanel && !this.menuPanel.classList.contains('hidden');
-    return !!(startOpen || inGameOpen);
+    const winOpen = this.isVictoryOpen();
+    return !!(startOpen || inGameOpen || winOpen);
   }
 
   /**
@@ -769,6 +899,7 @@ export class MenuController {
   onPointerLockChange(locked, wasLocked = false) {
     if (locked) {
       this.hideInGameMenu();
+      this.hideVictoryScreen();
     } else if (wasLocked && this.context?.started && !this.context?.won) {
       this.showInGameMenu();
     }
@@ -804,11 +935,43 @@ export class MenuController {
         return true;
       }
 
+      if (this.activeView === 'victory') {
+        return true;
+      }
+
       if (this.context?.started && !this.context?.won) {
         this.showInGameMenu();
         return true;
       }
 
+      return false;
+    }
+
+    // Crucial: If no menu is open, do not intercept any gameplay or spectator keys!
+    if (!this.isMenuOpen()) return false;
+
+    if (this.isVictoryOpen()) {
+      if (e.code === 'KeyN') {
+        e.preventDefault();
+        this._playTone('action');
+        this.newUniverse();
+        return true;
+      }
+      if (e.code === 'KeyW' || e.code === 'ArrowUp') {
+        e.preventDefault();
+        this.selectPrev();
+        return true;
+      }
+      if (e.code === 'KeyS' || e.code === 'ArrowDown') {
+        e.preventDefault();
+        this.selectNext();
+        return true;
+      }
+      if (e.code === 'Enter') {
+        e.preventDefault();
+        this.activateSelected();
+        return true;
+      }
       return false;
     }
 
@@ -838,8 +1001,6 @@ export class MenuController {
     } else if (isInput) {
       return false;
     }
-
-    if (!this.isMenuOpen()) return false;
 
     if (this.activeView === 'ingame' && e.code === 'KeyJ') {
       e.preventDefault();
@@ -897,6 +1058,9 @@ export class MenuController {
     if (this.ingameDecorator && (this.activeView === 'ingame' || this.activeView === 'ingame_options')) {
       this.ingameDecorator.resize();
     }
+    if (this.winDecorator && this.activeView === 'victory') {
+      this.winDecorator.resize();
+    }
   }
 
   /**
@@ -906,5 +1070,6 @@ export class MenuController {
     window.removeEventListener('resize', this._onResize);
     if (this.mainDecorator) this.mainDecorator.dispose();
     if (this.ingameDecorator) this.ingameDecorator.dispose();
+    if (this.winDecorator) this.winDecorator.dispose();
   }
 }

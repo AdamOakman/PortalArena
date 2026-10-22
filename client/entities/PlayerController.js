@@ -142,18 +142,33 @@ export class PlayerController extends Entity {
       const shotDist = toShot.length();
       const shotDir = shotDist > 0.01 ? toShot.clone().normalize() : new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
 
-      const pullDist = 2.0;
+      const pullDist = 2.2;
       const backDir = shotDir.clone().negate();
       const rayHit = G && G.raycast ? G.raycast(eyePos, backDir, pullDist + 0.3) : null;
       const actualPull = rayHit ? Math.max(0.1, rayHit.distance - 0.3) : pullDist;
 
       this.deathCamPos.copy(eyePos).addScaledVector(backDir, actualPull);
-      this.deathCamPos.y += Math.min(0.35, actualPull * 0.25);
-      this.deathCamTarget.copy(sOrigin);
+      this.deathCamPos.y += Math.min(0.65, 0.25 + actualPull * 0.25);
+
+      const shotHorizDist = Math.hypot(shotDir.x, shotDir.z);
+      if (shotHorizDist > 0.01) {
+        const horizX = shotDir.x / shotHorizDist;
+        const horizZ = shotDir.z / shotHorizDist;
+        const currentPitch = Math.atan2(shotDir.y, shotHorizDist);
+        const targetPitch = Math.max(-0.65, Math.min(0.15, currentPitch - 0.32));
+        const lookDir = new THREE.Vector3(
+          horizX * Math.cos(targetPitch),
+          Math.sin(targetPitch),
+          horizZ * Math.cos(targetPitch)
+        ).normalize();
+        this.deathCamTarget.copy(this.deathCamPos).addScaledVector(lookDir, Math.max(10, shotDist));
+      } else {
+        this.deathCamTarget.copy(sOrigin);
+      }
     } else {
-      const offset = new THREE.Vector3(0, 2, 4).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+      const offset = new THREE.Vector3(0, 2.2, 3.8).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
       this.deathCamPos.copy(this.position).add(offset);
-      this.deathCamTarget.copy(this.position);
+      this.deathCamTarget.copy(this.position).add(new THREE.Vector3(0, 0.2, 0));
     }
 
     if (this.engine && this.engine.eventBus) {

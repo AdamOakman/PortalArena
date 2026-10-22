@@ -547,6 +547,7 @@ export class BotAgent {
       orangeAimYaw: 0,
       orangeAimPitch: 0,
       orangeAimT: 0,
+      orangeDelayUntil: 0,
       unstuckUntilT: 0,
       strafeDir: null,
       instagibTargetPid: null,
@@ -867,7 +868,7 @@ export class BotAgent {
       canStepOver = false;
     } else if (st.portalPhase === 'aim_blue') {
       desiredYaw = st.blueAimYaw;
-    } else if (st.portalPhase === 'aim_orange') {
+    } else if (st.portalPhase === 'delay_orange' || st.portalPhase === 'aim_orange') {
       desiredYaw = st.orangeAimYaw;
     } else if (nowT < st.avoidUntilT) {
       desiredYaw = st.avoidYaw;
@@ -877,8 +878,8 @@ export class BotAgent {
     while (dyaw > Math.PI) dyaw -= Math.PI * 2;
     while (dyaw < -Math.PI) dyaw += Math.PI * 2;
 
-    const isPortalAiming = st.portalPhase === 'aim_blue' || st.portalPhase === 'aim_orange';
-    const maxTurn = (isPortalAiming ? 10.0 : (activeOpp ? 4.2 : 4.8)) * DT;
+    const isPortalAiming = st.portalPhase === 'aim_blue' || st.portalPhase === 'delay_orange' || st.portalPhase === 'aim_orange';
+    const maxTurn = (isPortalAiming ? 3.8 : (activeOpp ? 4.2 : 4.8)) * DT;
     if (Math.abs(dyaw) > maxTurn) {
       this.yaw += Math.sign(dyaw) * maxTurn;
     } else {
@@ -892,7 +893,7 @@ export class BotAgent {
       targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, activeOpp.dir.y)));
     } else if (st.portalPhase === 'aim_blue') {
       targetPitch = st.blueAimPitch;
-    } else if (st.portalPhase === 'aim_orange') {
+    } else if (st.portalPhase === 'delay_orange' || st.portalPhase === 'aim_orange') {
       targetPitch = st.orangeAimPitch;
     } else {
       targetPitch = Math.max(-0.25, Math.min(0.25, ((st.targetPos.y - this.pos.y) - 1.5) * 0.04));
@@ -921,7 +922,7 @@ export class BotAgent {
         st.rocketJumpPhase = 'none';
       }
     } else {
-      const pitchSpeed = isPortalAiming ? 12.0 : (activeOpp ? 4.5 : 6.0);
+      const pitchSpeed = isPortalAiming ? 4.0 : (activeOpp ? 4.5 : 6.0);
       this.pitch += (targetPitch - this.pitch) * Math.min(1, pitchSpeed * DT);
     }
 
@@ -1007,9 +1008,10 @@ export class BotAgent {
       while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
       const aimDpitch = Math.abs(st.blueAimPitch - this.pitch);
       const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
-      const timedOut = nowT - st.blueAimT > 0.35;
+      const timedOut = nowT - st.blueAimT > 1.2;
+      const minAimTimePassed = nowT - st.blueAimT > 0.45;
 
-      if (st.blueSurface && (aligned || timedOut)) {
+      if (st.blueSurface && ((aligned && minAimTimePassed) || timedOut)) {
         const surface = st.blueSurface;
         const P = portals[botPortalBase];
         P.placed = true;
@@ -1025,13 +1027,21 @@ export class BotAgent {
           st.orangeSurface = orangeFound.surface;
           st.orangeAimYaw = orangeFound.aimYaw;
           st.orangeAimPitch = orangeFound.aimPitch;
-          st.orangeAimT = nowT;
-          st.portalPhase = 'aim_orange';
+          st.portalPhase = 'delay_orange';
+          st.orangeDelayUntil = nowT + 0.85 + Math.random() * 0.35;
         } else {
           st.portalPhase = 'none';
           st.lastPortalT = nowT + 3.0;
         }
-      } else if (nowT - st.blueAimT > 0.8) {
+      } else if (nowT - st.blueAimT > 2.0) {
+        st.portalPhase = 'none';
+        st.lastPortalT = nowT + 2.0;
+      }
+    } else if (st.portalPhase === 'delay_orange') {
+      if (nowT >= st.orangeDelayUntil) {
+        st.portalPhase = 'aim_orange';
+        st.orangeAimT = nowT;
+      } else if (nowT > st.orangeDelayUntil + 2.0) {
         st.portalPhase = 'none';
         st.lastPortalT = nowT + 2.0;
       }
@@ -1041,9 +1051,10 @@ export class BotAgent {
       while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
       const aimDpitch = Math.abs(st.orangeAimPitch - this.pitch);
       const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
-      const timedOut = nowT - st.orangeAimT > 0.45;
+      const timedOut = nowT - st.orangeAimT > 1.2;
+      const minAimTimePassed = nowT - st.orangeAimT > 0.35;
 
-      if (st.orangeSurface && (aligned || timedOut)) {
+      if (st.orangeSurface && ((aligned && minAimTimePassed) || timedOut)) {
         const pIdx = botPortalBase + 1;
         const surface = st.orangeSurface;
         const P = portals[pIdx];
@@ -1058,7 +1069,7 @@ export class BotAgent {
         st.portalPhase = 'walk_thru';
         st.lastPortalT = nowT;
         st.walkThruT = nowT;
-      } else if (nowT - st.orangeAimT > 1.2) {
+      } else if (nowT - st.orangeAimT > 2.0) {
         st.portalPhase = 'none';
         st.lastPortalT = nowT + 3.0;
       }

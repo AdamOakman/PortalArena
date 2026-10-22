@@ -105,15 +105,14 @@
     background:transparent; border:none; outline:none; box-shadow:none; }
   .panel::before, .panel::after{ display:none; }
 
-  /* Modals (Exit Fallback / Round Summary) retain a subtle framed plaque */
-  #exit-modal .panel, #winpanel .panel{
+  /* Modals (Exit Fallback) retain a subtle framed plaque */
+  #exit-modal .panel{
     background:radial-gradient(circle at 50% 30%, rgba(32,16,14,.96), rgba(12,7,8,.98));
     border:1px solid rgba(255,122,34,.35); outline:1px solid rgba(255,122,34,.16); outline-offset:4px;
     box-shadow:0 0 60px rgba(0,0,0,.95), 0 0 20px rgba(255,100,20,.12) inset;
     padding:34px 40px; border-radius:3px;
   }
-  #exit-modal .panel::before, #exit-modal .panel::after,
-  #winpanel .panel::before, #winpanel .panel::after{
+  #exit-modal .panel::before, #exit-modal .panel::after{
     display:block;
   }
 
@@ -190,9 +189,24 @@
   .retro-fov-box span.val{ font-size:18px; color:#ffe0b0; text-shadow:0 0 10px rgba(255,179,77,.6); min-width:34px; text-align:right; }
   input[type=range]{ accent-color:var(--fire); cursor:pointer; }
 
-  #winpanel h1{ color:#ffe9c8; text-shadow:0 0 26px rgba(255,180,80,.9); }
-  #winstats{ font-size:15px; color:#d8d0c0; line-height:2; margin-bottom:10px; }
-  #winstats b{ font-family:var(--display); color:#ffd9a8; }
+  #winstats{ margin:8px auto 16px; width:100%; max-width:440px; position:relative; z-index:10; }
+  .win-scorecard{
+    display:flex; align-items:center; justify-content:space-around;
+    padding:12px 18px;
+    background:radial-gradient(ellipse at center, rgba(32,18,14,.75), rgba(14,8,10,.85));
+    border:1px solid rgba(255,122,34,.3); border-radius:2px;
+    box-shadow:inset 0 0 16px rgba(0,0,0,.7), 0 4px 14px rgba(0,0,0,.6);
+  }
+  .win-combatant{ display:flex; flex-direction:column; align-items:center; gap:2px; min-width:120px; }
+  .win-combatant.a .win-pname{ color:#a8d48a; text-shadow:0 0 10px rgba(120,210,90,.4); }
+  .win-combatant.b .win-pname{ color:#e06a55; text-shadow:0 0 10px rgba(215,70,50,.4); }
+  .win-pname{ font-family:var(--display); font-size:15px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .win-pkills{ font-family:var(--display); font-size:26px; font-weight:800; color:var(--bone); text-shadow:0 0 14px rgba(255,140,40,.8); line-height:1.1; }
+  .win-pkills span{ font-size:10px; letter-spacing:.18em; color:var(--ash); font-weight:600; margin-left:3px; }
+  .win-pwins{ font-size:11.5px; letter-spacing:.18em; color:#a69680; text-transform:uppercase; font-weight:600; }
+  .win-vs{ font-family:var(--display); font-size:14px; font-weight:800; letter-spacing:.25em; color:var(--ember); text-shadow:0 0 10px rgba(255,122,34,.8); }
+  .win-meta{ margin-top:8px; font-size:12px; letter-spacing:.18em; color:#8a7a66; text-transform:uppercase; text-align:center; }
+  .win-meta b{ color:#ffd9a8; font-family:var(--display); }
   #spectateinfo{
     position:absolute; bottom:28px; left:50%; transform:translateX(-50%);
     font-family:var(--display); font-size:17px; font-weight:600; letter-spacing:.14em;
@@ -423,13 +437,22 @@
   </div>
 </div>
 
+<!-- ==================== VICTORY / ROUND SUMMARY OVERLAY ==================== -->
 <div class="overlay hidden" id="winpanel">
   <div class="panel">
-    <h1 id="winTitle">ROUND OVER</h1>
-    <div class="sub" id="winSub">THE CHAMBER DECIDES</div>
-    <div class="divider"><span>✠</span></div>
-    <div id="winstats"></div>
-    <div class="retro-btn-col"><button id="btnagain" class="retro-action-btn hot">NEW UNIVERSE (N)</button><button id="btnsame" class="retro-action-btn">REPLAY THIS SEED</button></div>
+    <canvas id="win-decorator-canvas" class="menu-decorator-canvas"></canvas>
+
+    <div id="win-menu-root">
+      <h1 id="winTitle">VICTORY <em>DECIDED</em></h1>
+      <div class="divider"><span>✠ ◈ ✠</span></div>
+      <div class="sub" id="winSub">THE CHAMBER DECIDES</div>
+      <div id="winstats"></div>
+      <div class="retro-menu-list" id="win-menu-list">
+        <button class="retro-menu-item selected" id="btnagain" data-action="new_universe">NEW UNIVERSE (N)</button>
+        <button class="retro-menu-item" id="btnsame" data-action="replay_seed">REPLAY THIS SEED</button>
+        <button class="retro-menu-item" id="btnwinback" data-action="disconnect_to_main">BACK TO MAIN MENU</button>
+      </div>
+    </div>
   </div>
 </div>
 

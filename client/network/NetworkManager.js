@@ -74,6 +74,7 @@ export function onMessage(G, data) {
     G.started = true;
     G.startPanel.classList.add('hidden');
     if (G.menuController) {
+      G.menuController.hideMainMenu();
       G.menuController.updateSpectateBtn(G.isSpectator);
     }
     if (G.requestedSeed && G.Network?.send) {
@@ -147,7 +148,10 @@ export function onMessage(G, data) {
     if (data.match) {
       G.match = data.match;
       G.won = (G.match.phase === 'summary');
-      if (G.winPanel && !G.winPanel.classList.contains('hidden') && !G.won) G.winPanel.classList.add('hidden');
+      if (G.winPanel && !G.winPanel.classList.contains('hidden') && !G.won) {
+        if (G.hideVictoryScreen) G.hideVictoryScreen();
+        else G.winPanel.classList.add('hidden');
+      }
     }
     const switchBtn = document.getElementById('btnswitchmode');
     if (switchBtn) switchBtn.textContent = 'SPECTATE';
@@ -220,7 +224,8 @@ export function onMessage(G, data) {
       if (G.won) {
         if (G.winPanel.classList.contains('hidden') && !G.isSpectator) G.showSummary();
       } else if (!G.winPanel.classList.contains('hidden')) {
-        G.winPanel.classList.add('hidden');
+        if (G.hideVictoryScreen) G.hideVictoryScreen();
+        else G.winPanel.classList.add('hidden');
       }
       if (data.match.phase === 'countdown') {
         if (!G.countdownActive) {
@@ -515,20 +520,35 @@ export function onMessage(G, data) {
         const toShot = new V3().subVectors(shotOrigin, eyePos);
         const shotDist = toShot.length();
         const shotDir = shotDist > 0.01 ? toShot.clone().normalize() : new V3(-Math.sin(deadRp.yaw || 0), 0, -Math.cos(deadRp.yaw || 0));
-        const pullDist = 2.0;
+        const pullDist = 2.2;
         const backDir = shotDir.clone().negate();
         const rayHit = G.raycast ? G.raycast(eyePos, backDir, pullDist + 0.3) : null;
         const actualPull = rayHit ? Math.max(0.1, rayHit.distance - 0.3) : pullDist;
         deadRp.deathCamPos = eyePos.clone().addScaledVector(backDir, actualPull);
-        deadRp.deathCamPos.y += Math.min(0.35, actualPull * 0.25);
-        deadRp.deathCamTarget = shotOrigin.clone();
+        deadRp.deathCamPos.y += Math.min(0.65, 0.25 + actualPull * 0.25);
+
+        const shotHorizDist = Math.hypot(shotDir.x, shotDir.z);
+        if (shotHorizDist > 0.01) {
+          const horizX = shotDir.x / shotHorizDist;
+          const horizZ = shotDir.z / shotHorizDist;
+          const currentPitch = Math.atan2(shotDir.y, shotHorizDist);
+          const targetPitch = Math.max(-0.65, Math.min(0.15, currentPitch - 0.32));
+          const lookDir = new V3(
+            horizX * Math.cos(targetPitch),
+            Math.sin(targetPitch),
+            horizZ * Math.cos(targetPitch)
+          ).normalize();
+          deadRp.deathCamTarget = deadRp.deathCamPos.clone().addScaledVector(lookDir, Math.max(10, shotDist));
+        } else {
+          deadRp.deathCamTarget = shotOrigin.clone();
+        }
       } else {
-        const offset = new V3(0, 2, 4).applyAxisAngle(new V3(0, 1, 0), deadRp.yaw || 0);
+        const offset = new V3(0, 2.2, 3.8).applyAxisAngle(new V3(0, 1, 0), deadRp.yaw || 0);
         const backDir = offset.clone().normalize();
         const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length()) : null;
         const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
         deadRp.deathCamPos = deadPos.clone().addScaledVector(backDir, camDist);
-        deadRp.deathCamTarget = deadPos.clone();
+        deadRp.deathCamTarget = deadPos.clone().add(new V3(0, 0.2, 0));
       }
     }
     if (data.feedMsg) G.addEventLog(data.feedMsg, data.feedHot);

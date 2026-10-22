@@ -280,10 +280,26 @@ export class HUDController {
       const rw = match.roundWins || {};
       const rwA = (A && rw[A.pid]) || 0;
       const rwB = (B && rw[B.pid]) || 0;
+      const nameA = A ? (A.name || 'EMERALD') : '—';
+      const nameB = B ? (B.name || 'CRIMSON') : '—';
+      const scoreA = A ? (A.score || 0) : 0;
+      const scoreB = B ? (B.score || 0) : 0;
+
       this.hud.winstats.innerHTML =
-        `<span style="display:block;font-size:15px">${A ? A.name : '—'} <b style="font-size:20px">${A ? A.score : 0}</b> kills</span>` +
-        `<span style="display:block;font-size:15px">${B ? B.name : '—'} <b style="font-size:20px">${B ? B.score : 0}</b> kills</span>` +
-        `<span style="display:block;font-size:13px;color:#8a7a66;margin-top:8px">rounds won ${rwA} – ${rwB} · seed <b>${currentSeed}</b></span>`;
+        '<div class="win-scorecard">' +
+          '<div class="win-combatant a">' +
+            `<span class="win-pname">${nameA}</span>` +
+            `<span class="win-pkills">${scoreA} <span>KILLS</span></span>` +
+            `<span class="win-pwins">${rwA} ${rwA === 1 ? 'WIN' : 'WINS'}</span>` +
+          '</div>' +
+          '<div class="win-vs">VS</div>' +
+          '<div class="win-combatant b">' +
+            `<span class="win-pname">${nameB}</span>` +
+            `<span class="win-pkills">${scoreB} <span>KILLS</span></span>` +
+            `<span class="win-pwins">${rwB} ${rwB === 1 ? 'WIN' : 'WINS'}</span>` +
+          '</div>' +
+        '</div>' +
+        `<div class="win-meta">ROUNDS WON ${rwA} – ${rwB} · SEED <b>${currentSeed || '–'}</b></div>`;
     }
     this.renderStats(match, statsOpen, localPid);
   }

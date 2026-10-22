@@ -423,8 +423,12 @@ export class InputManager {
         }
       }
 
-      if (c === 'KeyN' && G.newMap) {
-        G.newMap(String(Math.floor(Math.random() * 1e9)));
+      if (c === 'KeyN') {
+        if (G.menuController?.isVictoryOpen()) {
+          G.menuController.newUniverse();
+        } else if (G.newMap) {
+          G.newMap(String(Math.floor(Math.random() * 1e9)));
+        }
       }
 
       if (c === 'KeyE' && G.camera && G.TH) {
@@ -551,19 +555,38 @@ export class InputManager {
     const btnAgain = G.dom ? G.dom('btnagain') : document.getElementById('btnagain');
     if (btnAgain) {
       btnAgain.addEventListener('click', () => {
-        if (G.newMap) G.newMap(String(Math.floor(Math.random() * 1e9)));
+        if (G.menuController) {
+          G.menuController.newUniverse();
+        } else {
+          const winPanel = G.winPanel || document.getElementById('winpanel');
+          if (winPanel) winPanel.classList.add('hidden');
+          if (G.newMap) G.newMap(String(Math.floor(Math.random() * 1e9)));
+        }
       });
     }
 
     const btnSame = G.dom ? G.dom('btnsame') : document.getElementById('btnsame');
     if (btnSame) {
       btnSame.addEventListener('click', () => {
-        if (G.Network?.send) {
-          G.Network.send({ type: 'new_map', seed: G.currentSeed });
+        if (G.menuController) {
+          G.menuController.replaySeed();
+        } else {
+          if (G.Network?.send) {
+            G.Network.send({ type: 'new_map', seed: G.currentSeed });
+          }
+          const winPanel = G.winPanel || document.getElementById('winpanel');
+          if (winPanel) winPanel.classList.add('hidden');
+          this.requestPointerLock();
         }
-        const winPanel = G.winPanel || document.getElementById('winpanel');
-        if (winPanel) winPanel.classList.add('hidden');
-        this.requestPointerLock();
+      });
+    }
+
+    const btnWinBack = G.dom ? G.dom('btnwinback') : document.getElementById('btnwinback');
+    if (btnWinBack) {
+      btnWinBack.addEventListener('click', () => {
+        if (G.menuController) {
+          G.menuController.disconnectToMainMenu();
+        }
       });
     }
   }
@@ -629,19 +652,24 @@ export class InputManager {
 
   showSummary() {
     const G = this.context;
+    if (G?.menuController) {
+      G.menuController.showVictoryScreen();
+      return;
+    }
+    this.exitPointerLock();
     if (!G || !G.match) return;
     let title, sub;
     if (G.match.winner === 'tie') {
-      title = 'DRAW';
+      title = 'ROUND <em>DRAW</em>';
       sub = 'THE CHAMBER BALANCES — NO FAVOR GIVEN';
     } else {
       const w = G.match.winner && G.match.players ? G.match.players[G.match.winner] : null;
-      title = (w ? w.name : 'PLAYER') + ' WINS';
-      sub = 'THE ROUND IS DECIDED';
+      title = (w ? w.name : 'PLAYER') + ' <em>WINS</em>';
+      sub = 'THE ROUND IS DECIDED — BLOOD CLAIMS VICTORY';
     }
     const t = G.dom ? G.dom('winTitle') : document.getElementById('winTitle');
     const s = G.dom ? G.dom('winSub') : document.getElementById('winSub');
-    if (t) t.textContent = title;
+    if (t) t.innerHTML = title;
     if (s) s.textContent = sub;
     const winPanel = G.winPanel || document.getElementById('winpanel');
     if (winPanel) winPanel.classList.remove('hidden');
