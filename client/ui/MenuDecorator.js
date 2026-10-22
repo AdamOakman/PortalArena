@@ -80,7 +80,7 @@ export class MenuDecorator {
   }
 
   /**
-   * Build Left (Green/Cyan) and Right (Crimson/Orange) player models with portal guns.
+   * Build Left (Green) and Right (Crimson) player models with portal guns.
    * @private
    */
   _buildPlayerModels() {

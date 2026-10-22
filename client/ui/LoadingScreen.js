@@ -354,7 +354,7 @@ export class LoadingScreen {
 
   /* ------------------------------------------------------------ player ---- */
   _makePlayer(TH, scene, camera) {
-    // The game's own model builder (models.js): local-player blue, layer 0
+    // The game's own model builder (models.js): local player model, layer 0
     // (visible to this camera), no clip plane. Two instances are built so
     // that during the portal pass one can be running into the right portal
     // while the other runs out of the left one at the same time.

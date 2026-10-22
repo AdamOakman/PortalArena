@@ -161,6 +161,7 @@ export class PortalManager {
       this.portalGroup.add(frameGrp);
 
       const lt = new THREE.PointLight(this.portals[i].color, 13.0, 16, 1.8);
+      lt.layers.enable(2);
       this.glowLights.push(lt);
       this.portalGroup.add(lt);
 

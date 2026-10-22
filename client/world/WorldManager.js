@@ -199,6 +199,7 @@ function renderGothicDecor(map, group, animObjects) {
       f.translate(0, 0.35 * s, 0);
       put(flameG, f, x, y + 1.7 * s, z);
       const L = new THREE.PointLight(0xff6a2a, 14, 22, 2);
+      L.layers.enable(2);
       L.position.set(x, y + 2.2 * s, z);
       group.add(L);
       if (animObjects) animObjects.push({ obj: L, type: 'torchlight', phase: Math.random() * 10 });
@@ -213,6 +214,7 @@ function renderGothicDecor(map, group, animObjects) {
       group.add(fm);
       if (animObjects) animObjects.push({ obj: fm, type: 'flame', phase: Math.random() * 10 });
       const L = new THREE.PointLight(0xff6a2a, 26, 32, 2);
+      L.layers.enable(2);
       L.position.set(x, y + 2 * s, z);
       group.add(L);
     } else if (d.t === 'arch') {

@@ -11,8 +11,8 @@ export class ModelFactory {
   static createPortalGun() {
     const gun = new THREE.Group();
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a2230, metalness: 0.85, roughness: 0.25 });
-    const glowA = new THREE.MeshStandardMaterial({ color: 0x0affff, emissive: 0x2eeaff, emissiveIntensity: 2.2 });
-    const glowB = new THREE.MeshStandardMaterial({ color: 0xff8a2a, emissive: 0xff9a3d, emissiveIntensity: 2.2 });
+    const glowA = new THREE.MeshStandardMaterial({ color: 0x33ff33, emissive: 0x33ff33, emissiveIntensity: 2.2 });
+    const glowB = new THREE.MeshStandardMaterial({ color: 0x00aa00, emissive: 0x00aa00, emissiveIntensity: 2.2 });
 
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.42), bodyMat);
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, 0.3, 12), bodyMat);
@@ -63,7 +63,7 @@ export class ModelFactory {
   static createInstagibGun() {
     const instagibGun = new THREE.Group();
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.2 });
-    const redMat = new THREE.MeshStandardMaterial({ color: 0xaa1111 });
+    const redMat = new THREE.MeshStandardMaterial({ color: 0xaa1111, metalness: 0.6, roughness: 0.25 });
     const glowMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff2222, emissiveIntensity: 4.0 });
 
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.45), metalMat);

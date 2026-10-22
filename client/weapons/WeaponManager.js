@@ -580,12 +580,15 @@ export class WeaponManager {
     G.camera.updateMatrixWorld(true);
     G.instagibGun.updateMatrixWorld(true);
 
+    const gunTip = new THREE.Vector3(0, 0, -0.4).applyMatrix4(G.instagibGun.matrixWorld);
+
     let curPos = G.camera.position.clone();
     let curDir = new THREE.Vector3(0, 0, -1).applyQuaternion(G.camera.quaternion).normalize();
     let remaining = 300;
-    const pts = [];
     let scorchMsg = null;
-    let curStart = new THREE.Vector3(0, 0, -0.4).applyMatrix4(G.instagibGun.matrixWorld);
+    let hitPlayerId = null;
+    let finalHitPt = null;
+    let firstPortalIdx = -1;
 
     for (let iter = 0; iter < 6; iter++) {
       const hit = G.raycast(curPos, curDir, remaining);
@@ -608,7 +611,6 @@ export class WeaponManager {
         }
       }
 
-      let hitPlayerId = null;
       let hitPlayerT = bestT;
       for (const id in G.remotePlayers) {
         const rp = G.remotePlayers[id];
@@ -644,57 +646,105 @@ export class WeaponManager {
 
       if (hitPlayerId !== null) {
         bestT = hitPlayerT;
-        const trueHitPt = curPos.clone().addScaledVector(curDir, bestT);
-        pts.push(curStart, trueHitPt);
-        G.Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()), hitPlayerId });
-        const shotOrigin = pts && pts.length >= 2 ? pts[pts.length - 2].clone() : curStart.clone();
-        const beamDir = curDir.clone();
-        if (hitPlayerId === G.localPlayerId) {
-          G.die(G.localPlayerId, true, 'instagib', shotOrigin, beamDir);
-        } else if (G.remotePlayers[hitPlayerId]) {
-          G.remotePlayers[hitPlayerId].isDead = true;
-          G.remotePlayers[hitPlayerId].predictedDeadUntil = G.nowT + 3.0;
-          G.remotePlayers[hitPlayerId].lastShotOrigin = shotOrigin;
-          G.remotePlayers[hitPlayerId].lastKillerId = G.localPlayerId;
-          G.remotePlayers[hitPlayerId].lastBeamDir = beamDir;
-        }
-        AudioSys.tone(600, 600, 0.5, 'sine', 0.3);
-        if (G.remotePlayerMeshes[hitPlayerId]) {
-          G.remotePlayerMeshes[hitPlayerId].visible = false;
-          if (G.remotePlayerMeshes[hitPlayerId].userData?.cloneMesh) {
-            G.remotePlayerMeshes[hitPlayerId].userData.cloneMesh.visible = false;
-          }
-        }
-        for (let i = 0; i < pts.length; i += 2) this.spawnInstagibBeam(pts[i], pts[i + 1], G.animObjects);
-        return;
+        finalHitPt = curPos.clone().addScaledVector(curDir, bestT);
+        break;
       }
 
-      const hitPt = curPos.clone().addScaledVector(curDir, bestT);
-      pts.push(curStart, hitPt);
+      finalHitPt = curPos.clone().addScaledVector(curDir, bestT);
 
       if (bestPortal !== null) {
+        if (iter === 0) firstPortalIdx = bestPortal;
+        const P = G.portals[bestPortal];
+        const pairIdx = Math.floor(bestPortal / 2);
+        const R = (bestPortal % 2 === 0) ? G.R_AB[pairIdx] : G.R_BA[pairIdx];
         const other = G.portals[bestPortal ^ 1];
-        if (other.placed) {
-          const local = hitPt.clone().sub(G.portals[bestPortal].c);
-          const lx = local.dot(G.portals[bestPortal].r), ly = local.dot(G.portals[bestPortal].u);
-          curPos = other.c.clone().addScaledVector(other.r, -lx).addScaledVector(other.u, ly).addScaledVector(other.n, 0.02);
-
-          const m = new THREE.Matrix4().makeBasis(G.portals[bestPortal].r, G.portals[bestPortal].u, G.portals[bestPortal].n);
-          const inv = m.clone().invert();
-          const om = new THREE.Matrix4().makeBasis(other.r.clone().negate(), other.u, other.n.clone().negate());
-          curDir.applyMatrix4(inv).applyMatrix4(om).normalize();
-          curStart = curPos.clone();
+        if (other.placed && R) {
+          const rel = finalHitPt.clone().sub(P.c).applyMatrix4(R);
+          const exitPt = other.c.clone().add(rel);
+          curPos = exitPt.clone().addScaledVector(other.n, 0.005);
+          curDir = curDir.clone().applyMatrix4(R).normalize();
           remaining -= bestT;
           continue;
         }
       }
+
       if (hit) {
-        AudioSys.zap(hitPt, G.camera.position.distanceTo(hitPt) / 343);
+        AudioSys.zap(finalHitPt, G.camera.position.distanceTo(finalHitPt) / 343);
         const sn = hit.normal.clone().normalize();
-        this.spawnScorch(hitPt, sn, G.animObjects);
-        scorchMsg = { pos: hitPt.toArray(), n: sn.toArray() };
+        this.spawnScorch(finalHitPt, sn, G.animObjects);
+        scorchMsg = { pos: finalHitPt.toArray(), n: sn.toArray() };
       }
       break;
+    }
+
+    if (!finalHitPt) {
+      finalHitPt = curPos.clone().addScaledVector(curDir, remaining);
+    }
+
+    const pts = [];
+
+    if (firstPortalIdx === -1) {
+      pts.push(gunTip, finalHitPt);
+    } else {
+      const P = G.portals[firstPortalIdx];
+      const pairIdx = Math.floor(firstPortalIdx / 2);
+      const R = (firstPortalIdx % 2 === 0) ? G.R_AB[pairIdx] : G.R_BA[pairIdx];
+      const Q = G.portals[firstPortalIdx ^ 1];
+      const R_inv = (firstPortalIdx % 2 === 0) ? G.R_BA[pairIdx] : G.R_AB[pairIdx];
+
+      if (P && Q && Q.placed && R && R_inv) {
+        const toGunTip = gunTip.clone().sub(P.c);
+        const normDist = toGunTip.dot(P.n);
+        const rDist = Math.abs(toGunTip.dot(P.r));
+        const uDist = Math.abs(toGunTip.dot(P.u));
+        const isGunTipInside = normDist <= 0.05 && rDist < PORT.hw && uDist < PORT.hh;
+
+        if (isGunTipInside) {
+          const relGunTip = toGunTip.clone().applyMatrix4(R);
+          const exitGunTip = Q.c.clone().add(relGunTip);
+          pts.push(exitGunTip, finalHitPt);
+        } else {
+          const targetVirtual = P.c.clone().add(finalHitPt.clone().sub(Q.c).applyMatrix4(R_inv));
+          const beamDir = targetVirtual.clone().sub(gunTip);
+          const denom = beamDir.dot(P.n);
+          const t = (denom < -0.0001) ? P.c.clone().sub(gunTip).dot(P.n) / denom : 0.5;
+          const P_entry = gunTip.clone().addScaledVector(beamDir, Math.max(0, t));
+
+          const dEntry = P_entry.clone().sub(P.c);
+          const lx = Math.max(-PORT.hw + 0.02, Math.min(PORT.hw - 0.02, dEntry.dot(P.r)));
+          const ly = Math.max(-PORT.hh + 0.02, Math.min(PORT.hh - 0.02, dEntry.dot(P.u)));
+          P_entry.copy(P.c).addScaledVector(P.r, lx).addScaledVector(P.u, ly);
+
+          const Q_exit = Q.c.clone().add(P_entry.clone().sub(P.c).applyMatrix4(R));
+          pts.push(gunTip, P_entry, Q_exit, finalHitPt);
+        }
+      } else {
+        pts.push(gunTip, finalHitPt);
+      }
+    }
+
+    if (hitPlayerId !== null) {
+      G.Network.send({ type: 'fire_instagib', pts: pts.map(p => p.toArray()), hitPlayerId });
+      const shotOrigin = pts.length >= 2 ? pts[pts.length - 2].clone() : gunTip.clone();
+      const beamDir = pts.length >= 2 ? pts[pts.length - 1].clone().sub(pts[pts.length - 2]).normalize() : curDir.clone();
+      if (hitPlayerId === G.localPlayerId) {
+        G.die(G.localPlayerId, true, 'instagib', shotOrigin, beamDir);
+      } else if (G.remotePlayers[hitPlayerId]) {
+        G.remotePlayers[hitPlayerId].isDead = true;
+        G.remotePlayers[hitPlayerId].predictedDeadUntil = G.nowT + 3.0;
+        G.remotePlayers[hitPlayerId].lastShotOrigin = shotOrigin;
+        G.remotePlayers[hitPlayerId].lastKillerId = G.localPlayerId;
+        G.remotePlayers[hitPlayerId].lastBeamDir = beamDir;
+      }
+      AudioSys.tone(600, 600, 0.5, 'sine', 0.3);
+      if (G.remotePlayerMeshes[hitPlayerId]) {
+        G.remotePlayerMeshes[hitPlayerId].visible = false;
+        if (G.remotePlayerMeshes[hitPlayerId].userData?.cloneMesh) {
+          G.remotePlayerMeshes[hitPlayerId].userData.cloneMesh.visible = false;
+        }
+      }
+      for (let i = 0; i < pts.length; i += 2) this.spawnInstagibBeam(pts[i], pts[i + 1], G.animObjects);
+      return;
     }
 
     for (let i = 0; i < pts.length; i += 2) this.spawnInstagibBeam(pts[i], pts[i + 1], G.animObjects);

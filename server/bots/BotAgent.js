@@ -381,10 +381,10 @@ function findPortalSurfaceInCone(pos, baseYaw, obbs_, portals, PORT_, currentPi,
   return null;
 }
 
-function findOrangePortalSurface(pos, blueN, obbs_, portals, PORT_, currentPi, session) {
+function findSecondaryPortalSurface(pos, primaryN, obbs_, portals, PORT_, currentPi, session) {
   const angleSpreads = [Math.PI * 0.5, -Math.PI * 0.5, Math.PI * 0.8, -Math.PI * 0.8, Math.PI, 0];
   const testPitches = [0.05, 0.2, -0.05, 0.35, -0.15];
-  const baseAngle = Math.atan2(blueN.x, blueN.z);
+  const baseAngle = Math.atan2(primaryN.x, primaryN.z);
   for (const ang of angleSpreads) {
     const y = baseAngle + ang;
     for (const p of testPitches) {
@@ -539,15 +539,15 @@ export class BotAgent {
       lastTickPos: null,
       avoidUntilT: 0,
       avoidYaw: 0,
-      blueSurface: null,
-      blueAimYaw: 0,
-      blueAimPitch: 0,
-      blueAimT: 0,
-      orangeSurface: null,
-      orangeAimYaw: 0,
-      orangeAimPitch: 0,
-      orangeAimT: 0,
-      orangeDelayUntil: 0,
+      primarySurface: null,
+      primaryAimYaw: 0,
+      primaryAimPitch: 0,
+      primaryAimT: 0,
+      secondarySurface: null,
+      secondaryAimYaw: 0,
+      secondaryAimPitch: 0,
+      secondaryAimT: 0,
+      secondaryDelayUntil: 0,
       unstuckUntilT: 0,
       strafeDir: null,
       instagibTargetPid: null,
@@ -727,13 +727,13 @@ export class BotAgent {
         Math.random() < PORTAL_CHANCE
       ) {
         const botPortalBase = this.portalBaseIndex;
-        const blueFound = findPortalSurfaceInCone(this.pos, this.yaw, obbs, portals, PORT_, botPortalBase, session);
-        if (blueFound) {
-          st.blueSurface = blueFound.surface;
-          st.blueAimYaw = blueFound.aimYaw;
-          st.blueAimPitch = blueFound.aimPitch;
-          st.blueAimT = nowT;
-          st.portalPhase = 'aim_blue';
+        const primaryFound = findPortalSurfaceInCone(this.pos, this.yaw, obbs, portals, PORT_, botPortalBase, session);
+        if (primaryFound) {
+          st.primarySurface = primaryFound.surface;
+          st.primaryAimYaw = primaryFound.aimYaw;
+          st.primaryAimPitch = primaryFound.aimPitch;
+          st.primaryAimT = nowT;
+          st.portalPhase = 'aim_primary';
         } else {
           st.lastPortalT = nowT + 2.0;
         }
@@ -866,10 +866,10 @@ export class BotAgent {
       st.avoidUntilT = nowT + 0.6;
       isTallWall = false;
       canStepOver = false;
-    } else if (st.portalPhase === 'aim_blue') {
-      desiredYaw = st.blueAimYaw;
-    } else if (st.portalPhase === 'delay_orange' || st.portalPhase === 'aim_orange') {
-      desiredYaw = st.orangeAimYaw;
+    } else if (st.portalPhase === 'aim_primary') {
+      desiredYaw = st.primaryAimYaw;
+    } else if (st.portalPhase === 'delay_secondary' || st.portalPhase === 'aim_secondary') {
+      desiredYaw = st.secondaryAimYaw;
     } else if (nowT < st.avoidUntilT) {
       desiredYaw = st.avoidYaw;
     }
@@ -878,7 +878,7 @@ export class BotAgent {
     while (dyaw > Math.PI) dyaw -= Math.PI * 2;
     while (dyaw < -Math.PI) dyaw += Math.PI * 2;
 
-    const isPortalAiming = st.portalPhase === 'aim_blue' || st.portalPhase === 'delay_orange' || st.portalPhase === 'aim_orange';
+    const isPortalAiming = st.portalPhase === 'aim_primary' || st.portalPhase === 'delay_secondary' || st.portalPhase === 'aim_secondary';
     const maxTurn = (isPortalAiming ? 3.8 : (activeOpp ? 4.2 : 4.8)) * DT;
     if (Math.abs(dyaw) > maxTurn) {
       this.yaw += Math.sign(dyaw) * maxTurn;
@@ -891,10 +891,10 @@ export class BotAgent {
     let targetPitch;
     if (activeOpp) {
       targetPitch = Math.asin(Math.max(-0.99, Math.min(0.99, activeOpp.dir.y)));
-    } else if (st.portalPhase === 'aim_blue') {
-      targetPitch = st.blueAimPitch;
-    } else if (st.portalPhase === 'delay_orange' || st.portalPhase === 'aim_orange') {
-      targetPitch = st.orangeAimPitch;
+    } else if (st.portalPhase === 'aim_primary') {
+      targetPitch = st.primaryAimPitch;
+    } else if (st.portalPhase === 'delay_secondary' || st.portalPhase === 'aim_secondary') {
+      targetPitch = st.secondaryAimPitch;
     } else {
       targetPitch = Math.max(-0.25, Math.min(0.25, ((st.targetPos.y - this.pos.y) - 1.5) * 0.04));
     }
@@ -1002,17 +1002,17 @@ export class BotAgent {
 
     const botPortalBase = this.portalBaseIndex;
 
-    if (st.portalPhase === 'aim_blue') {
-      let aimDyaw = st.blueAimYaw - this.yaw;
+    if (st.portalPhase === 'aim_primary') {
+      let aimDyaw = st.primaryAimYaw - this.yaw;
       while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
       while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
-      const aimDpitch = Math.abs(st.blueAimPitch - this.pitch);
+      const aimDpitch = Math.abs(st.primaryAimPitch - this.pitch);
       const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
-      const timedOut = nowT - st.blueAimT > 1.2;
-      const minAimTimePassed = nowT - st.blueAimT > 0.45;
+      const timedOut = nowT - st.primaryAimT > 1.2;
+      const minAimTimePassed = nowT - st.primaryAimT > 0.45;
 
-      if (st.blueSurface && ((aligned && minAimTimePassed) || timedOut)) {
-        const surface = st.blueSurface;
+      if (st.primarySurface && ((aligned && minAimTimePassed) || timedOut)) {
+        const surface = st.primarySurface;
         const P = portals[botPortalBase];
         P.placed = true;
         P.c.copy(surface.c);
@@ -1022,41 +1022,41 @@ export class BotAgent {
 
         if (onPortalPlaced) onPortalPlaced(botPortalBase, surface, surface.eyePos);
 
-        const orangeFound = findOrangePortalSurface(this.pos, surface.n, obbs, portals, PORT_, botPortalBase + 1, session);
-        if (orangeFound) {
-          st.orangeSurface = orangeFound.surface;
-          st.orangeAimYaw = orangeFound.aimYaw;
-          st.orangeAimPitch = orangeFound.aimPitch;
-          st.portalPhase = 'delay_orange';
-          st.orangeDelayUntil = nowT + 0.85 + Math.random() * 0.35;
+        const secondaryFound = findSecondaryPortalSurface(this.pos, surface.n, obbs, portals, PORT_, botPortalBase + 1, session);
+        if (secondaryFound) {
+          st.secondarySurface = secondaryFound.surface;
+          st.secondaryAimYaw = secondaryFound.aimYaw;
+          st.secondaryAimPitch = secondaryFound.aimPitch;
+          st.portalPhase = 'delay_secondary';
+          st.secondaryDelayUntil = nowT + 0.85 + Math.random() * 0.35;
         } else {
           st.portalPhase = 'none';
           st.lastPortalT = nowT + 3.0;
         }
-      } else if (nowT - st.blueAimT > 2.0) {
+      } else if (nowT - st.primaryAimT > 2.0) {
         st.portalPhase = 'none';
         st.lastPortalT = nowT + 2.0;
       }
-    } else if (st.portalPhase === 'delay_orange') {
-      if (nowT >= st.orangeDelayUntil) {
-        st.portalPhase = 'aim_orange';
-        st.orangeAimT = nowT;
-      } else if (nowT > st.orangeDelayUntil + 2.0) {
+    } else if (st.portalPhase === 'delay_secondary') {
+      if (nowT >= st.secondaryDelayUntil) {
+        st.portalPhase = 'aim_secondary';
+        st.secondaryAimT = nowT;
+      } else if (nowT > st.secondaryDelayUntil + 2.0) {
         st.portalPhase = 'none';
         st.lastPortalT = nowT + 2.0;
       }
-    } else if (st.portalPhase === 'aim_orange') {
-      let aimDyaw = st.orangeAimYaw - this.yaw;
+    } else if (st.portalPhase === 'aim_secondary') {
+      let aimDyaw = st.secondaryAimYaw - this.yaw;
       while (aimDyaw > Math.PI) aimDyaw -= Math.PI * 2;
       while (aimDyaw < -Math.PI) aimDyaw += Math.PI * 2;
-      const aimDpitch = Math.abs(st.orangeAimPitch - this.pitch);
+      const aimDpitch = Math.abs(st.secondaryAimPitch - this.pitch);
       const aligned = Math.abs(aimDyaw) < 0.08 && aimDpitch < 0.08;
-      const timedOut = nowT - st.orangeAimT > 1.2;
-      const minAimTimePassed = nowT - st.orangeAimT > 0.35;
+      const timedOut = nowT - st.secondaryAimT > 1.2;
+      const minAimTimePassed = nowT - st.secondaryAimT > 0.35;
 
-      if (st.orangeSurface && ((aligned && minAimTimePassed) || timedOut)) {
+      if (st.secondarySurface && ((aligned && minAimTimePassed) || timedOut)) {
         const pIdx = botPortalBase + 1;
-        const surface = st.orangeSurface;
+        const surface = st.secondarySurface;
         const P = portals[pIdx];
         P.placed = true;
         P.c.copy(surface.c);
@@ -1069,27 +1069,27 @@ export class BotAgent {
         st.portalPhase = 'walk_thru';
         st.lastPortalT = nowT;
         st.walkThruT = nowT;
-      } else if (nowT - st.orangeAimT > 2.0) {
+      } else if (nowT - st.secondaryAimT > 2.0) {
         st.portalPhase = 'none';
         st.lastPortalT = nowT + 3.0;
       }
     } else if (st.portalPhase === 'walk_thru') {
-      const bluePortal = portals[botPortalBase];
-      const orangePortal = portals[botPortalBase + 1];
+      const primaryPortal = portals[botPortalBase];
+      const secondaryPortal = portals[botPortalBase + 1];
 
-      if (bluePortal.placed) {
-        st.targetPos = bluePortal.c.clone().addScaledVector(bluePortal.n, -0.6);
-        const portalBottomY = bluePortal.c.y - PORT_.hh;
-        if (this.pos.distanceTo(bluePortal.c) < 2.5 && portalBottomY > this.pos.y + 0.35) {
+      if (primaryPortal.placed) {
+        st.targetPos = primaryPortal.c.clone().addScaledVector(primaryPortal.n, -0.6);
+        const portalBottomY = primaryPortal.c.y - PORT_.hh;
+        if (this.pos.distanceTo(primaryPortal.c) < 2.5 && portalBottomY > this.pos.y + 0.35) {
           this.jumpBuf = nowT;
         }
       }
 
-      const passedThrough = orangePortal.placed && this.pos.distanceTo(orangePortal.c) < 2.5 && (nowT - st.walkThruT > 0.25);
-      const reachedBlue = bluePortal.placed && this.pos.distanceTo(bluePortal.c) < 0.9;
+      const passedThrough = secondaryPortal.placed && this.pos.distanceTo(secondaryPortal.c) < 2.5 && (nowT - st.walkThruT > 0.25);
+      const reachedPrimary = primaryPortal.placed && this.pos.distanceTo(primaryPortal.c) < 0.9;
       const timedOut = nowT - st.walkThruT > 6.0;
 
-      if (passedThrough || reachedBlue || timedOut) {
+      if (passedThrough || reachedPrimary || timedOut) {
         st.portalPhase = 'none';
         const route = pickBotTargetAndRoute(this.pos, portals, mapData);
         st.targetPos = route.target;

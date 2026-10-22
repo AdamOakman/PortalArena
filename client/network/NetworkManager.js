@@ -199,6 +199,8 @@ export function onMessage(G, data) {
   } else if (data.type === 'player_disconnected') {
     G.addEventLog(data.name + ' dropped from the game');
   } else if (data.type === 'map_change') {
+    G.won = false;
+    if (G.hideVictoryScreen) G.hideVictoryScreen();
     if (G.resetWalls) G.resetWalls(data.seed);
     else G.loadMap(data.seed);
     G.destroyedWalls = [];
@@ -213,7 +215,7 @@ export function onMessage(G, data) {
     if (data.match) {
       const oldPhase = G.match ? G.match.phase : null;
       G.match = data.match;
-      if (oldPhase && oldPhase !== data.match.phase) {
+      if (oldPhase && oldPhase !== data.match.phase && data.match.phase !== 'summary') {
         if (G.resetWalls) G.resetWalls();
         G.destroyedWalls = [];
         G.destroyedWallObbs = [];
@@ -237,7 +239,7 @@ export function onMessage(G, data) {
         if (G.cancelCountdown) G.cancelCountdown();
       }
     }
-    if (data.destroyedWallCount === 0 && G.destroyedWalls && G.destroyedWalls.length > 0) {
+    if (data.destroyedWallCount === 0 && G.destroyedWalls && G.destroyedWalls.length > 0 && G.match?.phase !== 'summary') {
       if (G.resetWalls) G.resetWalls();
       G.destroyedWalls = [];
       G.destroyedWallObbs = [];
@@ -452,9 +454,9 @@ export function onMessage(G, data) {
       G.muzzleT = 1;
     }
     const pts = data.pts.map(a => new V3(...a));
-    if (data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) {
+    if (pts.length === 2 && data.playerId !== G.localPlayerId && G.remotePlayerMeshes[data.playerId]) {
       const rm = G.remotePlayerMeshes[data.playerId];
-      if (rm.userData.mirrorInstagibGun) {
+      if (rm.userData.mirrorInstagibGun && rm.position.distanceTo(pts[0]) < 2.5) {
         rm.updateMatrixWorld(true);
         rm.userData.mirrorInstagibGun.updateMatrixWorld(true);
         pts[0].set(0, 0, -0.4).applyMatrix4(rm.userData.mirrorInstagibGun.matrixWorld);
@@ -520,19 +522,19 @@ export function onMessage(G, data) {
         const toShot = new V3().subVectors(shotOrigin, eyePos);
         const shotDist = toShot.length();
         const shotDir = shotDist > 0.01 ? toShot.clone().normalize() : new V3(-Math.sin(deadRp.yaw || 0), 0, -Math.cos(deadRp.yaw || 0));
-        const pullDist = 2.2;
+        const pullDist = 4.2;
         const backDir = shotDir.clone().negate();
         const rayHit = G.raycast ? G.raycast(eyePos, backDir, pullDist + 0.3) : null;
-        const actualPull = rayHit ? Math.max(0.1, rayHit.distance - 0.3) : pullDist;
+        const actualPull = rayHit ? Math.max(0.4, rayHit.distance - 0.3) : pullDist;
         deadRp.deathCamPos = eyePos.clone().addScaledVector(backDir, actualPull);
-        deadRp.deathCamPos.y += Math.min(0.65, 0.25 + actualPull * 0.25);
+        deadRp.deathCamPos.y += Math.min(2.0, 1.0 + actualPull * 0.35);
 
         const shotHorizDist = Math.hypot(shotDir.x, shotDir.z);
         if (shotHorizDist > 0.01) {
           const horizX = shotDir.x / shotHorizDist;
           const horizZ = shotDir.z / shotHorizDist;
           const currentPitch = Math.atan2(shotDir.y, shotHorizDist);
-          const targetPitch = Math.max(-0.65, Math.min(0.15, currentPitch - 0.32));
+          const targetPitch = Math.max(-0.85, Math.min(-0.25, currentPitch - 0.65));
           const lookDir = new V3(
             horizX * Math.cos(targetPitch),
             Math.sin(targetPitch),
@@ -540,12 +542,12 @@ export function onMessage(G, data) {
           ).normalize();
           deadRp.deathCamTarget = deadRp.deathCamPos.clone().addScaledVector(lookDir, Math.max(10, shotDist));
         } else {
-          deadRp.deathCamTarget = shotOrigin.clone();
+          deadRp.deathCamTarget = deadPos.clone().add(new V3(0, 0.3, 0));
         }
       } else {
-        const offset = new V3(0, 2.2, 3.8).applyAxisAngle(new V3(0, 1, 0), deadRp.yaw || 0);
+        const offset = new V3(0, 2.8, 4.8).applyAxisAngle(new V3(0, 1, 0), deadRp.yaw || 0);
         const backDir = offset.clone().normalize();
-        const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length()) : null;
+        const rayHit = G.raycast ? G.raycast(deadPos, backDir, offset.length() + 0.3) : null;
         const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
         deadRp.deathCamPos = deadPos.clone().addScaledVector(backDir, camDist);
         deadRp.deathCamTarget = deadPos.clone().add(new V3(0, 0.2, 0));
@@ -553,6 +555,8 @@ export function onMessage(G, data) {
     }
     if (data.feedMsg) G.addEventLog(data.feedMsg, data.feedHot);
   } else if (data.type === 'respawn') {
+    G.won = false;
+    if (G.hideVictoryScreen) G.hideVictoryScreen();
     const isLocal = !G.isSpectator && (!data.playerId || data.playerId === G.localPlayerId);
     if (isLocal) {
       G.isDead = false;

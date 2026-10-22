@@ -165,7 +165,11 @@ export class RemotePlayer extends Entity {
       if (this.viewOffset.angleTo(id) < 0.001) this.viewOffset = null;
     }
 
-    m.visible = !this.isDead && !isTargetFollowPOV;
+    const isVictoryOrbit = G.won || (G.menuController && G.menuController.isVictoryOpen());
+    m.visible = !this.isDead && !isTargetFollowPOV && !isVictoryOrbit;
+    if (isVictoryOrbit && this.cloneMesh) {
+      this.cloneMesh.visible = false;
+    }
     m.position.set(this.pos[0], this.pos[1], this.pos[2]);
     m.quaternion.setFromEuler(new THREE.Euler(0, this.yaw, 0, 'YXZ'));
     if (this.viewOffset) {

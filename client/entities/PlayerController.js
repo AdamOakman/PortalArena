@@ -142,20 +142,20 @@ export class PlayerController extends Entity {
       const shotDist = toShot.length();
       const shotDir = shotDist > 0.01 ? toShot.clone().normalize() : new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
 
-      const pullDist = 2.2;
+      const pullDist = 4.2;
       const backDir = shotDir.clone().negate();
       const rayHit = G && G.raycast ? G.raycast(eyePos, backDir, pullDist + 0.3) : null;
-      const actualPull = rayHit ? Math.max(0.1, rayHit.distance - 0.3) : pullDist;
+      const actualPull = rayHit ? Math.max(0.4, rayHit.distance - 0.3) : pullDist;
 
       this.deathCamPos.copy(eyePos).addScaledVector(backDir, actualPull);
-      this.deathCamPos.y += Math.min(0.65, 0.25 + actualPull * 0.25);
+      this.deathCamPos.y += Math.min(2.0, 1.0 + actualPull * 0.35);
 
       const shotHorizDist = Math.hypot(shotDir.x, shotDir.z);
       if (shotHorizDist > 0.01) {
         const horizX = shotDir.x / shotHorizDist;
         const horizZ = shotDir.z / shotHorizDist;
         const currentPitch = Math.atan2(shotDir.y, shotHorizDist);
-        const targetPitch = Math.max(-0.65, Math.min(0.15, currentPitch - 0.32));
+        const targetPitch = Math.max(-0.85, Math.min(-0.25, currentPitch - 0.65));
         const lookDir = new THREE.Vector3(
           horizX * Math.cos(targetPitch),
           Math.sin(targetPitch),
@@ -163,11 +163,14 @@ export class PlayerController extends Entity {
         ).normalize();
         this.deathCamTarget.copy(this.deathCamPos).addScaledVector(lookDir, Math.max(10, shotDist));
       } else {
-        this.deathCamTarget.copy(sOrigin);
+        this.deathCamTarget.copy(this.position).add(new THREE.Vector3(0, 0.3, 0));
       }
     } else {
-      const offset = new THREE.Vector3(0, 2.2, 3.8).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-      this.deathCamPos.copy(this.position).add(offset);
+      const offset = new THREE.Vector3(0, 2.8, 4.8).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+      const backDir = offset.clone().normalize();
+      const rayHit = G && G.raycast ? G.raycast(this.position, backDir, offset.length() + 0.3) : null;
+      const camDist = rayHit ? Math.max(0.6, rayHit.distance - 0.3) : offset.length();
+      this.deathCamPos.copy(this.position).addScaledVector(backDir, camDist);
       this.deathCamTarget.copy(this.position).add(new THREE.Vector3(0, 0.2, 0));
     }
 
@@ -393,7 +396,7 @@ export class PlayerController extends Entity {
    */
   updateLocalView(dt, now, context = null) {
     const G = context || this.engine?.context || (typeof window !== 'undefined' ? window.__GAME_CONTEXT__ : null);
-    if (!G || !G.started || G.isSpectator) return;
+    if (!G || !G.started || G.isSpectator || G.won || (G.menuController && G.menuController.isVictoryOpen())) return;
 
     const { TH, camera } = G;
     const sp = Math.hypot(this.velocity.x, this.velocity.z);

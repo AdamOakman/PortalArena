@@ -341,7 +341,6 @@ export class GameServer {
     this.match.winner = winner;
     this.match.phase = 'summary';
     this.match.deadlineMs = 0;
-    this.broadcastResetWalls();
     this.broadcast(JSON.stringify({ type: 'round_over', match: this.matchSession.getInfo() }));
   }
 
@@ -795,6 +794,10 @@ export class GameServer {
           this.matchSession.resetToWaiting();
           this.broadcastResetWalls();
         }
+        for (const pid in this.gameState.players) {
+          const p = this.gameState.players[pid];
+          this.broadcast(JSON.stringify({ type: 'respawn', playerId: pid, pos: p.pos.toArray() }));
+        }
         this.broadcast(JSON.stringify({ type: 'map_change', seed: data.seed }));
       }
     });
@@ -834,7 +837,7 @@ export class GameServer {
         if (pl.crouchT > 0) {
           pl.crouchT = Math.max(0, pl.crouchT - dt * 3);
         }
-        if (!pl.isDead && this.match.phase !== 'countdown') {
+        if (!pl.isDead && this.match.phase !== 'countdown' && this.match.phase !== 'summary') {
           lastKeys = pl.tick(this.tpState.nowT, this.matchSession, {
             onPortalPlaced: (pIdx, surface, eyePos) => {
               const P = this.gameState.portals[pIdx];

@@ -37,16 +37,28 @@ export class RenderManager {
   }
 
   _setupLighting() {
-    this.scene.add(new THREE.HemisphereLight(0x4a4a72, 0x1c1826, 1.5));
-    const moon = new THREE.DirectionalLight(0x99a2d4, 1.5);
+    const hemi = new THREE.HemisphereLight(0x4a4a72, 0x1c1826, 1.5);
+    hemi.layers.enable(2);
+    this.scene.add(hemi);
+
+    const moon = new THREE.DirectionalLight(0x99a2d4, 1.8);
     moon.position.set(60, 90, -40);
+    moon.layers.enable(2);
     this.scene.add(moon);
 
-    const rimL = new THREE.DirectionalLight(0x4a3566, 0.7);
+    const rimL = new THREE.DirectionalLight(0x6a5588, 1.0);
     rimL.position.set(-48, 18, -34);
+    rimL.layers.enable(2);
     this.scene.add(rimL);
 
-    this.scene.add(new THREE.AmbientLight(0x3a3650, 1.2));
+    const amb = new THREE.AmbientLight(0x3a3650, 1.2);
+    amb.layers.enable(2);
+    this.scene.add(amb);
+
+    const vmLight = new THREE.DirectionalLight(0xaac8ff, 1.2);
+    vmLight.position.set(1.5, 2.5, 0.5);
+    vmLight.layers.set(2);
+    this.camera.add(vmLight);
   }
 
   _setupSky() {
