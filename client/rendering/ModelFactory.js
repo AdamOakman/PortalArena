@@ -20,9 +20,11 @@ export class ModelFactory {
     barrel.position.set(0, 0.02, -0.3);
 
     const core = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), glowA);
+    core.name = 'portalGunCore';
     core.position.set(0, 0.06, -0.05);
 
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.012, 8, 24), glowB);
+    ring.name = 'portalGunRing';
     ring.position.set(0, 0.02, -0.42);
 
     const prong1 = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.16, 0.05), bodyMat);
@@ -166,6 +168,12 @@ export function initModels(TH, camera, scene) {
     const mirrorGun = gun.clone();
     mirrorGun.position.set(0.3, -0.26, -0.5);
     mirrorGun.rotation.set(0, 0, 0);
+    const mirrorCore = mirrorGun.getObjectByName('portalGunCore');
+    const mirrorRing = mirrorGun.getObjectByName('portalGunRing');
+    mirrorGun.userData = {
+      core: mirrorCore,
+      ring: mirrorRing
+    };
     headGroup.add(mirrorGun);
 
     const mirrorRocketGun = rocketGun.clone();
@@ -189,6 +197,17 @@ export function initModels(TH, camera, scene) {
         }
       }
     });
+
+    if (mirrorCore?.material && gun.userData?.core?.material) {
+      mirrorCore.material.color.copy(gun.userData.core.material.color);
+      mirrorCore.material.emissive.copy(gun.userData.core.material.emissive);
+      mirrorCore.material.emissiveIntensity = gun.userData.core.material.emissiveIntensity;
+    }
+    if (mirrorRing?.material && gun.userData?.ring?.material) {
+      mirrorRing.material.color.copy(gun.userData.ring.material.color);
+      mirrorRing.material.emissive.copy(gun.userData.ring.material.emissive);
+      mirrorRing.material.emissiveIntensity = gun.userData.ring.material.emissiveIntensity;
+    }
 
     model.userData = { headGroup, mirrorGun, mirrorRocketGun, mirrorInstagibGun };
     return model;

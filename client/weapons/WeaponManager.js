@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AudioSys } from '../audio/AudioController.js';
-import { CFG, PORT, getPlayerHeight } from '../../shared/constants.js';
+import { PORT, getPlayerHeight } from '../../shared/constants.js';
 import { ObjectPool } from '../core/ObjectPool.js';
 import { RocketProjectile } from '../projectiles/RocketProjectile.js';
 
@@ -386,8 +386,32 @@ export class WeaponManager {
     G.muzzleT = 1;
     this.muzzleT = 1;
     const hex = G.portals[pi].color;
-    G.gun.userData.core.material.emissive.setHex(hex);
-    G.gun.userData.ring.material.emissive.setHex(hex);
+    if (G.gun?.userData?.core?.material) {
+      G.gun.userData.core.material.color.setHex(hex);
+      G.gun.userData.core.material.emissive.setHex(hex);
+    }
+    if (G.gun?.userData?.ring?.material) {
+      G.gun.userData.ring.material.color.setHex(hex);
+      G.gun.userData.ring.material.emissive.setHex(hex);
+    }
+    const pM = G.playerModel?.userData?.mirrorGun;
+    if (pM?.userData?.core?.material) {
+      pM.userData.core.material.color.setHex(hex);
+      pM.userData.core.material.emissive.setHex(hex);
+    }
+    if (pM?.userData?.ring?.material) {
+      pM.userData.ring.material.color.setHex(hex);
+      pM.userData.ring.material.emissive.setHex(hex);
+    }
+    const cM = G.playerCloneModel?.userData?.mirrorGun;
+    if (cM?.userData?.core?.material) {
+      cM.userData.core.material.color.setHex(hex);
+      cM.userData.core.material.emissive.setHex(hex);
+    }
+    if (cM?.userData?.ring?.material) {
+      cM.userData.ring.material.color.setHex(hex);
+      cM.userData.ring.material.emissive.setHex(hex);
+    }
   }
 
   traceCrosshairSightline(startPos, startDir, maxDist = 140, G = null) {

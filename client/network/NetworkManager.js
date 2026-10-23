@@ -52,8 +52,33 @@ export function onMessage(G, data) {
         }
       }
 
-      G.gun.userData.core.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
-      G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
+      const pCol = G.portals[G.localPlayerIndex * 2].color;
+      if (G.gun?.userData?.core?.material) {
+        G.gun.userData.core.material.color.setHex(pCol);
+        G.gun.userData.core.material.emissive.setHex(pCol);
+      }
+      if (G.gun?.userData?.ring?.material) {
+        G.gun.userData.ring.material.color.setHex(pCol);
+        G.gun.userData.ring.material.emissive.setHex(pCol);
+      }
+      const pM = G.playerModel?.userData?.mirrorGun;
+      if (pM?.userData?.core?.material) {
+        pM.userData.core.material.color.setHex(pCol);
+        pM.userData.core.material.emissive.setHex(pCol);
+      }
+      if (pM?.userData?.ring?.material) {
+        pM.userData.ring.material.color.setHex(pCol);
+        pM.userData.ring.material.emissive.setHex(pCol);
+      }
+      const cM = G.playerCloneModel?.userData?.mirrorGun;
+      if (cM?.userData?.core?.material) {
+        cM.userData.core.material.color.setHex(pCol);
+        cM.userData.core.material.emissive.setHex(pCol);
+      }
+      if (cM?.userData?.ring?.material) {
+        cM.userData.ring.material.color.setHex(pCol);
+        cM.userData.ring.material.emissive.setHex(pCol);
+      }
       G.gun.visible = (G.activeWeapon === 1);
       G.rocketGun.visible = (G.activeWeapon === 2);
       G.instagibGun.visible = (G.activeWeapon === 3);
@@ -125,8 +150,33 @@ export function onMessage(G, data) {
       }
     }
 
-    G.gun.userData.core.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
-    G.gun.userData.ring.material.emissive.setHex(G.portals[G.localPlayerIndex * 2].color);
+    const pCol = G.portals[G.localPlayerIndex * 2].color;
+    if (G.gun?.userData?.core?.material) {
+      G.gun.userData.core.material.color.setHex(pCol);
+      G.gun.userData.core.material.emissive.setHex(pCol);
+    }
+    if (G.gun?.userData?.ring?.material) {
+      G.gun.userData.ring.material.color.setHex(pCol);
+      G.gun.userData.ring.material.emissive.setHex(pCol);
+    }
+    const pM = G.playerModel?.userData?.mirrorGun;
+    if (pM?.userData?.core?.material) {
+      pM.userData.core.material.color.setHex(pCol);
+      pM.userData.core.material.emissive.setHex(pCol);
+    }
+    if (pM?.userData?.ring?.material) {
+      pM.userData.ring.material.color.setHex(pCol);
+      pM.userData.ring.material.emissive.setHex(pCol);
+    }
+    const cM = G.playerCloneModel?.userData?.mirrorGun;
+    if (cM?.userData?.core?.material) {
+      cM.userData.core.material.color.setHex(pCol);
+      cM.userData.core.material.emissive.setHex(pCol);
+    }
+    if (cM?.userData?.ring?.material) {
+      cM.userData.ring.material.color.setHex(pCol);
+      cM.userData.ring.material.emissive.setHex(pCol);
+    }
     G.gun.visible = (G.activeWeapon === 1);
     G.rocketGun.visible = (G.activeWeapon === 2);
     G.instagibGun.visible = (G.activeWeapon === 3);

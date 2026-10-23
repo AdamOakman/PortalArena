@@ -470,11 +470,10 @@ export function initPhysics(TH, CFG, PORT) {
       if (pl.pos.y > Q.c.y - curH - 0.2) {
         pl.pos.y = Q.c.y - curH - 0.2;
       }
-    }
-
-    const outSpeed = pl.vel.dot(Q.n);
-    if (outSpeed < 6.0) {
-      pl.vel.addScaledVector(Q.n, 6.0 - outSpeed);
+      const outSpeed = pl.vel.dot(Q.n);
+      if (outSpeed < 6.0) {
+        pl.vel.addScaledVector(Q.n, 6.0 - outSpeed);
+      }
     }
 
     const baseQ = new TH.Quaternion().setFromEuler(new TH.Euler(pl.pitch, pl.yaw, 0, 'YXZ'));

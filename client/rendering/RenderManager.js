@@ -24,7 +24,7 @@ export class RenderManager {
     this.scene.fog = new THREE.Fog(0x251c4a, 30, 140);
     this.scene.background = new THREE.Color(0x171233);
 
-    this.camera = new THREE.PerspectiveCamera(115, window.innerWidth / window.innerHeight, 0.02, 300);
+    this.camera = new THREE.PerspectiveCamera(115, window.innerWidth / window.innerHeight, 0.001, 300);
     this.camera.layers.enable(2);
 
     this.skyGroup = new THREE.Group();

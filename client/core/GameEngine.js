@@ -984,7 +984,7 @@ export class GameEngine {
 
       const camPos = G.camera.position;
       const dot = (camPos.x - P.c.x) * P.n.x + (camPos.y - P.c.y) * P.n.y + (camPos.z - P.c.z) * P.n.z;
-      const isFacing = dot > 0.05;
+      const isFacing = dot > 0.0001;
 
       G.quads[i].scale.setScalar(scl);
       G.frames[i].scale.set((PORT.hw + 0.05) * scl, (PORT.hh + 0.05) * scl, 1);

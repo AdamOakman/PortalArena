@@ -33,7 +33,7 @@ export class PortalManager {
     this.MIN_PORTAL_PX = 32;
     this.portalRTs = [];
     this.clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 1e6);
-    this.vcam = new THREE.PerspectiveCamera(115, 1, 0.02, 300);
+    this.vcam = new THREE.PerspectiveCamera(115, 1, 0.001, 300);
     this.vcam.matrixAutoUpdate = false;
     this.vcam.layers.enable(1);
 
@@ -407,7 +407,7 @@ export class PortalManager {
 
     _parentPos.setFromMatrixPosition(parentCamMatrix);
     const dot = (_parentPos.x - P.c.x) * P.n.x + (_parentPos.y - P.c.y) * P.n.y + (_parentPos.z - P.c.z) * P.n.z;
-    if (dot <= 0.01) return null;
+    if (dot <= 0.0001) return null;
 
     if (depth > 0) {
       const dCam = _parentPos.distanceTo(P.c);
@@ -447,10 +447,10 @@ export class PortalManager {
     this.vcam.updateProjectionMatrix();
 
     const dP = (_parentPos.x - P.c.x) * P.n.x + (_parentPos.y - P.c.y) * P.n.y + (_parentPos.z - P.c.z) * P.n.z;
-    if (Math.abs(dP) > 0.05) {
+    if (Math.abs(dP) > 0.0001) {
       const s = dP >= 0 ? 1 : -1;
       this.clipPlane.normal.copy(Q.n).multiplyScalar(s);
-      this.clipPlane.constant = -s * Q.n.dot(Q.c) + 0.02;
+      this.clipPlane.constant = -s * Q.n.dot(Q.c) + 0.005;
     } else {
       this.parkClip();
     }
@@ -478,7 +478,7 @@ export class PortalManager {
         const pj = this.portals[j];
         if (this._isLive(pj)) {
           const vdot = (vcamPos.x - pj.c.x) * pj.n.x + (vcamPos.y - pj.c.y) * pj.n.y + (vcamPos.z - pj.c.z) * pj.n.z;
-          const vFacing = vdot > 0.05;
+          const vFacing = vdot > 0.0001;
           if (this.frames[j]) this.frames[j].visible = vFacing;
           if (this.sparkles[j] && this.sparkles[j].mesh) this.sparkles[j].mesh.visible = vFacing;
           if (this.quads[j]) this.quads[j].visible = vFacing && (texs[j] !== null);
@@ -559,7 +559,7 @@ export class PortalManager {
         this.quadMats[i].uniforms.uEncode.value = 1;
         const P = this.portals[i];
         const dot = (this.camera.position.x - P.c.x) * P.n.x + (this.camera.position.y - P.c.y) * P.n.y + (this.camera.position.z - P.c.z) * P.n.z;
-        this.quads[i].visible = this._isLive(P) && (dot > 0.05) && (texs[i] !== null);
+        this.quads[i].visible = this._isLive(P) && (dot > 0.0001) && (texs[i] !== null);
       }
     }
   }
@@ -580,7 +580,7 @@ export class PortalManager {
         continue;
       }
       const dot = (camPos.x - P.c.x) * P.n.x + (camPos.y - P.c.y) * P.n.y + (camPos.z - P.c.z) * P.n.z;
-      const isFacing = dot > 0.05;
+      const isFacing = dot > 0.0001;
 
       if (this.frames && this.frames[i]) this.frames[i].visible = isFacing;
       if (this.sparkles && this.sparkles[i] && this.sparkles[i].mesh) this.sparkles[i].mesh.visible = isFacing;
@@ -744,7 +744,21 @@ export function updatePortalTransition(mesh, cloneMesh, clipPlane, cloneClipPlan
     const cmrg = cloneMesh.userData.mirrorRocketGun;
     const cmig = cloneMesh.userData.mirrorInstagibGun;
 
-    if (cmg && mg) { cmg.scale.copy(mg.scale); cmg.position.copy(mg.position); cmg.rotation.copy(mg.rotation); }
+    if (cmg && mg) {
+      cmg.scale.copy(mg.scale);
+      cmg.position.copy(mg.position);
+      cmg.rotation.copy(mg.rotation);
+      if (cmg.userData?.core?.material && mg.userData?.core?.material) {
+        cmg.userData.core.material.color.copy(mg.userData.core.material.color);
+        cmg.userData.core.material.emissive.copy(mg.userData.core.material.emissive);
+        cmg.userData.core.material.emissiveIntensity = mg.userData.core.material.emissiveIntensity;
+      }
+      if (cmg.userData?.ring?.material && mg.userData?.ring?.material) {
+        cmg.userData.ring.material.color.copy(mg.userData.ring.material.color);
+        cmg.userData.ring.material.emissive.copy(mg.userData.ring.material.emissive);
+        cmg.userData.ring.material.emissiveIntensity = mg.userData.ring.material.emissiveIntensity;
+      }
+    }
     if (cmrg && mrg) { cmrg.scale.copy(mrg.scale); cmrg.position.copy(mrg.position); cmrg.rotation.copy(mrg.rotation); }
     if (cmig && mig) { cmig.scale.copy(mig.scale); cmig.position.copy(mig.position); cmig.rotation.copy(mig.rotation); }
   }

@@ -79,3 +79,74 @@ describe('Player Hitbox & Crouch Raycast Verification', () => {
     assert.strictEqual(hitCrouched, null, 'Beam at y=1.35m must miss crouched player');
   });
 });
+
+describe('Portal Gun First-Person & Mirror Avatar Color Match', () => {
+  test('mirrorGun on player model synchronizes core and ring colors from first-person viewmodel', async () => {
+    const THREE = await import('three');
+    const { initModels } = await import('../../client/rendering/ModelFactory.js');
+
+    const camera = new THREE.PerspectiveCamera(115, 1, 0.001, 300);
+    const scene = new THREE.Scene();
+    const { gun, createPlayerModel } = initModels(THREE, camera, scene);
+
+    const playerModel = createPlayerModel(0x33ff33, 1, null);
+    const mirrorGun = playerModel.userData.mirrorGun;
+
+    assert.ok(mirrorGun, 'Player model must contain mirrorGun');
+    assert.ok(mirrorGun.userData?.core, 'mirrorGun must have reference to portalGunCore');
+    assert.ok(mirrorGun.userData?.ring, 'mirrorGun must have reference to portalGunRing');
+
+    // Initial colors match
+    assert.strictEqual(
+      mirrorGun.userData.core.material.color.getHex(),
+      gun.userData.core.material.color.getHex(),
+      'Initial mirrorGun core color must match first-person gun core color'
+    );
+    assert.strictEqual(
+      mirrorGun.userData.core.material.emissive.getHex(),
+      gun.userData.core.material.emissive.getHex(),
+      'Initial mirrorGun core emissive must match first-person gun core emissive'
+    );
+
+    // Simulate switching/firing secondary portal or changing team color (e.g. red 0xff5555)
+    const newColor = 0xff5555;
+    gun.userData.core.material.color.setHex(newColor);
+    gun.userData.core.material.emissive.setHex(newColor);
+    gun.userData.ring.material.color.setHex(newColor);
+    gun.userData.ring.material.emissive.setHex(newColor);
+
+    // Simulate PlayerController synchronization
+    const { PlayerController } = await import('../../client/entities/PlayerController.js');
+    const controller = new PlayerController();
+    controller.playerModel = playerModel;
+
+    const mockG = {
+      started: true,
+      isSpectator: false,
+      won: false,
+      isDead: false,
+      gun,
+      activeWeapon: 1,
+      camera: new THREE.PerspectiveCamera(),
+      TH: THREE
+    };
+
+    controller.updateLocalView(1 / 60, 0, mockG);
+
+    assert.strictEqual(
+      mirrorGun.userData.core.material.color.getHex(),
+      newColor,
+      'mirrorGun core color must match updated first-person gun color'
+    );
+    assert.strictEqual(
+      mirrorGun.userData.core.material.emissive.getHex(),
+      newColor,
+      'mirrorGun core emissive must match updated first-person gun emissive'
+    );
+    assert.strictEqual(
+      mirrorGun.userData.ring.material.color.getHex(),
+      newColor,
+      'mirrorGun ring color must match updated first-person gun ring color'
+    );
+  });
+});

@@ -453,6 +453,22 @@ export class PlayerController extends Entity {
         if (this.playerModel.userData.mirrorInstagibGun) {
           this.playerModel.userData.mirrorInstagibGun.visible = (G.activeWeapon === 3);
         }
+
+        const mirGun = this.playerModel.userData.mirrorGun;
+        if (G.gun?.userData?.core) {
+          const srcCore = G.gun.userData.core.material;
+          const srcRing = G.gun.userData.ring?.material;
+          if (mirGun.userData?.core?.material && srcCore) {
+            mirGun.userData.core.material.color.copy(srcCore.color);
+            mirGun.userData.core.material.emissive.copy(srcCore.emissive);
+            mirGun.userData.core.material.emissiveIntensity = srcCore.emissiveIntensity;
+          }
+          if (mirGun.userData?.ring?.material && srcRing) {
+            mirGun.userData.ring.material.color.copy(srcRing.color);
+            mirGun.userData.ring.material.emissive.copy(srcRing.emissive);
+            mirGun.userData.ring.material.emissiveIntensity = srcRing.emissiveIntensity;
+          }
+        }
       }
     }
 
